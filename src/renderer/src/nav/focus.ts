@@ -32,8 +32,17 @@ function isVisible(element: HTMLElement): boolean {
   return style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0'
 }
 
-function candidates(): HTMLElement[] {
-  return Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(isVisible)
+/**
+ * Focusable elements, optionally only those inside `scope`. An overlay passes
+ * its own container so the screen underneath cannot win a move.
+ */
+function candidates(scope?: ParentNode): HTMLElement[] {
+  const root = scope ?? document
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    // `inert` subtrees stay mounted for their exit animation (the closed rail
+    // slides out), but must never take focus.
+    (element) => !element.closest('[inert]') && isVisible(element)
+  )
 }
 
 interface Box {
@@ -88,8 +97,8 @@ export function setFocused(element: HTMLElement | null, scroll = true): void {
 }
 
 /** Focus the first focusable element, or the one matching `prefer`. */
-export function focusFirst(prefer?: string): void {
-  const all = candidates()
+export function focusFirst(prefer?: string, scope?: ParentNode): void {
+  const all = candidates(scope)
   const preferred = prefer ? all.find((el) => el.matches(prefer)) : undefined
   setFocused(preferred ?? all[0] ?? null)
 }
@@ -135,13 +144,19 @@ function pick(from: HTMLElement, pool: HTMLElement[], direction: Direction): HTM
   return best
 }
 
-/** Move focus in a direction. Returns false when the edge of the screen was reached. */
-export function move(direction: Direction): boolean {
+/**
+ * Move focus in a direction. Returns false when the edge of the screen was reached.
+ *
+ * `scope` confines the move to a container. The rail needs that: its Sign out
+ * sits at the foot of the screen, so the rows behind it are geometrically
+ * nearer to Search and would otherwise take the "down" press.
+ */
+export function move(direction: Direction, scope?: ParentNode): boolean {
   if (!current || !current.isConnected) {
-    focusFirst()
+    focusFirst(undefined, scope)
     return true
   }
-  const next = pick(current, candidates(), direction)
+  const next = pick(current, candidates(scope), direction)
   if (!next) return false
   setFocused(next)
   return true

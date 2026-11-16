@@ -58,4 +58,16 @@ describe('NavRail', () => {
 
     expect(screen.queryByTestId('rail-signout')).toBeNull()
   })
+
+  it('is out of the navigation order while closed', () => {
+    render(rail({ open: false }))
+
+    expect(screen.getByTestId('rail-search').closest('nav')?.hasAttribute('inert')).toBe(true)
+  })
+
+  it('is navigable while open', () => {
+    render(rail())
+
+    expect(screen.getByTestId('rail-search').closest('nav')?.hasAttribute('inert')).toBe(false)
+  })
 })

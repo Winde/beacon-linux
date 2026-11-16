@@ -27,7 +27,15 @@ export function NavRail({
       <span className="rail-hint" aria-hidden>
         <NavArrowLeft width={20} height={20} strokeWidth={1.6} />
       </span>
-      <nav className={`rail${open ? ' is-open' : ''}`} aria-hidden={!open} aria-label="Browse">
+      <nav
+        className={`rail${open ? ' is-open' : ''}`}
+        aria-hidden={!open}
+        // Closed means out of the navigation order, not merely off-screen: the
+        // slide-out keeps the buttons mounted (and momentarily visible) for
+        // 180ms, long enough to steal a "left" press.
+        inert={!open}
+        aria-label="Browse"
+      >
         {showHome ? (
           <button
             type="button"

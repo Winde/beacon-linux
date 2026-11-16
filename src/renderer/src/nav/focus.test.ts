@@ -187,6 +187,34 @@ describe('move', () => {
     expect(getFocused()).toBe(from)
   })
 
+  it('stays inside the given scope', () => {
+    const rail = document.createElement('nav')
+    document.body.append(rail)
+    // Search at the top of the rail, Sign out at its foot.
+    const search = tile(16, 0)
+    const signOut = tile(16, 600)
+    rail.append(search, signOut)
+    // A content row behind the rail is nearer to Search than Sign out is.
+    const behind = tile(56, 80)
+    setFocused(search)
+
+    expect(move('down', rail)).toBe(true)
+    expect(getFocused()).toBe(signOut)
+    expect(getFocused()).not.toBe(behind)
+  })
+
+  it('skips elements inside an inert container', () => {
+    const [a, b, c] = grid()
+    const closedRail = document.createElement('nav')
+    closedRail.setAttribute('inert', '')
+    document.body.append(closedRail)
+    closedRail.append(b)
+    setFocused(a)
+
+    expect(move('right')).toBe(true)
+    expect(getFocused()).toBe(c)
+  })
+
   it('measures in layout space so a scrolled shelf stays in order', () => {
     const scroller = document.createElement('div')
     scroller.scrollTop = 5000

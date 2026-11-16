@@ -23,6 +23,14 @@ interface Entry {
   route: Route
 }
 
+/**
+ * The rail while it is open. Navigation is confined to it: the rail covers the
+ * screen, so the rows behind it must not win a d-pad move.
+ */
+function openRailElement(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('.rail.is-open')
+}
+
 export default function App(): React.JSX.Element {
   const [stack, setStack] = useState<Entry[]>([])
   const [player, setPlayer] = useState<{ slug: string; startAt?: number } | null>(null)
@@ -125,7 +133,7 @@ export default function App(): React.JSX.Element {
   // rail is mid-transition.
   useEffect(() => {
     if (!railOpen) return
-    const item = document.querySelector<HTMLElement>('.rail [data-focus]')
+    const item = openRailElement()?.querySelector<HTMLElement>('[data-focus]')
     if (item) setFocused(item)
   }, [railOpen])
 
@@ -172,7 +180,10 @@ export default function App(): React.JSX.Element {
             return
           }
           if (action === 'left') return
-          move(action)
+          // Up and down stay inside the rail. Sign out sits at the foot of the
+          // screen, so without a scope the nearer rows behind the rail would
+          // take the press and the account action would be unreachable.
+          move(action, openRailElement() ?? undefined)
           return
         }
         if (move(action)) return
