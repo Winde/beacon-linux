@@ -63,7 +63,7 @@ On a Steam Deck, `STEAM` + `X` opens the on-screen keyboard for the password fie
 | Move | D-pad / left stick | Arrow keys |
 | Select | A | Enter |
 | Back | B / Back | Escape |
-| Search | X | `X` or `/` |
+| Search | left on the edge | `/` |
 | Play / pause | A | Space |
 | Seek ±10s | D-pad left / right | ← / → |
 | Seek ±1min | LT / RT | — |
@@ -78,6 +78,18 @@ npm run build          # compile
 npm run build:win      # Windows installer
 npm run build:linux    # AppImage + .deb
 ```
+
+### Test
+
+```bash
+npm test               # unit tests (Vitest)
+npm run test:watch     # re-run on change
+npm run typecheck      # type-check app and tests
+```
+
+Tests sit next to the code they cover (`*.test.ts`). Most run in Node; files that
+need the DOM start with `// @vitest-environment jsdom`. Component and screen tests
+use Testing Library (`@testing-library/react`).
 
 ### Releases
 

@@ -1,21 +1,85 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Card, SearchData } from '@shared/types'
-import { focusFirst } from '../nav/focus'
+import { focusFirst, setFocused } from '../nav/focus'
+import { OnScreenKeyboard } from '../components/OnScreenKeyboard'
 import { Row } from '../components/Row'
 import { Empty, Spinner } from '../components/ui'
+
+const MAX_QUERY = 40
 
 interface SearchProps {
   onOpen: (card: Card) => void
 }
 
+/**
+ * A search screen that owns its input: a d-pad keyboard for the pad, live
+ * results beside it, and suggestions pulled from the local catalog.
+ *
+ * There is no text field on purpose. Focusing one hands the job to the
+ * platform's on-screen keyboard, whose Enter arrives as a plain `accept` and
+ * presses whatever happened to be focused on the screen underneath.
+ */
 export function Search({ onOpen }: SearchProps): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchData | null>(null)
+  const [suggestions, setSuggestions] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    focusFirst('[data-focus]')
+    focusFirst('.keyboard .key')
   }, [])
+
+  // A physical keyboard still types: handled in the capture phase so Backspace
+  // and Space never fall through to the global shortcuts while this screen is
+  // the visible route.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (!root.current || root.current.offsetParent === null) return
+      // Playback owns the keyboard while it is on screen.
+      if (document.querySelector('.player')) return
+      if (event.ctrlKey || event.metaKey || event.altKey) return
+
+      if (event.key === 'Backspace') {
+        event.preventDefault()
+        event.stopPropagation()
+        setQuery((current) => current.slice(0, -1))
+        return
+      }
+      if (event.key.length === 1 && /^[a-z0-9 ]$/i.test(event.key)) {
+        event.preventDefault()
+        event.stopPropagation()
+        setQuery((current) =>
+          current.length >= MAX_QUERY ? current : current + event.key.toLowerCase()
+        )
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+
+  const type = (char: string): void =>
+    setQuery((current) => (current.length >= MAX_QUERY ? current : current + char))
+
+  useEffect(() => {
+    const trimmed = query.trim()
+    if (trimmed.length < 2) {
+      setSuggestions([])
+      return
+    }
+    let cancelled = false
+    window.beacon.catalog
+      .suggest(trimmed)
+      .then((list) => {
+        if (!cancelled) setSuggestions(list.slice(0, 6))
+      })
+      .catch(() => {
+        if (!cancelled) setSuggestions([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [query])
 
   useEffect(() => {
     const trimmed = query.trim()
@@ -45,42 +109,72 @@ export function Search({ onOpen }: SearchProps): React.JSX.Element {
     }
   }, [query])
 
+  /** Hand focus to the results, the way a TV search jumps to its hits. */
+  const submit = (): void => {
+    const first = root.current?.querySelector<HTMLElement>('.search__results [data-focus]')
+    if (first) setFocused(first)
+  }
+
   const empty = results && !results.series.length && !results.videos.length
 
   return (
-    <div className="screen screen--search">
-      <div className="search-head">
-        <h1 className="search-title">Search</h1>
-        <input
-          className="search-input"
-          type="search"
-          data-focus
-          tabIndex={-1}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Series, episode, or c4e12"
-          autoComplete="off"
-          spellCheck={false}
-        />
+    <div className="screen screen--search" ref={root}>
+      <header className="search__head">
+        <h1 className="search__title">Search</h1>
+        <div className="search__field">
+          {query ? (
+            <span>{query}</span>
+          ) : (
+            <span className="search__placeholder">Series, episode, or c4e12</span>
+          )}
+          <span className="search__caret" />
+        </div>
+      </header>
+
+      <div className="search__body">
+        <div className="search__panel">
+          <OnScreenKeyboard
+            onChar={type}
+            onBackspace={() => setQuery((current) => current.slice(0, -1))}
+            onClear={() => setQuery('')}
+            onSubmit={submit}
+          />
+          {suggestions.length ? (
+            <div className="search__suggestions">
+              {suggestions.map((text) => (
+                <button
+                  key={text}
+                  type="button"
+                  className="chip"
+                  data-focus
+                  tabIndex={-1}
+                  onClick={() => setQuery(text)}
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="search__results">
+          {loading ? <Spinner label="Searching" /> : null}
+
+          {empty ? <Empty>Nothing matches “{query.trim()}”.</Empty> : null}
+
+          {results && results.series.length ? (
+            <Row title="Series" items={results.series} onSelect={onOpen} />
+          ) : null}
+
+          {results && results.videos.length ? (
+            <Row title="Videos" items={results.videos} onSelect={onOpen} />
+          ) : null}
+
+          {!query.trim() ? (
+            <Empty>Try a series name, an episode title, or an episode code like “c4e12”.</Empty>
+          ) : null}
+        </div>
       </div>
-
-      {loading ? <Spinner label="Searching" /> : null}
-
-      {empty ? <Empty>Nothing matches “{query.trim()}”.</Empty> : null}
-
-      {results && results.series.length ? (
-        <Row title="Series" items={results.series} onSelect={onOpen} />
-      ) : null}
-
-      {results && results.videos.length ? (
-        <Row title="Videos" items={results.videos} onSelect={onOpen} />
-      ) : null}
-
-      {!query.trim() ? (
-        <Empty>
-          Try a series name, an episode title, or an episode code like “c4e12”.
-        </Empty>
-      ) : null}
     </div>
   )
 }

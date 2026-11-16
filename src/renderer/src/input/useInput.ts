@@ -20,7 +20,8 @@ const STICK_DEADZONE = 0.55
 const BUTTON_ACTIONS: Record<number, Action> = {
   0: 'accept', // A / cross
   1: 'back', // B / circle
-  2: 'search', // X / square
+  // No search binding: Steam's desktop layout uses X for its on-screen
+  // keyboard, and the rail is the way in now.
   3: 'menu', // Y / triangle
   4: 'prevSection', // LB
   5: 'nextSection', // RB
@@ -81,6 +82,8 @@ const KEY_ACTIONS: Record<string, Action> = {
   Escape: 'back',
   Backspace: 'back',
   m: 'menu',
+  // Only '/' opens search: Steam maps pad buttons to plain letters, so binding
+  // 'x' meant pressing the pad's X opened the search screen by accident.
   '/': 'search'
 }
 
