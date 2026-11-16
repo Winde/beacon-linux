@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BeaconApi, NextEpisodeRequest, ProgressReport } from '@shared/types'
+import type { BeaconApi, Card, NextEpisodeRequest, ProgressReport } from '@shared/types'
 
 const api: BeaconApi = {
   auth: {
@@ -16,11 +16,22 @@ const api: BeaconApi = {
     suggest: (query: string) => ipcRenderer.invoke('catalog:suggest', query),
     indexStatus: () => ipcRenderer.invoke('catalog:indexStatus')
   },
+  watchlist: {
+    list: () => ipcRenderer.invoke('watchlist:list'),
+    add: (card: Card) => ipcRenderer.invoke('watchlist:add', card),
+    remove: (kind: Card['kind'], slug: string) =>
+      ipcRenderer.invoke('watchlist:remove', kind, slug),
+    setPosition: (rowsAbove: number) => ipcRenderer.invoke('watchlist:setPosition', rowsAbove),
+    clear: () => ipcRenderer.invoke('watchlist:clear')
+  },
   playback: {
     open: (slug: string) => ipcRenderer.invoke('playback:open', slug),
     next: (request: NextEpisodeRequest) => ipcRenderer.invoke('playback:next', request),
     progress: (report: ProgressReport) => ipcRenderer.invoke('playback:progress', report),
     captions: (url: string) => ipcRenderer.invoke('playback:captions', url)
+  },
+  watch: {
+    mark: (slug: string, watched: boolean) => ipcRenderer.invoke('watch:mark', slug, watched)
   },
   app: {
     quit: () => ipcRenderer.invoke('app:quit'),

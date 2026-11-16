@@ -1,11 +1,15 @@
 import type { Card } from '@shared/types'
 import { backdropUrl, useBackdrop } from '../lib/images'
+import { WatchlistButton } from './WatchlistButton'
 
 interface HeroProps {
   card: Card
   /** Open the card's own page (series/collection) or its details (video). */
   onOpen: (card: Card) => void
   onPlay: (card: Card) => void
+  /** Omit to hide the watchlist control (e.g. a preview used outside Home). */
+  onToggleWatchlist?: (card: Card) => void
+  inWatchlist?: boolean
 }
 
 /**
@@ -14,7 +18,13 @@ interface HeroProps {
  * that plays, so it gets a Browse button instead of Play; a locked video opens
  * its details, where the membership requirement is explained.
  */
-export function Hero({ card, onOpen, onPlay }: HeroProps): React.JSX.Element {
+export function Hero({
+  card,
+  onOpen,
+  onPlay,
+  onToggleWatchlist,
+  inWatchlist = false
+}: HeroProps): React.JSX.Element {
   const isVideo = card.kind === 'video'
   const playable = isVideo && !card.locked
   const resuming = playable && (card.progress ?? 0) > 0.01
@@ -53,16 +63,25 @@ export function Hero({ card, onOpen, onPlay }: HeroProps): React.JSX.Element {
         <p className="hero__eyebrow">Featured</p>
         <h1 className="hero__title">{card.title}</h1>
         <p className="hero__sub">{sub.filter(Boolean).join(' · ')}</p>
-        <button
-          type="button"
-          className="button button--primary"
-          data-focus
-          data-testid={playable ? 'hero-play' : isVideo ? 'hero-details' : 'hero-browse'}
-          tabIndex={-1}
-          onClick={() => (playable ? onPlay(card) : onOpen(card))}
-        >
-          {!isVideo ? 'Browse' : card.locked ? 'Details' : resuming ? 'Resume' : 'Play'}
-        </button>
+        <div className="button-row">
+          <button
+            type="button"
+            className="button button--primary"
+            data-focus
+            data-testid={playable ? 'hero-play' : isVideo ? 'hero-details' : 'hero-browse'}
+            tabIndex={-1}
+            onClick={() => (playable ? onPlay(card) : onOpen(card))}
+          >
+            {!isVideo ? 'Browse' : card.locked ? 'Details' : resuming ? 'Resume' : 'Play'}
+          </button>
+          {onToggleWatchlist ? (
+            <WatchlistButton
+              active={inWatchlist}
+              onToggle={() => onToggleWatchlist(card)}
+              testId="hero-watchlist"
+            />
+          ) : null}
+        </div>
       </div>
     </section>
   )

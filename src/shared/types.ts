@@ -20,6 +20,8 @@ export type CredentialStorage = 'keyring' | 'plaintext' | 'unavailable'
 
 export interface Card {
   kind: 'video' | 'series'
+  /** Beacon's content id; the stable identity behind the slug. */
+  id?: string
   slug: string
   title: string
   subtitle?: string
@@ -34,11 +36,41 @@ export interface Card {
   locked?: boolean
   /** 0..1 watch progress, video only */
   progress?: number
+  /** video only; true once the account has finished it */
+  watched?: boolean
 }
 
 export interface Row {
   title: string
   items: Card[]
+}
+
+/**
+ * One saved title, hydrated for the row. Only `kind`, `id` and `addedAt` are
+ * written to disk; the rest is looked up in the local catalog each launch.
+ */
+export interface WatchlistItem {
+  kind: 'video' | 'series'
+  /** Beacon's content id (video) or collection id (series/collection). */
+  id: string
+  slug: string
+  title: string
+  subtitle: string
+  image: string | null
+  image2x: string | null
+  minutes: number | null
+  count: number | null
+  /** epoch ms, newest first */
+  addedAt: number
+}
+
+export interface WatchlistData {
+  items: WatchlistItem[]
+  /**
+   * Where the Watchlist row sits on Home: the number of other rows above it.
+   * null keeps the default, just below Continue watching.
+   */
+  rowsAbove: number | null
 }
 
 export interface HomeData {
@@ -52,6 +84,7 @@ export interface Season {
 }
 
 export interface CollectionData {
+  id: string
   slug: string
   title: string
   image: string | null
@@ -78,9 +111,20 @@ export interface ContentData {
   tier: string | null
   locked: boolean
   signInNeeded: boolean
+  /** whether a signed-in account's watch state can be read or changed */
+  signedIn: boolean
+  /** true once the account has finished this video */
+  watched: boolean
   /** seconds */
   resumeAt: number
   rows: Row[]
+}
+
+/** The watch state of one video after a mark or a read. */
+export interface WatchState {
+  watched: boolean
+  /** 0..1 */
+  progress: number
 }
 
 export interface PlaybackData {
@@ -156,11 +200,27 @@ export interface BeaconApi {
     suggest(query: string): Promise<string[]>
     indexStatus(): Promise<IndexStatus>
   }
+  /**
+   * A local list, kept per sign-in address on this device. Beacon has no
+   * watchlist, and none of these calls touch the network.
+   */
+  watchlist: {
+    list(): Promise<WatchlistData>
+    add(card: Card): Promise<WatchlistData>
+    remove(kind: Card['kind'], slug: string): Promise<WatchlistData>
+    /** Persist the Watchlist row's place: the number of Home rows above it. */
+    setPosition(rowsAbove: number): Promise<WatchlistData>
+    clear(): Promise<WatchlistData>
+  }
   playback: {
     open(slug: string): Promise<PlaybackData | null>
     next(request: NextEpisodeRequest): Promise<NextEpisode | null>
     progress(report: ProgressReport): Promise<boolean>
     captions(url: string): Promise<string>
+  }
+  watch: {
+    /** Mark an episode watched or unwatched for the signed-in account. */
+    mark(slug: string, watched: boolean): Promise<WatchState>
   }
   app: {
     quit(): void

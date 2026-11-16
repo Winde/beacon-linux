@@ -26,6 +26,8 @@ function contentData(overrides: Partial<ContentData> = {}): ContentData {
     tier: 'Apprentice',
     locked: false,
     signInNeeded: false,
+    signedIn: true,
+    watched: false,
     resumeAt: 0,
     rows: [],
     ...overrides
@@ -33,9 +35,12 @@ function contentData(overrides: Partial<ContentData> = {}): ContentData {
 }
 
 /** Replace the preload bridge with a catalog that answers content(). */
-function stubContent(result: ContentData | Promise<ContentData>): ReturnType<typeof vi.fn> {
+function stubContent(
+  result: ContentData | Promise<ContentData>,
+  mark = vi.fn(() => Promise.resolve({ watched: true, progress: 1 }))
+): ReturnType<typeof vi.fn> {
   const content = vi.fn(() => Promise.resolve(result))
-  vi.stubGlobal('beacon', { catalog: { content } })
+  vi.stubGlobal('beacon', { catalog: { content }, watch: { mark } })
   return content
 }
 
@@ -90,6 +95,53 @@ describe('Content', () => {
     expect(onPlay).toHaveBeenLastCalledWith('c1e5', 0)
   })
 
+  it('marks an episode watched and reports the change', async () => {
+    const mark = vi.fn(() => Promise.resolve({ watched: true, progress: 1 }))
+    const onWatchedChanged = vi.fn()
+    stubContent(contentData(), mark)
+    render(
+      <Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} onWatchedChanged={onWatchedChanged} />
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark as watched' }))
+
+    expect(await screen.findByRole('button', { name: 'Mark as unwatched' })).toBeDefined()
+    expect(mark).toHaveBeenCalledWith('c1e5', true)
+    expect(onWatchedChanged).toHaveBeenCalled()
+  })
+
+  it('takes a watched episode back to unwatched', async () => {
+    const mark = vi.fn(() => Promise.resolve({ watched: false, progress: 0 }))
+    stubContent(contentData({ watched: true }), mark)
+    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark as unwatched' }))
+
+    expect(await screen.findByRole('button', { name: 'Mark as watched' })).toBeDefined()
+    expect(mark).toHaveBeenCalledWith('c1e5', false)
+  })
+
+  it('keeps the original label when a mark is rejected', async () => {
+    const mark = vi.fn(() =>
+      Promise.reject(new Error("Error invoking remote method 'watch:mark': Error: Offline."))
+    )
+    stubContent(contentData(), mark)
+    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark as watched' }))
+
+    expect(await screen.findByText('Offline.')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Mark as watched' })).toBeDefined()
+  })
+
+  it('hides the watch control from guests', async () => {
+    stubContent(contentData({ signedIn: false }))
+    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
+
+    await screen.findByRole('button', { name: 'Play' })
+    expect(screen.queryByTestId('watch-toggle')).toBeNull()
+  })
+
   it('explains that a locked video needs a sign-in', async () => {
     stubContent(contentData({ locked: true, signInNeeded: true }))
     render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
@@ -105,6 +157,66 @@ describe('Content', () => {
     expect(
       await screen.findByText('Your membership level does not include this video.')
     ).toBeDefined()
+  })
+
+  it('adds the episode to the watchlist', async () => {
+    const onToggleWatchlist = vi.fn()
+    stubContent(contentData())
+    render(
+      <Content
+        slug="c1e5"
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+        onToggleWatchlist={onToggleWatchlist}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add to watchlist' }))
+
+    expect(onToggleWatchlist).toHaveBeenCalledWith({
+      kind: 'video',
+      id: 'e5',
+      slug: 'c1e5',
+      title: 'Campaign 1 Episode 5',
+      subtitle: 'Campaign 1',
+      image: 'https://images.example/page/format=auto',
+      image2x: 'https://images.example/wide/format=auto',
+      minutes: 55
+    })
+  })
+
+  it('offers to remove an episode that is already saved', async () => {
+    stubContent(contentData())
+    render(
+      <Content
+        slug="c1e5"
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+        onToggleWatchlist={vi.fn()}
+        inWatchlist
+      />
+    )
+
+    const toggle = await screen.findByRole('button', { name: 'Remove from watchlist' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('can save a video the account cannot watch yet', async () => {
+    const onToggleWatchlist = vi.fn()
+    stubContent(contentData({ locked: true, signInNeeded: true }))
+    render(
+      <Content
+        slug="c1e5"
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+        onToggleWatchlist={onToggleWatchlist}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add to watchlist' }))
+
+    expect(onToggleWatchlist).toHaveBeenCalledOnce()
+    expect(screen.queryByTestId('play')).toBeNull()
   })
 
   it('shows a clean error from the main process', async () => {

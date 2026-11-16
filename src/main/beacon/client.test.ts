@@ -103,16 +103,34 @@ function indexedVideo(n: number, overrides: Partial<IndexedVideo> = {}): Indexed
   }
 }
 
+function indexedCollection(overrides: Partial<IndexedCollection> = {}): IndexedCollection {
+  return {
+    id: 's1',
+    slug: 'campaign-1',
+    name: 'Campaign 1',
+    isSeries: true,
+    itemCount: 1,
+    released: null,
+    image: null,
+    image2x: null,
+    portrait: null,
+    ...overrides
+  }
+}
+
 function fakeCatalog(options: {
   videos?: IndexedVideo[]
   collections?: IndexedCollection[]
   suggestions?: string[]
 } = {}): CatalogLike {
   const videos = options.videos ?? []
+  const collections = options.collections ?? []
   return {
     ensure: async () => undefined,
     videoBySlug: (slug) => videos.find((video) => video.slug === slug) ?? null,
-    collectionBySlug: () => null,
+    collectionBySlug: (slug) => collections.find((collection) => collection.slug === slug) ?? null,
+    videoById: (id) => videos.find((video) => video.id === id) ?? null,
+    collectionById: (id) => collections.find((collection) => collection.id === id) ?? null,
     seriesVideos: () => videos,
     localSearch: () => ({ collections: options.collections ?? [], videos }),
     suggest: () => options.suggestions ?? []
@@ -600,6 +618,58 @@ describe('content', () => {
 
     expect(content.resumeAt).toBe(13_824)
   })
+
+  it('does not offer to resume the first few seconds', async () => {
+    routeCms(
+      contentRoutes(playableDoc(), {
+        [Q.CONTENT]: () => ({
+          Contents: { docs: [playableDoc()] },
+          // One second is the position used to clear a finished episode.
+          currentProgress: { videoProgress: 0, videoProgressSeconds: 1 }
+        })
+      })
+    )
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos })
+
+    const content = await client.content('c1e5')
+
+    expect(content.watched).toBe(false)
+    expect(content.resumeAt).toBe(0)
+  })
+
+  it('shows a marked episode as watched and drops its resume point', async () => {
+    let marked = false
+    routeCms(
+      contentRoutes(playableDoc(), {
+        [Q.CONTENT]: () => ({
+          Contents: { docs: [playableDoc()] },
+          currentProgress: marked
+            ? { videoProgress: 100, videoProgressSeconds: 3300 }
+            : { videoProgress: 10, videoProgressSeconds: 300 }
+        }),
+        [Q.TRACK]: () => {
+          marked = true
+          return { trackView: { success: true } }
+        },
+        [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+          removeContentFromContinueWatching: { success: true }
+        })
+      })
+    )
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos })
+
+    const before = await client.content('c1e5')
+    expect(before.watched).toBe(false)
+    expect(before.resumeAt).toBe(300)
+
+    await client.markWatched('c1e5', true)
+
+    const after = await client.content('c1e5')
+    expect(after.watched).toBe(true)
+    expect(after.resumeAt).toBe(0)
+  })
 })
 
 describe('play', () => {
@@ -872,6 +942,277 @@ describe('trackProgress', () => {
   })
 })
 
+describe('watch state', () => {
+  it('badges a finished episode in a collection', async () => {
+    const collection: IndexedCollection = {
+      id: 's1',
+      slug: 'campaign-1',
+      name: 'Campaign 1',
+      isSeries: true,
+      itemCount: 2,
+      released: null,
+      image: null,
+      image2x: null,
+      portrait: null
+    }
+    routeCms({
+      [Q.ME]: () => MEMBER,
+      [Q.SERIES]: () => ({
+        fetchSeries: {
+          docs: [
+            { content: cmsCard({ id: 'e1', slug: 'c1e1', duration: 3_300_000 }) },
+            { content: cmsCard({ id: 'e2', slug: 'c1e2', duration: 3_300_000 }) }
+          ]
+        }
+      }),
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: {
+          timeMap: [
+            { contentId: 'e1', videoProgress: 99, videoProgressSeconds: 3267 },
+            { contentId: 'e2', videoProgress: 50, videoProgressSeconds: 1650 }
+          ]
+        }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ collections: [collection] })
+
+    const data = await client.collection('campaign-1')
+
+    expect(data.seasons[0].items[0]).toMatchObject({
+      slug: 'c1e1',
+      progress: 0.99,
+      watched: true
+    })
+    expect(data.seasons[0].items[1]).toMatchObject({
+      slug: 'c1e2',
+      progress: 0.5,
+      watched: false
+    })
+  })
+
+  it('marks an episode watched at its full runtime', async () => {
+    let event: Record<string, any> | null = null
+    let removed: string | null = null
+    routeCms({
+      [Q.TRACK]: (variables) => {
+        event = variables.events[0]
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: (variables) => {
+        removed = variables.id
+        return { removeContentFromContinueWatching: { success: true } }
+      }
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await expect(client.markWatched('c1e1', true)).resolves.toEqual({
+      watched: true,
+      progress: 1
+    })
+
+    // One second inside the end, so the CMS cannot discard the extreme value.
+    expect(event).toMatchObject({
+      content: 'e1',
+      videoProgress: 99,
+      videoProgressSeconds: 3299
+    })
+    expect(removed).toBe('e1')
+  })
+
+  it('takes an episode back to the start when marked unwatched', async () => {
+    let event: Record<string, any> | null = null
+    routeCms({
+      [Q.TRACK]: (variables) => {
+        event = variables.events[0]
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await expect(client.markWatched('c1e1', false)).resolves.toEqual({
+      watched: false,
+      progress: 0
+    })
+
+    // An all-zero report is ignored by Beacon, so the smallest real position is
+    // the one that replaces the finished point.
+    expect(event).toMatchObject({
+      content: 'e1',
+      videoProgress: 1,
+      videoProgressSeconds: 1
+    })
+  })
+
+  it('still marks an episode when it cannot leave Continue watching', async () => {
+    routeCms({
+      [Q.TRACK]: () => ({ trackView: { success: true } }),
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => {
+        throw new Error('not in the row')
+      }
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await expect(client.markWatched('c1e1', false)).resolves.toEqual({
+      watched: false,
+      progress: 0
+    })
+  })
+
+  it('finds a slug the catalog index does not know yet', async () => {
+    let event: Record<string, any> | null = null
+    routeCms({
+      [Q.LOOKUP]: () => ({ Contents: { docs: [{ id: 'e7', duration: 1_800_000 }] } }),
+      [Q.TRACK]: (variables) => {
+        event = variables.events[0]
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+
+    await client.markWatched('fresh-episode', true)
+
+    expect(event).toMatchObject({
+      content: 'e7',
+      videoProgress: 99,
+      videoProgressSeconds: 1799
+    })
+  })
+
+  it('requires a signed-in account', async () => {
+    vi.mocked(loadSession).mockResolvedValue(null)
+    const client = new BeaconClient()
+
+    await expect(client.markWatched('c1e1', true)).rejects.toThrow(
+      'Sign in with a Beacon account'
+    )
+    expect(net.fetch).not.toHaveBeenCalled()
+  })
+
+  it('keeps the mark when Beacon does not accept the write', async () => {
+    routeCms({
+      [Q.TRACK]: () => ({ trackView: { success: false } }),
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: false }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await expect(client.markWatched('c1e1', true)).resolves.toEqual({
+      watched: true,
+      progress: 1
+    })
+  })
+
+  it('keeps a mark while Beacon still reports the old point', async () => {
+    routeCms({
+      [Q.ME]: () => MEMBER,
+      [Q.SERIES]: () => ({ fetchSeries: { docs: [{ content: cmsCard() }] } }),
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: {
+          timeMap: [{ contentId: 'e1', videoProgress: 50, videoProgressSeconds: 1650 }]
+        }
+      }),
+      [Q.TRACK]: () => ({ trackView: { success: true } }),
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({
+      videos: [indexedVideo(1)],
+      collections: [indexedCollection()]
+    })
+
+    // Beacon answers success but the read still says 50%; the mark must win.
+    await client.markWatched('c1e1', true)
+    const data = await client.collection('campaign-1')
+
+    expect(data.seasons[0].items[0]).toMatchObject({
+      slug: 'c1e1',
+      progress: 1,
+      watched: true
+    })
+  })
+
+  it('lets real playback replace a mark', async () => {
+    let percent = 50
+    let seconds = 1650
+    routeCms({
+      [Q.ME]: () => MEMBER,
+      [Q.SERIES]: () => ({ fetchSeries: { docs: [{ content: cmsCard() }] } }),
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: {
+          timeMap: [{ contentId: 'e1', videoProgress: percent, videoProgressSeconds: seconds }]
+        }
+      }),
+      [Q.TRACK]: (variables) => {
+        percent = variables.events[0].videoProgress
+        seconds = variables.events[0].videoProgressSeconds
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({
+      videos: [indexedVideo(1)],
+      collections: [indexedCollection()]
+    })
+
+    await client.markWatched('c1e1', true)
+    await client.trackProgress('e1', 900, 3300)
+
+    const data = await client.collection('campaign-1')
+
+    expect(data.seasons[0].items[0]).toMatchObject({
+      slug: 'c1e1',
+      progress: 0.27,
+      watched: false
+    })
+  })
+
+  it('drops a marked title from Continue watching', async () => {
+    routeCms(
+      homeRoutes({
+        [Q.CONTINUE_WATCHING]: () => ({
+          continueWatching: {
+            docs: [
+              {
+                videoProgress: 50,
+                videoProgressSeconds: 1650,
+                content: cmsCard({ id: 'e1', slug: 'c1e1' })
+              }
+            ]
+          }
+        }),
+        [Q.TRACK]: () => ({ trackView: { success: true } }),
+        [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+          removeContentFromContinueWatching: { success: true }
+        })
+      })
+    )
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.markWatched('c1e1', true)
+
+    const home = await client.home()
+    expect(home.rows.find((row) => row.title === 'Continue watching')).toBeUndefined()
+  })
+})
+
 describe('search', () => {
   it('merges local and remote results without duplicates', async () => {
     const local = indexedVideo(1, { slug: 'local', title: 'Local Result' })
@@ -910,6 +1251,7 @@ describe('search', () => {
     expect(results.series).toEqual([
       {
         kind: 'series',
+        id: 's1',
         slug: 'campaign-1',
         title: 'Campaign 1',
         image: 'https://images.example/collection/format=auto,width=480',

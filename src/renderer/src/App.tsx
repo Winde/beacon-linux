@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Card } from '@shared/types'
+import type { Card, WatchlistData } from '@shared/types'
+import { isWatchlisted } from '@shared/watchlist'
 import { useInput } from './input/useInput'
 import { focusFirst, getFocused, move, setFocused } from './nav/focus'
 import { Home } from './screens/Home'
@@ -8,6 +9,7 @@ import { Collection } from './screens/Collection'
 import { Content } from './screens/Content'
 import { Search } from './screens/Search'
 import { Player, type PlayerHandle } from './screens/Player'
+import { ConfirmDialog } from './components/ConfirmDialog'
 import { NavRail } from './components/NavRail'
 import { Spinner } from './components/ui'
 
@@ -31,6 +33,8 @@ function openRailElement(): HTMLElement | null {
   return document.querySelector<HTMLElement>('.rail.is-open')
 }
 
+const EMPTY_WATCHLIST: WatchlistData = { items: [], rowsAbove: null }
+
 export default function App(): React.JSX.Element {
   const [stack, setStack] = useState<Entry[]>([])
   const [player, setPlayer] = useState<{ slug: string; startAt?: number } | null>(null)
@@ -41,6 +45,10 @@ export default function App(): React.JSX.Element {
   const railReturn = useRef<HTMLElement | null>(null)
   /** Whether the rail should offer Sign out; guests have no account to leave. */
   const [signedIn, setSignedIn] = useState(false)
+  const [watchlist, setWatchlist] = useState<WatchlistData>(EMPTY_WATCHLIST)
+  /** Signing out while a non-empty watchlist exists asks what to do with it. */
+  const [signOutPrompt, setSignOutPrompt] = useState(false)
+  const dialogReturn = useRef<HTMLElement | null>(null)
   // Bumped when the player closes. What is behind it has just learned about
   // progress it did not have when its data was built, and screens stay mounted
   // while the player is open, so nothing else would refresh them.
@@ -72,6 +80,12 @@ export default function App(): React.JSX.Element {
   }, [])
 
   const playCard = useCallback((card: Card) => play(card.slug), [play])
+
+  // A watch mark changes the same data the player does: badges, resume points
+  // and the rows behind this screen all described the moment before it.
+  const watchedChanged = useCallback(() => {
+    setProgressVersion((version) => version + 1)
+  }, [])
 
   const closePlayer = useCallback(() => {
     setPlayer(null)
@@ -113,10 +127,24 @@ export default function App(): React.JSX.Element {
     reset({ name: 'home' })
   }, [reset])
 
+  /**
+   * Reload the list for whoever is signed in now. The API never sees this; the
+   * main process only files it under the account's address.
+   */
+  const loadWatchlist = useCallback(async () => {
+    try {
+      setWatchlist(await window.beacon.watchlist.list())
+    } catch {
+      // A local list that cannot be read is empty for this run, not deleted.
+    }
+  }, [])
+
   // Signing out clears the stored session, the cached rows and the prefilled
   // address, so a shared Deck does not hand the next person the last account.
+  // The watchlist is not a credential and is only deleted when asked for.
   const signOut = useCallback(async () => {
     setRailOpen(false)
+    setSignOutPrompt(false)
     await window.beacon.auth.signOut().catch(() => {})
     try {
       window.localStorage.removeItem('beacon.email')
@@ -125,7 +153,51 @@ export default function App(): React.JSX.Element {
     }
     setSignedIn(false)
     reset({ name: 'login' })
-  }, [reset])
+    // Show the guest list, not the account's, if free videos are picked next.
+    void loadWatchlist()
+  }, [loadWatchlist, reset])
+
+  const requestSignOut = useCallback(() => {
+    if (!watchlist.items.length) {
+      void signOut()
+      return
+    }
+    dialogReturn.current = getFocused()
+    setSignOutPrompt(true)
+  }, [signOut, watchlist.items.length])
+
+  const cancelSignOut = useCallback(() => {
+    setSignOutPrompt(false)
+    const previous = dialogReturn.current
+    if (previous?.isConnected) setFocused(previous)
+    else focusFirst()
+  }, [])
+
+  const deleteWatchlistAndSignOut = useCallback(async () => {
+    setSignOutPrompt(false)
+    // Clear before signing out: the main process files the list under the
+    // address in the session that is about to be dropped.
+    await window.beacon.watchlist
+      .clear()
+      .then(setWatchlist)
+      .catch(() => {})
+    await signOut()
+  }, [signOut])
+
+  const toggleWatchlist = useCallback(
+    (card: Card) => {
+      const saved = isWatchlisted(watchlist.items, card.kind, card.slug)
+      const update = saved
+        ? window.beacon.watchlist.remove(card.kind, card.slug)
+        : window.beacon.watchlist.add(card)
+      update.then(setWatchlist).catch(() => {})
+    },
+    [watchlist.items]
+  )
+
+  const moveWatchlist = useCallback((rowsAbove: number) => {
+    window.beacon.watchlist.setPosition(rowsAbove).then(setWatchlist).catch(() => {})
+  }, [])
 
   // The rail is only focusable while open, so focus it once it is on screen.
   // Queried directly rather than through focusFirst(): that helper skips
@@ -139,10 +211,19 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([window.beacon.auth.status(), window.beacon.app.initialSlug()])
-      .then(([status, slug]) => {
+    const boot = async (): Promise<void> => {
+      try {
+        const [status, slug] = await Promise.all([
+          window.beacon.auth.status(),
+          window.beacon.app.initialSlug()
+        ])
+        // Read the list only after status(): a rejected token signs the member
+        // out inside status(), and the local list must follow the account that
+        // is actually active, not the one whose tokens just failed.
+        const list = await window.beacon.watchlist.list().catch(() => EMPTY_WATCHLIST)
         if (cancelled) return
         setSignedIn(status.signedIn)
+        setWatchlist(list)
         const home: Route = status.signedIn ? { name: 'home' } : { name: 'login' }
         if (slug) {
           setStack([
@@ -152,10 +233,11 @@ export default function App(): React.JSX.Element {
         } else {
           reset(home)
         }
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) reset({ name: 'login' })
-      })
+      }
+    }
+    void boot()
     return () => {
       cancelled = true
     }
@@ -164,6 +246,21 @@ export default function App(): React.JSX.Element {
   useInput((action) => {
     if (player) {
       playerRef.current?.handle(action)
+      return
+    }
+
+    // The dialog is modal: nothing behind it may take a move or a press.
+    if (signOutPrompt) {
+      if (action === 'up' || action === 'down' || action === 'left' || action === 'right') {
+        move(action, document.querySelector<HTMLElement>('.dialog') ?? undefined)
+        return
+      }
+      if (action === 'accept') {
+        const active = document.activeElement as HTMLElement | null
+        active?.click()
+        return
+      }
+      if (action === 'back') cancelSignOut()
       return
     }
 
@@ -243,15 +340,35 @@ export default function App(): React.JSX.Element {
           <Login
             onSignedIn={() => {
               setSignedIn(true)
+              // The session now names the account, so swap in its list.
+              void loadWatchlist()
               reset({ name: 'home' })
             }}
             onSkip={() => reset({ name: 'home' })}
           />
         )
       case 'home':
-        return <Home onOpen={openCard} onPlay={playCard} refreshKey={progressVersion} />
+        return (
+          <Home
+            onOpen={openCard}
+            onPlay={playCard}
+            refreshKey={progressVersion}
+            watchlist={watchlist.items}
+            rowsAbove={watchlist.rowsAbove}
+            onToggleWatchlist={toggleWatchlist}
+            onMoveWatchlist={moveWatchlist}
+          />
+        )
       case 'collection':
-        return <Collection slug={route.slug} onOpen={openCard} />
+        return (
+          <Collection
+            slug={route.slug}
+            onOpen={openCard}
+            refreshKey={progressVersion}
+            onToggleWatchlist={toggleWatchlist}
+            inWatchlist={isWatchlisted(watchlist.items, 'series', route.slug)}
+          />
+        )
       case 'content':
         return (
           <Content
@@ -259,6 +376,9 @@ export default function App(): React.JSX.Element {
             onOpen={openCard}
             onPlay={play}
             refreshKey={progressVersion}
+            onWatchedChanged={watchedChanged}
+            onToggleWatchlist={toggleWatchlist}
+            inWatchlist={isWatchlisted(watchlist.items, 'video', route.slug)}
           />
         )
       case 'search':
@@ -275,7 +395,7 @@ export default function App(): React.JSX.Element {
         showHome={current.route.name !== 'home'}
         onHome={goHome}
         onSearch={openSearch}
-        onSignOut={signedIn ? signOut : undefined}
+        onSignOut={signedIn ? requestSignOut : undefined}
       />
       {stack.map((entry, index) => (
         <div
@@ -286,6 +406,28 @@ export default function App(): React.JSX.Element {
           {renderRoute(entry.route)}
         </div>
       ))}
+
+      {signOutPrompt ? (
+        <ConfirmDialog
+          title="Delete your watchlist?"
+          message="Your watchlist is kept on this device, not in your Beacon account. You can keep it for next time, or delete it now."
+          actions={[
+            {
+              label: 'Keep and sign out',
+              onSelect: signOut,
+              variant: 'primary',
+              testId: 'keep-watchlist'
+            },
+            {
+              label: 'Delete and sign out',
+              onSelect: deleteWatchlistAndSignOut,
+              variant: 'danger',
+              testId: 'delete-watchlist'
+            },
+            { label: 'Cancel', onSelect: cancelSignOut, testId: 'cancel-signout' }
+          ]}
+        />
+      ) : null}
 
       {player ? (
         <Player

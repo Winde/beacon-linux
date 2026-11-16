@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Card, HomeData } from '@shared/types'
+import type { Card, HomeData, WatchlistItem } from '@shared/types'
 import { HERO_WIDTH, preloadAll } from '../lib/images'
 import { focusFirst } from '../nav/focus'
 import { Home } from './Home'
@@ -41,6 +41,26 @@ function homeData(overrides: Partial<HomeData> = {}): HomeData {
     rows: [{ title: 'Recently added', items: [card('a', 'Episode a'), card('b', 'Episode b')] }],
     ...overrides
   }
+}
+
+function saved(slug: string, title: string, overrides: Partial<WatchlistItem> = {}): WatchlistItem {
+  return {
+    kind: 'video',
+    id: `id-${slug}`,
+    slug,
+    title,
+    subtitle: 'Campaign 1',
+    image: null,
+    image2x: null,
+    minutes: 55,
+    count: null,
+    addedAt: 1,
+    ...overrides
+  }
+}
+
+function shelfTitles(): (string | null)[] {
+  return screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)
 }
 
 function stubHome(result: HomeData | Promise<HomeData>): ReturnType<typeof vi.fn> {
@@ -112,6 +132,155 @@ describe('Home', () => {
     fireEvent.click(screen.getByText('Episode b'))
 
     expect(onOpen).toHaveBeenCalledWith(data.rows[0].items[1])
+  })
+
+  it('puts the watchlist just below Continue watching', async () => {
+    stubHome(
+      homeData({
+        rows: [
+          { title: 'Continue watching', items: [card('cw', 'Watching')] },
+          { title: 'Recently added', items: [card('a', 'Episode a')] }
+        ]
+      })
+    )
+    render(
+      <Home onOpen={vi.fn()} onPlay={vi.fn()} watchlist={[saved('w1', 'Saved One')]} />
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Watchlist' })).toBeDefined()
+    expect(shelfTitles()).toEqual(['Continue watching', 'Watchlist', 'Recently added'])
+    expect(screen.getByText('Saved One')).toBeDefined()
+  })
+
+  it('puts the watchlist first when there is nothing to continue', async () => {
+    stubHome(
+      homeData({
+        rows: [{ title: 'Recently added', items: [card('a', 'Episode a')] }]
+      })
+    )
+    render(
+      <Home onOpen={vi.fn()} onPlay={vi.fn()} watchlist={[saved('w1', 'Saved One')]} />
+    )
+
+    await screen.findByRole('heading', { name: 'Watchlist' })
+    expect(shelfTitles()).toEqual(['Watchlist', 'Recently added'])
+  })
+
+  it('remembers a watchlist row the player moved to the end', async () => {
+    stubHome(
+      homeData({
+        rows: [
+          { title: 'Continue watching', items: [card('cw', 'Watching')] },
+          { title: 'Recently added', items: [card('a', 'Episode a')] }
+        ]
+      })
+    )
+    render(
+      <Home
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+        watchlist={[saved('w1', 'Saved One')]}
+        rowsAbove={2}
+      />
+    )
+
+    await screen.findByRole('heading', { name: 'Watchlist' })
+    expect(shelfTitles()).toEqual(['Continue watching', 'Recently added', 'Watchlist'])
+  })
+
+  it('hides the row while the watchlist is empty', async () => {
+    stubHome(homeData())
+    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} watchlist={[]} />)
+
+    await screen.findByRole('heading', { name: 'Recently added' })
+    expect(screen.queryByRole('heading', { name: 'Watchlist' })).toBeNull()
+  })
+
+  it('moves the watchlist row with its own arrows', async () => {
+    const onMoveWatchlist = vi.fn()
+    stubHome(
+      homeData({
+        rows: [
+          { title: 'Continue watching', items: [card('cw', 'Watching')] },
+          { title: 'Recently added', items: [card('a', 'Episode a')] }
+        ]
+      })
+    )
+    render(
+      <Home
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+        watchlist={[saved('w1', 'Saved One')]}
+        onMoveWatchlist={onMoveWatchlist}
+      />
+    )
+
+    await screen.findByRole('heading', { name: 'Watchlist' })
+
+    fireEvent.click(screen.getByTestId('watchlist-up'))
+    expect(onMoveWatchlist).toHaveBeenLastCalledWith(0)
+
+    fireEvent.click(screen.getByTestId('watchlist-down'))
+    expect(onMoveWatchlist).toHaveBeenLastCalledWith(2)
+  })
+
+  it('disables the arrows at the ends of the shelves', async () => {
+    stubHome(
+      homeData({
+        rows: [
+          { title: 'Continue watching', items: [card('cw', 'Watching')] },
+          { title: 'Recently added', items: [card('a', 'Episode a')] }
+        ]
+      })
+    )
+    const { rerender } = render(
+      <Home
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+        watchlist={[saved('w1', 'Saved One')]}
+        rowsAbove={0}
+        onMoveWatchlist={vi.fn()}
+      />
+    )
+    await screen.findByRole('heading', { name: 'Watchlist' })
+
+    expect(screen.getByTestId<HTMLButtonElement>('watchlist-up').disabled).toBe(true)
+    expect(screen.getByTestId<HTMLButtonElement>('watchlist-down').disabled).toBe(false)
+
+    rerender(
+      <Home
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+        watchlist={[saved('w1', 'Saved One')]}
+        rowsAbove={2}
+        onMoveWatchlist={vi.fn()}
+      />
+    )
+
+    expect(screen.getByTestId<HTMLButtonElement>('watchlist-up').disabled).toBe(false)
+    expect(screen.getByTestId<HTMLButtonElement>('watchlist-down').disabled).toBe(true)
+  })
+
+  it('toggles the previewed title from the hero, saved or not', async () => {
+    const onToggleWatchlist = vi.fn()
+    stubHome(homeData())
+    render(
+      <Home
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+        watchlist={[saved('w1', 'Saved One')]}
+        onToggleWatchlist={onToggleWatchlist}
+      />
+    )
+    await screen.findByRole('heading', { level: 1, name: 'Featured One' })
+
+    expect(screen.getByTestId('hero-watchlist').textContent).toBe('Add to watchlist')
+
+    fireEvent.focusIn(screen.getByText('Saved One').closest('button')!)
+    expect(screen.getByTestId('hero-watchlist').textContent).toBe('Remove from watchlist')
+
+    fireEvent.click(screen.getByTestId('hero-watchlist'))
+    expect(onToggleWatchlist).toHaveBeenCalledWith(expect.objectContaining({ slug: 'w1' }))
   })
 
   it('refreshes the feed after playback without blanking it or moving focus', async () => {

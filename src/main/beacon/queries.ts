@@ -97,6 +97,15 @@ export const CONTINUE_WATCHING = `
   ${CARD}
 `
 
+/** The id and runtime a watch-state write needs, found by slug. */
+export const LOOKUP = `
+  query Lookup($slug: String!) {
+    Contents(where: { slug: { equals: $slug } }, limit: 1, draft: false) {
+      docs { id duration }
+    }
+  }
+`
+
 export const PROGRESS_FOR = `
   query P($ids: [String!]!) {
     getProgressForContent(id: $ids) { timeMap { contentId videoProgress videoProgressSeconds } }
@@ -105,4 +114,11 @@ export const PROGRESS_FOR = `
 
 export const TRACK = `
   mutation Track($events: [EventInput!]!) { trackView(events: $events) { success reason } }
+`
+
+/** The one member-facing mutation that takes a title out of Continue watching. */
+export const REMOVE_FROM_CONTINUE_WATCHING = `
+  mutation RemoveContentFromContinueWatching($id: String!) {
+    removeContentFromContinueWatching(id: $id) { success }
+  }
 `

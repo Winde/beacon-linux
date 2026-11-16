@@ -197,6 +197,22 @@ describe('Catalog', () => {
     })
   })
 
+  it('finds entries by the ids the watchlist persists', async () => {
+    const { client } = fakeClient({
+      videos: [rawVideo(1)],
+      collections: [
+        rawCollection({ id: 's1', name: 'Campaign 1', slug: 's1', isSeries: true, itemCount: 1 })
+      ]
+    })
+    const catalog = new Catalog(client)
+    await catalog.ensure()
+
+    expect(catalog.videoById('v1')).toMatchObject({ slug: 'episode-1', title: 'Episode 1' })
+    expect(catalog.collectionById('s1')).toMatchObject({ slug: 's1', name: 'Campaign 1' })
+    expect(catalog.videoById('missing')).toBeNull()
+    expect(catalog.collectionById('missing')).toBeNull()
+  })
+
   it('tolerates sparse records', async () => {
     const { client } = fakeClient({
       videos: [

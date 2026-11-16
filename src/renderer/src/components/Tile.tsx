@@ -1,3 +1,4 @@
+import { Check } from 'iconoir-react'
 import type { Card } from '@shared/types'
 
 interface TileProps {
@@ -9,10 +10,11 @@ interface TileProps {
 
 export function Tile({ card, onSelect, onFocus, size = 'normal' }: TileProps): React.JSX.Element {
   const progress = card.progress ?? 0
+  const watched = card.kind === 'video' && Boolean(card.watched)
   return (
     <button
       type="button"
-      className={`tile tile--${size}`}
+      className={`tile tile--${size}${watched ? ' tile--watched' : ''}`}
       data-focus
       tabIndex={-1}
       onClick={() => onSelect(card)}
@@ -28,7 +30,13 @@ export function Tile({ card, onSelect, onFocus, size = 'normal' }: TileProps): R
         {card.kind === 'series' && card.count ? (
           <span className="tile__count">{card.count} videos</span>
         ) : null}
-        {progress > 0.01 ? (
+        {watched ? (
+          <span className="tile__watched">
+            <Check width={14} height={14} strokeWidth={2.4} aria-hidden />
+            Watched
+          </span>
+        ) : null}
+        {!watched && progress > 0.01 ? (
           <span className="tile__progress">
             <span style={{ width: `${Math.min(100, progress * 100)}%` }} />
           </span>

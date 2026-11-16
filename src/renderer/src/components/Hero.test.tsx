@@ -79,6 +79,45 @@ describe('Hero', () => {
     expect(onPlay).not.toHaveBeenCalled()
   })
 
+  it('adds the card to the watchlist from the hero', () => {
+    const data = card()
+    const onToggleWatchlist = vi.fn()
+    render(
+      <Hero
+        card={data}
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+        onToggleWatchlist={onToggleWatchlist}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId('hero-watchlist'))
+
+    expect(onToggleWatchlist).toHaveBeenCalledWith(data)
+  })
+
+  it('offers removal when the card is already saved', () => {
+    render(
+      <Hero
+        card={card()}
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+        onToggleWatchlist={vi.fn()}
+        inWatchlist
+      />
+    )
+
+    const toggle = screen.getByTestId('hero-watchlist')
+    expect(toggle.textContent).toBe('Remove from watchlist')
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('hides the watchlist control when the app does not offer one', () => {
+    render(<Hero card={card()} onOpen={vi.fn()} onPlay={vi.fn()} />)
+
+    expect(screen.queryByTestId('hero-watchlist')).toBeNull()
+  })
+
   it('omits the subtitle parts a category does not have', () => {
     const { container } = render(
       <Hero card={card({ kind: 'series', subtitle: undefined, minutes: null })} onOpen={vi.fn()} onPlay={vi.fn()} />

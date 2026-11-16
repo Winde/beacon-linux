@@ -18,6 +18,7 @@ function card(slug: string, title: string): Card {
 
 function collectionData(overrides: Partial<CollectionData> = {}): CollectionData {
   return {
+    id: 's1',
     slug: 'campaign-1',
     title: 'Campaign 1',
     image: 'https://images.example/page/format=auto',
@@ -68,7 +69,7 @@ describe('Collection', () => {
     expect(screen.queryByRole('tablist')).toBeNull()
     expect(screen.getAllByRole('button')).toHaveLength(3)
     expect(collection).toHaveBeenCalledWith('campaign-1')
-    expect(focusFirst).toHaveBeenCalledWith('[data-focus]')
+    expect(focusFirst).toHaveBeenCalledWith('.grid [data-focus]')
   })
 
   it('calls a non-series entry a collection', async () => {
@@ -100,6 +101,72 @@ describe('Collection', () => {
     expect(screen.getByText('Season Two One')).toBeDefined()
     expect(screen.queryByText('Episode 1')).toBeNull()
     expect(screen.getAllByRole('tab')[1].getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('starts on the season tabs when there is more than one', async () => {
+    stubCollection(
+      collectionData({
+        seasons: [
+          { title: 'Season 1', items: [card('c1e1', 'Episode 1')] },
+          { title: 'Season 2', items: [card('c2e1', 'Season Two One')] }
+        ]
+      })
+    )
+    render(<Collection slug="campaign-1" onOpen={vi.fn()} />)
+    await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })
+
+    expect(focusFirst).toHaveBeenCalledWith('.tab')
+  })
+
+  it('adds the whole series to the watchlist', async () => {
+    const onToggleWatchlist = vi.fn()
+    stubCollection(collectionData())
+    render(
+      <Collection
+        slug="campaign-1"
+        onOpen={vi.fn()}
+        onToggleWatchlist={onToggleWatchlist}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add to watchlist' }))
+
+    expect(onToggleWatchlist).toHaveBeenCalledWith({
+      kind: 'series',
+      id: 's1',
+      slug: 'campaign-1',
+      title: 'Campaign 1',
+      image: 'https://images.example/page/format=auto',
+      image2x: 'https://images.example/wide/format=auto',
+      count: 3
+    })
+  })
+
+  it('offers to remove a saved series', async () => {
+    stubCollection(collectionData())
+    render(
+      <Collection
+        slug="campaign-1"
+        onOpen={vi.fn()}
+        onToggleWatchlist={vi.fn()}
+        inWatchlist
+      />
+    )
+
+    const toggle = await screen.findByRole('button', { name: 'Remove from watchlist' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('reloads when a watch mark changes progress', async () => {
+    const collection = stubCollection(collectionData())
+    const { rerender } = render(
+      <Collection slug="campaign-1" onOpen={vi.fn()} refreshKey={0} />
+    )
+    await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })
+
+    rerender(<Collection slug="campaign-1" onOpen={vi.fn()} refreshKey={1} />)
+
+    await vi.waitFor(() => expect(collection).toHaveBeenCalledTimes(2))
   })
 
   it('passes selections to the caller', async () => {

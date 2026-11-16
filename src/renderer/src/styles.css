@@ -325,12 +325,48 @@ kbd {
   margin-bottom: 30px;
 }
 
-.row__title {
+.row__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin: 0 0 12px;
   padding: 0 var(--gutter);
+}
+
+.row__title {
+  margin: 0;
   font-size: 1.18rem;
   font-weight: 650;
   letter-spacing: 0.01em;
+}
+
+/* Reordering controls beside a heading, currently only the Watchlist row. */
+.row__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.row__move {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-raise);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.row__move:hover {
+  color: var(--fg);
+}
+
+.row__move:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .row__track {
@@ -385,6 +421,11 @@ kbd {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: opacity 130ms ease;
+}
+
+.tile--watched .tile__art img {
+  opacity: 0.55;
 }
 
 .tile__art-empty {
@@ -417,6 +458,23 @@ kbd {
   background: rgba(8, 9, 12, 0.75);
   font-size: 0.72rem;
   color: var(--muted);
+}
+
+.tile__watched {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(8, 9, 12, 0.82);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .tile__progress {
@@ -490,6 +548,21 @@ kbd {
 
 .button--ghost {
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* A saved title: the control states what pressing it would do. */
+.button--ghost.is-active {
+  color: var(--accent);
+  background: rgba(240, 184, 102, 0.14);
+}
+
+.button--danger {
+  background: rgba(255, 92, 92, 0.16);
+  color: #ffb4b4;
+}
+
+.button--danger:hover {
+  background: rgba(255, 92, 92, 0.26);
 }
 
 .button.is-focused {
@@ -916,8 +989,8 @@ kbd {
 /* Tiles scale to 1.035 and draw a 3px ring when focused. The gap is too narrow
    for the default gutter, but zero padding clips both at the column edge, so
    leave just enough inset and keep titles aligned with it. */
-.search__results .row__title {
-  padding-left: 14px;
+.search__results .row__head {
+  padding: 0 14px;
 }
 
 .search__results .row__track {
@@ -929,6 +1002,46 @@ kbd {
    is what spilled the title past the edge. The ring alone marks focus. */
 .search__results .tile.is-focused {
   transform: none;
+}
+
+/* ---------- dialogs ---------- */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 40px;
+  background: rgba(4, 5, 8, 0.74);
+  backdrop-filter: blur(4px);
+}
+
+.dialog {
+  width: min(580px, 100%);
+  padding: 30px 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #12141b;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.6);
+}
+
+.dialog__title {
+  margin: 0 0 12px;
+  font-size: 1.45rem;
+}
+
+.dialog__message {
+  margin: 0 0 24px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
 }
 
 /* ---------- player ---------- */

@@ -1,26 +1,43 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Card } from '@shared/types'
 import { useAsync } from '../lib/useAsync'
 import { focusFirst } from '../nav/focus'
 import { backdropUrl } from '../lib/images'
 import { Tile } from '../components/Tile'
 import { ScreenScroll } from '../components/ScreenScroll'
+import { WatchlistButton } from '../components/WatchlistButton'
 import { ErrorNote, Spinner } from '../components/ui'
 
 interface CollectionProps {
   slug: string
   onOpen: (card: Card) => void
+  /** Bumped when playback ends or a watch mark lands; card progress is stale. */
+  refreshKey?: number
+  /** Show the watchlist control, and whether this series/collection is saved. */
+  onToggleWatchlist?: (card: Card) => void
+  inWatchlist?: boolean
 }
 
-export function Collection({ slug, onOpen }: CollectionProps): React.JSX.Element | null {
+export function Collection({
+  slug,
+  onOpen,
+  refreshKey = 0,
+  onToggleWatchlist,
+  inWatchlist = false
+}: CollectionProps): React.JSX.Element | null {
   const { data, error, loading } = useAsync(
     () => window.beacon.catalog.collection(slug),
-    [slug]
+    [slug, refreshKey]
   )
   const [seasonIndex, setSeasonIndex] = useState(0)
+  const placed = useRef(false)
 
   useEffect(() => {
-    if (data) focusFirst('[data-focus]')
+    if (!data || placed.current) return
+    placed.current = true
+    // Browsing is the point of this screen: put focus on the seasons or the
+    // first episode, not on the header's watchlist control.
+    focusFirst(data.seasons.length > 1 ? '.tab' : '.grid [data-focus]')
   }, [data])
 
   if (loading) {
@@ -40,6 +57,16 @@ export function Collection({ slug, onOpen }: CollectionProps): React.JSX.Element
   if (!data) return null
 
   const season = data.seasons[Math.min(seasonIndex, data.seasons.length - 1)]
+  const total = data.seasons.reduce((count, item) => count + item.items.length, 0)
+  const saved: Card = {
+    kind: 'series',
+    id: data.id,
+    slug: data.slug,
+    title: data.title,
+    image: data.image,
+    image2x: data.image2x,
+    count: total
+  }
 
   return (
     <div className="screen screen--split">
@@ -49,8 +76,16 @@ export function Collection({ slug, onOpen }: CollectionProps): React.JSX.Element
         <div className="page-head__body">
           <h1 className="page-head__title">{data.title}</h1>
           <p className="page-head__sub">
-            {data.isSeries ? 'Series' : 'Collection'} · {data.seasons.reduce((n, s) => n + s.items.length, 0)} videos
+            {data.isSeries ? 'Series' : 'Collection'} · {total} videos
           </p>
+          {onToggleWatchlist ? (
+            <div className="button-row">
+              <WatchlistButton
+                active={inWatchlist}
+                onToggle={() => onToggleWatchlist(saved)}
+              />
+            </div>
+          ) : null}
         </div>
       </header>
 

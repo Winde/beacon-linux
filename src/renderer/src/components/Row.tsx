@@ -5,9 +5,17 @@ import { Tile } from './Tile'
 interface RowProps extends RowData {
   onSelect: (card: Card) => void
   onFocus?: (card: Card) => void
+  /** Controls beside the heading, e.g. moving the Watchlist row. */
+  actions?: React.ReactNode
 }
 
-export function Row({ title, items, onSelect, onFocus }: RowProps): React.JSX.Element | null {
+export function Row({
+  title,
+  items,
+  onSelect,
+  onFocus,
+  actions
+}: RowProps): React.JSX.Element | null {
   if (!items.length) return null
 
   // Warm the neighbours' full-size backdrops while the player is on this tile,
@@ -24,7 +32,12 @@ export function Row({ title, items, onSelect, onFocus }: RowProps): React.JSX.El
 
   return (
     <section className="row">
-      {title ? <h2 className="row__title">{title}</h2> : null}
+      {title || actions ? (
+        <div className="row__head">
+          {title ? <h2 className="row__title">{title}</h2> : null}
+          {actions ? <div className="row__actions">{actions}</div> : null}
+        </div>
+      ) : null}
       <div className="row__track">
         {items.map((card) => (
           <Tile

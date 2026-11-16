@@ -91,6 +91,8 @@ export class Catalog implements CatalogLike {
   private building: Promise<void> | null = null
   private videosBySlug = new Map<string, IndexedVideo>()
   private collectionsBySlug = new Map<string, IndexedCollection>()
+  private videosById = new Map<string, IndexedVideo>()
+  private collectionsById = new Map<string, IndexedCollection>()
   private videosBySeries = new Map<string, IndexedVideo[]>()
   private searchableVideos: SearchableVideo[] = []
   private searchableCollections: SearchableCollection[] = []
@@ -103,6 +105,9 @@ export class Catalog implements CatalogLike {
     this.snapshot = snapshot
     this.videosBySlug = new Map(snapshot.videos.map((v) => [v.slug, v]))
     this.collectionsBySlug = new Map(snapshot.collections.map((c) => [c.slug, c]))
+    // The watchlist persists ids, so it can be rehydrated from here.
+    this.videosById = new Map(snapshot.videos.map((v) => [v.id, v]))
+    this.collectionsById = new Map(snapshot.collections.map((c) => [c.id, c]))
 
     // Episode lists are asked for on every episode page, several times over;
     // group and order them once instead of filtering the whole index each time.
@@ -249,6 +254,14 @@ export class Catalog implements CatalogLike {
 
   collectionBySlug(slug: string): IndexedCollection | null {
     return this.collectionsBySlug.get(slug) ?? null
+  }
+
+  videoById(id: string): IndexedVideo | null {
+    return this.videosById.get(id) ?? null
+  }
+
+  collectionById(id: string): IndexedCollection | null {
+    return this.collectionsById.get(id) ?? null
   }
 
   /** Episodes of a series in watching order. */

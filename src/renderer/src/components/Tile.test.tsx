@@ -79,6 +79,27 @@ describe('Tile', () => {
     expect(container.querySelector('.tile__progress')).toBeNull()
   })
 
+  it('badges a watched video and drops its progress bar', () => {
+    const { container } = render(
+      <Tile card={card({ watched: true, progress: 0.4 })} onSelect={vi.fn()} />
+    )
+
+    expect(screen.getByText('Watched')).toBeDefined()
+    expect(container.querySelector('.tile--watched')).not.toBeNull()
+    expect(container.querySelector('.tile__progress')).toBeNull()
+  })
+
+  it('does not badge a series as watched', () => {
+    render(
+      <Tile
+        card={card({ kind: 'series', watched: true, count: 4, minutes: null })}
+        onSelect={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByText('Watched')).toBeNull()
+  })
+
   it('reports the selected card', () => {
     const onSelect = vi.fn()
     const data = card()

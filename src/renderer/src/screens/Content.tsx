@@ -1,18 +1,25 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Card } from '@shared/types'
 import { useAsync } from '../lib/useAsync'
+import { cleanError } from '../lib/errors'
 import { focusFirst } from '../nav/focus'
 import { backdropUrl } from '../lib/images'
 import { Row } from '../components/Row'
 import { ScreenScroll } from '../components/ScreenScroll'
+import { WatchlistButton } from '../components/WatchlistButton'
 import { ErrorNote, Spinner } from '../components/ui'
 
 interface ContentProps {
   slug: string
   onOpen: (card: Card) => void
   onPlay: (slug: string, startAt?: number) => void
-  /** Bumped when playback ends; the resume point is stale from then on. */
+  /** Bumped when playback ends or a watch mark lands; older data is stale. */
   refreshKey?: number
+  /** Lets screens behind this one drop their cached progress too. */
+  onWatchedChanged?: () => void
+  /** Show the watchlist control, and whether this episode is already on it. */
+  onToggleWatchlist?: (card: Card) => void
+  inWatchlist?: boolean
 }
 
 const stripHtml = (value: string): string => value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -21,7 +28,10 @@ export function Content({
   slug,
   onOpen,
   onPlay,
-  refreshKey = 0
+  refreshKey = 0,
+  onWatchedChanged,
+  onToggleWatchlist,
+  inWatchlist = false
 }: ContentProps): React.JSX.Element | null {
   // Keep the page on screen while it reloads: it is what the player uncovers.
   const { data, error, loading } = useAsync(
@@ -30,6 +40,16 @@ export function Content({
     { keepData: true }
   )
   const placed = useRef(false)
+  // The toggle shows its result before the CMS has answered. The next read
+  // replaces it, so this is a head start, not a second source of truth.
+  const [watchedNow, setWatchedNow] = useState<boolean | null>(null)
+  const [marking, setMarking] = useState(false)
+  const [markError, setMarkError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setWatchedNow(null)
+    setMarkError(null)
+  }, [data])
 
   useEffect(() => {
     if (!data || placed.current) return
@@ -54,6 +74,35 @@ export function Content({
   if (!data) return null
 
   const resuming = data.resumeAt > 0
+  const watched = watchedNow ?? data.watched
+  const saved: Card = {
+    kind: 'video',
+    id: data.id,
+    slug: data.slug,
+    title: data.title,
+    subtitle: data.series?.title,
+    image: data.image,
+    image2x: data.image2x,
+    minutes: data.minutes
+  }
+
+  const toggleWatched = async (): Promise<void> => {
+    if (marking) return
+    const next = !watched
+    setMarking(true)
+    setMarkError(null)
+    setWatchedNow(next)
+    try {
+      const state = await window.beacon.watch.mark(slug, next)
+      setWatchedNow(state.watched)
+      onWatchedChanged?.()
+    } catch (err) {
+      setWatchedNow(null)
+      setMarkError(cleanError(err))
+    } finally {
+      setMarking(false)
+    }
+  }
 
   return (
     <div className="screen screen--split">
@@ -76,31 +125,57 @@ export function Content({
                 ? 'Sign in with a Beacon account to watch this.'
                 : 'Your membership level does not include this video.'}
             </p>
-          ) : (
+          ) : null}
+
+          {!data.locked || onToggleWatchlist ? (
             <div className="button-row">
-              <button
-                type="button"
-                className="button button--primary"
-                data-focus
-                data-testid="play"
-                tabIndex={-1}
-                onClick={() => onPlay(slug)}
-              >
-                {resuming ? 'Resume' : 'Play'}
-              </button>
-              {resuming ? (
-                <button
-                  type="button"
-                  className="button button--ghost"
-                  data-focus
-                  tabIndex={-1}
-                  onClick={() => onPlay(slug, 0)}
-                >
-                  Start over
-                </button>
+              {!data.locked ? (
+                <>
+                  <button
+                    type="button"
+                    className="button button--primary"
+                    data-focus
+                    data-testid="play"
+                    tabIndex={-1}
+                    onClick={() => onPlay(slug)}
+                  >
+                    {resuming ? 'Resume' : 'Play'}
+                  </button>
+                  {resuming ? (
+                    <button
+                      type="button"
+                      className="button button--ghost"
+                      data-focus
+                      tabIndex={-1}
+                      onClick={() => onPlay(slug, 0)}
+                    >
+                      Start over
+                    </button>
+                  ) : null}
+                  {data.signedIn ? (
+                    <button
+                      type="button"
+                      className="button button--ghost"
+                      data-focus
+                      data-testid="watch-toggle"
+                      tabIndex={-1}
+                      disabled={marking}
+                      onClick={() => void toggleWatched()}
+                    >
+                      {watched ? 'Mark as unwatched' : 'Mark as watched'}
+                    </button>
+                  ) : null}
+                </>
+              ) : null}
+              {onToggleWatchlist ? (
+                <WatchlistButton
+                  active={inWatchlist}
+                  onToggle={() => onToggleWatchlist(saved)}
+                />
               ) : null}
             </div>
-          )}
+          ) : null}
+          {markError ? <ErrorNote>{markError}</ErrorNote> : null}
         </div>
       </header>
 

@@ -213,6 +213,31 @@ mutation Track($events: [EventInput!]!) { trackView(events: $events) { success r
 
 This is what keeps "Continue watching" in sync across beacon.tv and the apps.
 
+Beacon keeps the **latest** report, not the furthest: reporting an earlier
+position moves the saved point back (backtracking an episode saves). There is no
+separate watched flag and no mutation that deletes progress, so a finished state
+is written with the same event:
+
+- watched: `videoProgress: 99`, `videoProgressSeconds: <runtime - 1>`
+- unwatched: `videoProgress: 1`, `videoProgressSeconds: 1`
+
+Both extremes are a trap: an all-zero event and a 100% event are accepted
+(`success: true`) but the next read still reports the old point. Staying one
+step inside each end behaves like a real rewatch. Even then the read can lag, so
+the client keeps the member's choice locally (`watch-state.json`, per sign-in
+address) and drops it once `getProgressForContent` agrees. That leaves an
+unwatched title at "started", so call the member mutation the web client uses to
+keep it out of the row:
+
+```graphql
+mutation { removeContentFromContinueWatching(id: "<content id>") { success } }
+```
+
+Because the write is shared, a mark changes "Continue watching" and the progress
+bars on every device signed in to the account. The client marks an episode only
+when the member asks; finishing one by playback is detected from the progress
+(`videoProgress` plus `videoProgressSeconds` against the runtime).
+
 ### Home page
 
 beacon.tv's member home page is a single large query (`MemberHomePage.pageContent`),

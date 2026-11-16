@@ -14,9 +14,9 @@ does for YouTube.
 
 ## Status
 
-Working end to end: sign-in, home, series, episode pages, search, and video
-playback with resume and progress sync. Controller navigation is in place but has
-only been exercised with a keyboard so far.
+Working end to end: sign-in, home, series, episode pages, search, watchlist, and
+video playback with resume and progress sync. Controller navigation is in place
+but has only been exercised with a keyboard so far.
 
 Verified against the live service on 2026-11-16.
 
@@ -31,6 +31,7 @@ HLS from JW Player — no Widevine. That makes a native client straightforward. 
 │  main process                                                          │
 │    BeaconClient   Memberful OAuth, GraphQL, watch progress             │
 │    Catalog        local index of ~1,300 videos, fuzzy search           │
+│    watchlist.ts   per-account local watchlist and row position         │
 │    hls.ts         master playlist reordered best-first                 │
 │                          │ IPC                                          │
 │  renderer (React)        ▼                                             │
@@ -40,12 +41,31 @@ HLS from JW Player — no Widevine. That makes a native client straightforward. 
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
+### Watchlist
+
+Beacon has no watchlist, so this one lives on the device. Episodes, series and
+collections can be saved from the hero on Home or from their own page, and a
+**Watchlist** row appears on Home just below *Continue watching*. The arrows in
+that row's heading move it up or down; the position, like the list, is
+remembered per account.
+
+Watching something never removes it. The list is filed under the address the
+account signs in with and is stored in plain JSON in the app's user-data folder
+(`watchlist.json`). Persistence holds Beacon's content/collection ids, when each
+was saved, and the row position; titles, artwork and lengths are hydrated from
+the local catalog index each launch, so renamed or re-artworked titles update
+themselves.
+
+It is not a credential, so an expired or rejected session does not delete it.
+Signing out asks whether to delete it when it has anything in it. Without an
+account, free-video browsing gets a guest list of its own.
+
 API calls live in the main process for two reasons: Beacon's CMS only accepts
 `beacon.tv` as a browser origin (so the renderer would be blocked by CORS), and
 tokens stay out of the renderer. The session is encrypted at rest with the OS
-keyring via Electron's `safeStorage`. Where no real keyring is reachable (some
-SteamOS setups, a Flatpak without secret-service access) nothing is written —
-the tokens live in memory for that run and you sign in again next launch. The
+keyring via Electron's `safeStorage`. Where no real keyring is reachable
+(SteamOS Game Mode, or a machine with none at all) nothing is written — the
+tokens live in memory for that run and you sign in again next launch. The
 sign-in screen says so when that is the case.
 
 ## Run it
