@@ -1,8 +1,9 @@
 # Releasing
 
-Releases are cut from tags. Pushing a tag that starts with `v` runs
-[`.github/workflows/release.yml`](../.github/workflows/release.yml), which builds
-every artifact and publishes a GitHub Release.
+Releases are cut from tags, but nothing is automatic. Pushing a tag builds
+nothing. You create the release yourself, then run
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) by hand for
+that tag, and it attaches the artifacts.
 
 ## Versioning
 
@@ -32,27 +33,29 @@ happens there and it is the easiest way to test a change; it is not the product.
 ## Cutting a release
 
 1. Bump `version` in `package.json`.
-2. Commit it on `main`.
-3. Tag and push:
+2. Commit it on `main` and push.
+3. Tag and push the tag. This does not start a build:
 
    ```sh
    git tag -a v0.2.0 -m "v0.2.0"
-   git push origin main
    git push origin v0.2.0
    ```
 
-4. Watch the Actions run. The `verify` job fails immediately if the tag and
-   `package.json` disagree, before anything is built.
-5. Review the release notes. They are generated from commits, so edit them in the
-   GitHub UI if the commit messages do not read well.
+4. Create the release in the GitHub UI for that tag, with whatever notes you want.
+5. Go to **Actions → Release → Run workflow** and enter the tag (`v0.2.0`).
 
-Nothing is published until every build succeeds: the release is created by the
-`publish` job, which only runs after both platform jobs pass.
+The run checks out that tag, fails immediately if it disagrees with
+`package.json`, builds both platforms, and uploads the artifacts and checksums to
+the release you created. If the release does not exist yet, the `publish` job
+stops with a message telling you to create it.
+
+Artifacts only appear if every build succeeds, so a failed run leaves your
+release empty rather than half-populated.
 
 ## Re-running
 
-Re-run the workflow from the Actions tab. The `publish` job detects an existing
-release and uploads over it with `--clobber` instead of failing.
+Run the workflow again with the same tag. Uploads use `--clobber`, so artifacts
+are replaced rather than duplicated.
 
 To abandon a release, delete it in the GitHub UI and delete the tag:
 
