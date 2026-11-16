@@ -1,7 +1,16 @@
 import { net } from 'electron'
+import { TtlCache } from './beacon/cache'
 
 /** Hosts that serve Beacon's video and caption files. */
 const MEDIA_HOSTS = /(^|\.)(jwplayer\.com|jwpsrv\.com|jwpcdn\.com|jwplatform\.com)$/
+
+/** Master playlists change only when a stream is re-encoded. */
+const playlists = new TtlCache<string, string>(5 * 60_000, 20)
+
+/** Test seam: the cache is module-level and outlives a single test. */
+export function clearPlaylistCache(): void {
+  playlists.clear()
+}
 
 export function isMediaUrl(raw: string): boolean {
   try {
@@ -67,10 +76,13 @@ export function reorderMasterPlaylist(text: string, base: string): string | null
 /** Fetch a stream's master playlist, best variant first. Falls back to the original text. */
 export async function fetchMasterPlaylist(url: string): Promise<string> {
   if (!isMediaUrl(url)) throw new Error('Stream host not allowed')
-  const res = await net.fetch(url)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const text = await res.text()
-  return reorderMasterPlaylist(text, url) ?? text
+  // Replaying an episode should not wait on this request again.
+  return playlists.load(url, async () => {
+    const res = await net.fetch(url)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const text = await res.text()
+    return reorderMasterPlaylist(text, url) ?? text
+  })
 }
 
 /** Caption files come from JW Player without CORS headers, so the renderer can't fetch them. */

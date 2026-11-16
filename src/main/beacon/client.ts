@@ -11,6 +11,7 @@ import type {
   SearchData
 } from '@shared/types'
 import { loadSession, saveSession, type Session } from './session'
+import { TtlCache } from './cache'
 import * as Q from './queries'
 import { episodeCode, imageUrl as img } from './text'
 import type { IndexedCollection, IndexedVideo } from './catalog-types'
@@ -91,6 +92,43 @@ function captionsOf(video: { videoData?: string; closedCaptions?: string }): Cap
   return out
 }
 
+/**
+ * A title leaves "Continue watching" once it is past this share of its runtime
+ * and only this little remains. The share alone misjudges long episodes: 92%
+ * of a four-hour episode still has nineteen minutes left to play.
+ */
+const FINISHED_SHARE = 92
+const FINISHED_TAIL = 5 * 60 // seconds
+
+/**
+ * A stored position this far into the closing stretch is not worth resuming:
+ * the player would open on the credits. Same two-part rule, with a tighter
+ * tail, so a long episode watched to 96% keeps its point.
+ */
+const RESUME_SHARE = 95
+const RESUME_TAIL = 3 * 60 // seconds
+
+/**
+ * Whether a video is in its closing stretch: past `share` percent and, when
+ * the runtime is known, with no more than `tail` seconds left.
+ */
+function closingStretch(
+  progress: number,
+  position: number | null | undefined,
+  runtimeSec: number | null | undefined,
+  share: number,
+  tail: number
+): boolean {
+  if (progress < share) return false
+  // Without a runtime there is no tail to measure; keep the plain share rule.
+  if (!runtimeSec) return true
+  const left =
+    position != null && position >= 0 && position <= runtimeSec
+      ? runtimeSec - position
+      : (runtimeSec * (100 - progress)) / 100
+  return left <= tail
+}
+
 export class BeaconClient {
   // Loaded once, on first use and after the app is ready: safeStorage needs that,
   // and this class is constructed at module load, before it.
@@ -99,6 +137,32 @@ export class BeaconClient {
   private refreshing: Promise<string | null> | null = null
   private level: { at: number; value: number } | null = null
   private sessionId = 'linux-' + Math.random().toString(36).slice(2, 10)
+
+  // Beacon answers the same questions over and over while a member browses,
+  // and most answers stay right for minutes. The keys carry the account, and
+  // everything is dropped when the account changes.
+  private readonly homeCache = new TtlCache<string, HomeData>(60_000, 4)
+  /** Five minutes: series cards show progress, so shorter is more accurate. */
+  private readonly collectionCache = new TtlCache<string, CollectionData>(5 * 60_000, 40)
+  private readonly contentCache = new TtlCache<string, ContentData>(10 * 60_000, 40)
+  private readonly searchCache = new TtlCache<string, SearchData>(5 * 60_000, 30)
+  private readonly playbackCache = new TtlCache<string, PlaybackData | null>(5 * 60_000, 40)
+  private readonly progressCache = new TtlCache<string, Record<string, number>>(30_000, 30)
+
+  /** What an entry belongs to: a member's rows and tier are not shared. */
+  private async scope(): Promise<string> {
+    const session = await this.currentSession()
+    return session?.email ?? 'guest'
+  }
+
+  private clearCaches(): void {
+    this.homeCache.clear()
+    this.collectionCache.clear()
+    this.contentCache.clear()
+    this.searchCache.clear()
+    this.playbackCache.clear()
+    this.progressCache.clear()
+  }
 
   private async currentSession(): Promise<Session | null> {
     if (this.sessionState !== undefined) return this.sessionState
@@ -164,12 +228,14 @@ export class BeaconClient {
       expiresAt: Date.now() + (body.expires_in ?? 3600) * 1000
     })
     this.level = null
+    this.clearCaches()
     return this.status()
   }
 
   async signOut(): Promise<void> {
     await this.updateSession(null)
     this.level = null
+    this.clearCaches()
   }
 
   async status(): Promise<AuthStatus> {
@@ -186,6 +252,9 @@ export class BeaconClient {
         }
       }>(Q.ME)
       const user = r.meMember?.user
+      // Home and the screens ask for the level straight after boot; this saves
+      // a second ME query and answers it with what status() already learned.
+      this.level = { at: Date.now(), value: user?.tier?.planLevel ?? 1 }
       return {
         signedIn: true,
         user: {
@@ -329,8 +398,16 @@ export class BeaconClient {
   }
 
   async progressFor(ids: string[]): Promise<Record<string, number>> {
+    if (!(await this.currentSession()) || !ids.length) return {}
+    const unique = [...new Set(ids)]
+    // The ids come from whichever rows are on screen, so sort them into a
+    // stable key: two screens asking for the same set share the answer.
+    const key = unique.slice().sort().join(',')
+    return this.progressCache.load(key, () => this.loadProgress(unique))
+  }
+
+  private async loadProgress(ids: string[]): Promise<Record<string, number>> {
     const map: Record<string, number> = {}
-    if (!(await this.currentSession()) || !ids.length) return map
     for (let i = 0; i < ids.length; i += 100) {
       const r = await this.gql<{
         getProgressForContent?: {
@@ -347,6 +424,14 @@ export class BeaconClient {
   // ---------- screens ----------
 
   async home(): Promise<HomeData> {
+    const key = await this.scope()
+    const data = await this.homeCache.load(key, () => this.buildHome())
+    // A CMS hiccup must not be remembered as an empty home for a minute.
+    if (!data.hero.length && !data.rows.length) this.homeCache.delete(key)
+    return data
+  }
+
+  private async buildHome(): Promise<HomeData> {
     const signed = await this.isSignedIn()
     const level = await this.userLevel()
     this.catalog?.ensure().catch(() => {})
@@ -355,7 +440,7 @@ export class BeaconClient {
       signed
         ? this.gql<{
             continueWatching?: {
-              docs?: { videoProgress?: number; content?: CmsCard }[]
+              docs?: { videoProgress?: number; videoProgressSeconds?: number; content?: CmsCard }[]
             }
           }>(Q.CONTINUE_WATCHING, { limit: 30 }).catch(() => null)
         : Promise.resolve(null),
@@ -379,7 +464,16 @@ export class BeaconClient {
       for (const d of watching) {
         if (d.content) progress[d.content.id] = Math.min(1, (d.videoProgress ?? 0) / 100)
       }
-      const unfinished = watching.filter((d) => (d.videoProgress ?? 0) < 92)
+      const unfinished = watching.filter(
+        (d) =>
+          !closingStretch(
+            d.videoProgress ?? 0,
+            d.videoProgressSeconds,
+            (d.content!.duration ?? 0) / 1000,
+            FINISHED_SHARE,
+            FINISHED_TAIL
+          )
+      )
       if (unfinished.length) {
         rows.push({
           title: 'Continue watching',
@@ -413,6 +507,11 @@ export class BeaconClient {
   }
 
   async collection(slug: string): Promise<CollectionData> {
+    const key = `${await this.scope()}|${slug}`
+    return this.collectionCache.load(key, () => this.buildCollection(slug))
+  }
+
+  private async buildCollection(slug: string): Promise<CollectionData> {
     await this.catalog?.ensure().catch(() => {})
     const known = this.catalog?.collectionBySlug(slug) ?? null
     if (!known) throw new Error('Series not found.')
@@ -493,12 +592,23 @@ export class BeaconClient {
   }
 
   async content(slug: string): Promise<ContentData> {
+    const key = `${await this.scope()}|${slug}`
+    return this.contentCache.load(key, () => this.buildContent(slug))
+  }
+
+  private async buildContent(slug: string): Promise<ContentData> {
     const r = await this.gql<{
       Contents?: {
         docs?: (CmsCard & {
           description?: string
           content?: { carouselContent?: CmsCard[] }[]
-          contentVideo?: { video?: { video?: string } | null } | null
+          contentVideo?: {
+            video?: {
+              video?: string
+              videoData?: string
+              closedCaptions?: string
+            } | null
+          } | null
         })[]
       }
       currentProgress?: { videoProgress?: number; videoProgressSeconds?: number } | null
@@ -568,6 +678,32 @@ export class BeaconClient {
     }
 
     const cp = r.currentProgress
+    const resumeAt =
+      cp &&
+      !closingStretch(
+        cp.videoProgress ?? 0,
+        cp.videoProgressSeconds,
+        (doc.duration ?? 0) / 1000,
+        RESUME_SHARE,
+        RESUME_TAIL
+      )
+        ? (cp.videoProgressSeconds ?? 0)
+        : 0
+
+    // Play would ask the CMS for this same stream again a second later; hand
+    // the player what this page already fetched.
+    if (video?.video) {
+      this.playbackCache.set(`${await this.scope()}|${slug}`, {
+        id: doc.id,
+        title: doc.title,
+        url: video.video,
+        playlist: null,
+        duration: doc.duration ? Math.round(doc.duration / 1000) : null,
+        resumeAt,
+        captions: captionsOf(video)
+      })
+    }
+
     return {
       id: doc.id,
       slug,
@@ -581,12 +717,17 @@ export class BeaconClient {
       tier: doc.contentTier?.name ?? null,
       locked: !video?.video,
       signInNeeded: !video?.video && !(await this.isSignedIn()),
-      resumeAt: cp && (cp.videoProgress ?? 0) < 95 ? (cp.videoProgressSeconds ?? 0) : 0,
+      resumeAt,
       rows
     }
   }
 
   async play(slug: string): Promise<PlaybackData | null> {
+    const key = `${await this.scope()}|${slug}`
+    return this.playbackCache.load(key, () => this.loadPlayback(slug))
+  }
+
+  private async loadPlayback(slug: string): Promise<PlaybackData | null> {
     const r = await this.gql<{
       Contents?: {
         docs?: {
@@ -606,13 +747,24 @@ export class BeaconClient {
     if (!video?.video) return null
 
     const cp = r.currentProgress
+    const runtimeSec = (doc?.duration ?? 0) / 1000
     return {
       id: doc?.id ?? '',
       title: doc?.title ?? '',
       url: video.video,
       playlist: null,
       duration: doc?.duration ? Math.round(doc.duration / 1000) : null,
-      resumeAt: cp && (cp.videoProgress ?? 0) < 95 ? (cp.videoProgressSeconds ?? 0) : 0,
+      resumeAt:
+        cp &&
+        !closingStretch(
+          cp.videoProgress ?? 0,
+          cp.videoProgressSeconds,
+          runtimeSec,
+          RESUME_SHARE,
+          RESUME_TAIL
+        )
+          ? (cp.videoProgressSeconds ?? 0)
+          : 0,
       captions: captionsOf(video)
     }
   }
@@ -630,10 +782,30 @@ export class BeaconClient {
     const r = await this.gql<{ trackView?: { success?: boolean } }>(Q.TRACK, {
       events: [event]
     }).catch(() => null)
-    return Boolean(r?.trackView?.success)
+    const tracked = Boolean(r?.trackView?.success)
+    if (tracked) {
+      // The rows, resume points and progress bars now describe an older moment.
+      // Collections keep their cards for their shorter window: the series
+      // screen is still mounted while the player is open, so invalidating it
+      // would only cost a refetch on a screen that is already on the stack.
+      this.homeCache.clear()
+      this.contentCache.clear()
+      this.playbackCache.clear()
+      this.progressCache.clear()
+    }
+    return tracked
   }
 
   async search(query: string): Promise<SearchData> {
+    const key = `${await this.scope()}|${query.trim().toLowerCase()}`
+    const data = await this.searchCache.load(key, () => this.buildSearch(query))
+    // A failed remote query leaves only the local index; do not remember that
+    // as the whole answer.
+    if (!data.series.length && !data.videos.length) this.searchCache.delete(key)
+    return data
+  }
+
+  private async buildSearch(query: string): Promise<SearchData> {
     await this.catalog?.ensure().catch(() => {})
     const level = await this.userLevel()
     const local = this.catalog?.localSearch(query) ?? { collections: [], videos: [] }

@@ -1,5 +1,5 @@
 import { BrowserWindow, ipcMain } from 'electron'
-import type { ProgressReport } from '@shared/types'
+import type { PlaybackData, ProgressReport } from '@shared/types'
 import { BeaconClient } from './beacon/client'
 import { Catalog } from './beacon/catalog'
 import { fetchCaptionFile, fetchMasterPlaylist } from './hls'
@@ -23,8 +23,10 @@ export function registerIpc(): void {
   ipcMain.handle('catalog:indexStatus', () => catalog.status())
 
   ipcMain.handle('playback:open', async (_event, slug: string) => {
-    const data = await client.play(slug)
-    if (!data) return null
+    const cached = await client.play(slug)
+    if (!cached) return null
+    // play() may hand back a cached object; keep per-open state out of it.
+    const data: PlaybackData = { ...cached, playlist: null }
     try {
       data.playlist = await fetchMasterPlaylist(data.url)
     } catch {

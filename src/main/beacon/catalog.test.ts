@@ -145,7 +145,7 @@ function writeSnapshot(snapshot: CatalogSnapshot): void {
   writeFileSync(indexFile(), JSON.stringify(snapshot))
 }
 
-const STALE = 7 * 3600 * 1000
+const STALE = 25 * 3600 * 1000
 
 beforeEach(() => {
   rmSync(indexFile(), { force: true })

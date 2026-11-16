@@ -315,6 +315,36 @@ describe('home', () => {
     expect(home.rows.find((row) => row.title === 'Continue watching')).toBeUndefined()
   })
 
+  it('measures the tail in time, so a long episode stays in the row', async () => {
+    routeCms(
+      homeRoutes({
+        [Q.CONTINUE_WATCHING]: () => ({
+          continueWatching: {
+            docs: [
+              // Four hours, 94% watched: 14:24 still to play.
+              {
+                videoProgress: 94,
+                videoProgressSeconds: 13_536,
+                content: cmsCard({ id: 'long', slug: 'long', duration: 14_400_000 })
+              },
+              // The same runtime at 99.9%: 14 seconds left, so it is done.
+              {
+                videoProgress: 99.9,
+                videoProgressSeconds: 14_386,
+                content: cmsCard({ id: 'done', slug: 'done', duration: 14_400_000 })
+              }
+            ]
+          }
+        })
+      })
+    )
+    const client = new BeaconClient()
+
+    const home = await client.home()
+
+    expect(home.rows[0].items.map((item) => item.slug)).toEqual(['long'])
+  })
+
   it('skips the continue-watching query when signed out', async () => {
     vi.mocked(loadSession).mockResolvedValue(null)
     routeCms(homeRoutes())
@@ -511,7 +541,8 @@ describe('content', () => {
       contentRoutes(playableDoc(), {
         [Q.CONTENT]: () => ({
           Contents: { docs: [playableDoc()] },
-          currentProgress: { videoProgress: 96, videoProgressSeconds: 900 }
+          // 96% of the 55-minute runtime: only 2:12 of credits remain.
+          currentProgress: { videoProgress: 96, videoProgressSeconds: 3168 }
         })
       })
     )
@@ -529,7 +560,7 @@ describe('content', () => {
       contentRoutes(playableDoc(), {
         [Q.CONTENT]: () => ({
           Contents: { docs: [playableDoc()] },
-          currentProgress: { videoProgress: 94, videoProgressSeconds: 1450 }
+          currentProgress: { videoProgress: 94, videoProgressSeconds: 3102 }
         })
       })
     )
@@ -538,7 +569,25 @@ describe('content', () => {
 
     const content = await client.content('c1e5')
 
-    expect(content.resumeAt).toBe(1450)
+    expect(content.resumeAt).toBe(3102)
+  })
+
+  it('resumes a long episode whose closing stretch is still minutes away', async () => {
+    // 96% of a four-hour episode leaves 9:36 to play, so it is not an ending.
+    routeCms(
+      contentRoutes(playableDoc({ duration: 14_400_000 }), {
+        [Q.CONTENT]: () => ({
+          Contents: { docs: [playableDoc({ duration: 14_400_000 })] },
+          currentProgress: { videoProgress: 96, videoProgressSeconds: 13_824 }
+        })
+      })
+    )
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos })
+
+    const content = await client.content('c1e5')
+
+    expect(content.resumeAt).toBe(13_824)
   })
 })
 
@@ -771,6 +820,140 @@ describe('search', () => {
 
     client.catalog = null
     expect(client.suggest('cam')).toEqual([])
+  })
+})
+
+describe('caching', () => {
+  function cmsCalls(query: string): number {
+    return net.fetch.mock.calls.filter((call) => {
+      const body = (call[1] as { body?: string } | undefined)?.body
+      return body ? (JSON.parse(body) as { query?: string }).query === query : false
+    }).length
+  }
+
+  function episodeRoutes(overrides: Routes = {}): Routes {
+    return {
+      [Q.ME]: () => MEMBER,
+      [Q.CONTENT]: () => ({
+        Contents: {
+          docs: [
+            cmsCard({
+              id: 'e1',
+              slug: 'c1e1',
+              contentVideo: { video: { video: 'https://cdn.jwplayer.com/manifests/abc.m3u8' } }
+            })
+          ]
+        },
+        currentProgress: { videoProgress: 10, videoProgressSeconds: 30 }
+      }),
+      [Q.SERIES]: () => ({ fetchSeries: {} }),
+      [Q.PROGRESS_FOR]: () => ({ getProgressForContent: { timeMap: [] } }),
+      [Q.MEDIA]: () => ({ Contents: { docs: [] } }),
+      [Q.TRACK]: () => ({ trackView: { success: true } }),
+      ...overrides
+    }
+  }
+
+  it('serves a second Home from memory', async () => {
+    routeCms(
+      homeRoutes({
+        [Q.SEARCH]: () => ({
+          search: { docs: [cmsCard({ id: 'r1', slug: 'recent', title: 'Recent' })] }
+        })
+      })
+    )
+    const client = new BeaconClient()
+
+    await client.home()
+    await client.home()
+
+    expect(cmsCalls(Q.CONTINUE_WATCHING)).toBe(1)
+    expect(cmsCalls(Q.SEARCH)).toBe(1)
+    expect(cmsCalls(Q.COLLECTIONS)).toBe(1)
+  })
+
+  it('shares one Home request between concurrent callers', async () => {
+    routeCms(homeRoutes())
+    const client = new BeaconClient()
+
+    await Promise.all([client.home(), client.home()])
+
+    expect(cmsCalls(Q.CONTINUE_WATCHING)).toBe(1)
+  })
+
+  it('does not remember an empty home after a CMS failure', async () => {
+    net.fetch.mockRejectedValue(new Error('offline'))
+    const client = new BeaconClient()
+    await expect(client.home()).resolves.toEqual({ hero: [], rows: [] })
+
+    net.fetch.mockReset()
+    routeCms(homeRoutes())
+    await client.home()
+
+    expect(cmsCalls(Q.SEARCH)).toBe(1)
+  })
+
+  it('serves an episode page from memory until progress is reported', async () => {
+    routeCms(episodeRoutes())
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.content('c1e1')
+    await client.content('c1e1')
+    expect(cmsCalls(Q.CONTENT)).toBe(1)
+
+    await client.trackProgress('e1', 300, 600)
+    await client.content('c1e1')
+    expect(cmsCalls(Q.CONTENT)).toBe(2)
+  })
+
+  it('starts playback from the stream the episode page already fetched', async () => {
+    routeCms(episodeRoutes())
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.content('c1e1')
+    const playback = await client.play('c1e1')
+
+    expect(playback?.url).toBe('https://cdn.jwplayer.com/manifests/abc.m3u8')
+    expect(cmsCalls(Q.MEDIA)).toBe(0)
+  })
+
+  it('reuses a progress map for the same set of ids', async () => {
+    routeCms({ [Q.PROGRESS_FOR]: () => ({ getProgressForContent: { timeMap: [] } }) })
+    const client = new BeaconClient()
+
+    await client.progressFor(['a', 'b'])
+    await client.progressFor(['b', 'a'])
+
+    expect(cmsCalls(Q.PROGRESS_FOR)).toBe(1)
+  })
+
+  it('drops every cache when the account changes', async () => {
+    routeCms(
+      homeRoutes({
+        [Q.SEARCH]: () => ({
+          search: { docs: [cmsCard({ id: 'r1', slug: 'recent', title: 'Recent' })] }
+        })
+      })
+    )
+    const client = new BeaconClient()
+
+    await client.home()
+    await client.signOut()
+    await client.home()
+
+    expect(cmsCalls(Q.SEARCH)).toBe(2)
+  })
+
+  it('reuses the level that the boot status already learned', async () => {
+    routeCms(homeRoutes())
+    const client = new BeaconClient()
+
+    await client.status()
+    await client.home()
+
+    expect(cmsCalls(Q.ME)).toBe(1)
   })
 })
 

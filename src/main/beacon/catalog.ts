@@ -7,8 +7,10 @@ import type { CatalogSnapshot, IndexedCollection, IndexedVideo } from './catalog
 import { episodeCode, normalize, relevance } from './text'
 import type { BeaconClient, CatalogLike } from './client'
 
-const INDEX_HOURS = 6
+const INDEX_HOURS = 24
 const PAGE_LIMIT = 100
+/** Beacon's CMS is happy with a handful of parallel page reads. */
+const PAGE_CONCURRENCY = 4
 
 interface SearchableVideo extends IndexedVideo {
   norm: string
@@ -89,6 +91,7 @@ export class Catalog implements CatalogLike {
   private building: Promise<void> | null = null
   private videosBySlug = new Map<string, IndexedVideo>()
   private collectionsBySlug = new Map<string, IndexedCollection>()
+  private videosBySeries = new Map<string, IndexedVideo[]>()
   private searchableVideos: SearchableVideo[] = []
   private searchableCollections: SearchableCollection[] = []
 
@@ -100,6 +103,26 @@ export class Catalog implements CatalogLike {
     this.snapshot = snapshot
     this.videosBySlug = new Map(snapshot.videos.map((v) => [v.slug, v]))
     this.collectionsBySlug = new Map(snapshot.collections.map((c) => [c.slug, c]))
+
+    // Episode lists are asked for on every episode page, several times over;
+    // group and order them once instead of filtering the whole index each time.
+    const bySeries = new Map<string, IndexedVideo[]>()
+    for (const video of snapshot.videos) {
+      const seriesId = video.series?.id
+      if (!seriesId) continue
+      const list = bySeries.get(seriesId)
+      if (list) list.push(video)
+      else bySeries.set(seriesId, [video])
+    }
+    for (const list of bySeries.values()) {
+      list.sort(
+        (a, b) =>
+          (a.episode ?? 0) - (b.episode ?? 0) ||
+          (Date.parse(a.released ?? '') || 0) - (Date.parse(b.released ?? '') || 0)
+      )
+    }
+    this.videosBySeries = bySeries
+
     this.searchableVideos = snapshot.videos.map((v) => ({
       ...v,
       norm: normalize(v.title),
@@ -113,23 +136,47 @@ export class Catalog implements CatalogLike {
     }))
   }
 
+  private async fetchPage<T>(
+    query: string,
+    field: string,
+    map: (raw: Record<string, any>) => T,
+    page: number
+  ): Promise<{ docs: T[]; totalPages: number }> {
+    const r = await this.client.gql<
+      Record<string, { docs?: Record<string, any>[]; totalPages?: number }>
+    >(query, { types: PLAYABLE, sort: '-releaseDate', page, limit: PAGE_LIMIT })
+    const bucket = r[field]
+    if (!bucket) return { docs: [], totalPages: 1 }
+    return { docs: (bucket.docs ?? []).map(map), totalPages: bucket.totalPages ?? 1 }
+  }
+
+  /**
+   * The first page says how many there are; the rest are read a few at a time.
+   * A full rebuild used to be a dozen sequential round trips.
+   */
   private async fetchPages<T>(
     query: string,
     field: string,
     map: (raw: Record<string, any>) => T,
     maxPages: number
   ): Promise<T[]> {
-    const out: T[] = []
-    for (let page = 1; page <= maxPages; page++) {
-      const r = await this.client.gql<
-        Record<string, { docs?: Record<string, any>[]; totalPages?: number }>
-      >(query, { types: PLAYABLE, sort: '-releaseDate', page, limit: PAGE_LIMIT })
-      const bucket = r[field]
-      if (!bucket) break
-      out.push(...(bucket.docs ?? []).map(map))
-      if (page >= (bucket.totalPages ?? 1)) break
+    const first = await this.fetchPage(query, field, map, 1)
+    const last = Math.min(maxPages, Math.max(1, first.totalPages))
+    if (last <= 1) return first.docs
+
+    const pages = Array.from({ length: last - 1 }, (_, index) => index + 2)
+    const results: T[][] = new Array(pages.length)
+    let next = 0
+    const worker = async (): Promise<void> => {
+      while (next < pages.length) {
+        const index = next++
+        results[index] = (await this.fetchPage(query, field, map, pages[index])).docs
+      }
     }
-    return out
+    await Promise.all(
+      Array.from({ length: Math.min(PAGE_CONCURRENCY, pages.length) }, () => worker())
+    )
+    return [...first.docs, ...results.flat()]
   }
 
   private async build(): Promise<void> {
@@ -207,13 +254,7 @@ export class Catalog implements CatalogLike {
   /** Episodes of a series in watching order. */
   seriesVideos(seriesId: string): IndexedVideo[] {
     if (!seriesId) return []
-    return (this.snapshot?.videos ?? [])
-      .filter((v) => v.series?.id === seriesId)
-      .sort(
-        (a, b) =>
-          (a.episode ?? 0) - (b.episode ?? 0) ||
-          (Date.parse(a.released ?? '') || 0) - (Date.parse(b.released ?? '') || 0)
-      )
+    return this.videosBySeries.get(seriesId) ?? []
   }
 
   localSearch(

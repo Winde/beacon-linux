@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchCaptionFile, fetchMasterPlaylist, isMediaUrl, reorderMasterPlaylist } from './hls'
+import {
+  clearPlaylistCache,
+  fetchCaptionFile,
+  fetchMasterPlaylist,
+  isMediaUrl,
+  reorderMasterPlaylist
+} from './hls'
 
 // hls.ts imports Electron's net at module load; these tests only need the pure helpers.
 const net = vi.hoisted(() => ({ fetch: vi.fn() }))
@@ -7,6 +13,7 @@ vi.mock('electron', () => ({ net: { fetch: net.fetch } }))
 
 beforeEach(() => {
   net.fetch.mockReset()
+  clearPlaylistCache()
 })
 
 const BASE = 'https://cdn.jwplayer.com/v2/media/abc123/master.m3u8'
@@ -166,6 +173,15 @@ describe('fetchMasterPlaylist', () => {
     net.fetch.mockResolvedValue({ ok: false, status: 404 })
 
     await expect(fetchMasterPlaylist(BASE)).rejects.toThrow('HTTP 404')
+  })
+
+  it('serves a replay from the cache', async () => {
+    net.fetch.mockResolvedValue({ ok: true, status: 200, text: async () => master })
+
+    await fetchMasterPlaylist(BASE)
+    await fetchMasterPlaylist(BASE)
+
+    expect(net.fetch).toHaveBeenCalledTimes(1)
   })
 })
 

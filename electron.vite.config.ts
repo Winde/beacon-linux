@@ -22,6 +22,9 @@ export default defineConfig({
         '@shared': resolve('src/shared')
       }
     },
-    plugins: [react()]
+    plugins: [react()],
+    // Vite leaves the renderer unminified here, which ships ~1.8 MB of JS.
+    // The app is read from disk on every launch, so minify it.
+    build: { minify: true }
   }
 })
