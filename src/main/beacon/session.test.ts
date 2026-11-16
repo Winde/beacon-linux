@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const electron = vi.hoisted(() => ({
   userData: '',
   encryption: true,
+  backend: 'gnome_libsecret',
   encrypted: [] as string[]
 }))
 
@@ -14,6 +15,7 @@ vi.mock('electron', () => ({
   app: { getPath: () => electron.userData },
   safeStorage: {
     isAsyncEncryptionAvailable: async () => electron.encryption,
+    getSelectedStorageBackend: () => electron.backend,
     encryptStringAsync: async (text: string) => {
       electron.encrypted.push(text)
       return Buffer.from(`enc:${text}`, 'utf8')
@@ -24,7 +26,13 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { loadSession, saveSession, type Session } from './session'
+import {
+  backendCountsAsSecure,
+  credentialStorage,
+  loadSession,
+  saveSession,
+  type Session
+} from './session'
 
 const session: Session = {
   email: 'member@example.com',
@@ -40,6 +48,7 @@ function sessionFile(): string {
 beforeEach(() => {
   electron.userData = mkdtempSync(join(tmpdir(), 'beacon-session-'))
   electron.encryption = true
+  electron.backend = 'gnome_libsecret'
   electron.encrypted = []
 })
 
@@ -51,13 +60,31 @@ describe('saveSession and loadSession', () => {
     await expect(loadSession()).resolves.toEqual(session)
   })
 
-  it('falls back to a plain private file without a keyring', async () => {
+  it('writes nothing when only plain storage is available', async () => {
     electron.encryption = false
 
     await saveSession(session)
 
-    expect(JSON.parse(readFileSync(sessionFile(), 'utf8'))).toEqual(session)
-    await expect(loadSession()).resolves.toEqual(session)
+    expect(existsSync(sessionFile())).toBe(false)
+    await expect(loadSession()).resolves.toBeNull()
+  })
+
+  it('does not restore a plaintext session left by an older version', async () => {
+    electron.encryption = false
+    writeFileSync(sessionFile(), JSON.stringify(session))
+
+    await expect(loadSession()).resolves.toBeNull()
+
+    expect(existsSync(sessionFile())).toBe(false)
+  })
+
+  it('leaves a file it cannot identify alone when the keyring is unavailable', async () => {
+    electron.encryption = false
+    writeFileSync(sessionFile(), 'v10 ciphertext, not json')
+
+    await expect(loadSession()).resolves.toBeNull()
+
+    expect(existsSync(sessionFile())).toBe(true)
   })
 
   it('removes the file on sign out', async () => {
@@ -99,5 +126,34 @@ describe('saveSession and loadSession', () => {
 
     await expect(saveSession(session)).resolves.toBeUndefined()
     await expect(loadSession()).resolves.toBeNull()
+  })
+})
+
+describe('credentialStorage', () => {
+  it('does not count basic_text as a keyring', () => {
+    expect(backendCountsAsSecure('basic_text')).toBe(false)
+    expect(backendCountsAsSecure('unknown')).toBe(false)
+    expect(backendCountsAsSecure('gnome_libsecret')).toBe(true)
+    expect(backendCountsAsSecure('kwallet6')).toBe(true)
+  })
+
+  it('reports the keyring when Electron has encryption', async () => {
+    await expect(credentialStorage('win32')).resolves.toBe('keyring')
+  })
+
+  it('reports the keyring for a real Linux backend', async () => {
+    await expect(credentialStorage('linux')).resolves.toBe('keyring')
+  })
+
+  it('reports plaintext when Linux only offers basic_text', async () => {
+    electron.backend = 'basic_text'
+
+    await expect(credentialStorage('linux')).resolves.toBe('plaintext')
+  })
+
+  it('reports unavailable without encryption', async () => {
+    electron.encryption = false
+
+    await expect(credentialStorage('linux')).resolves.toBe('unavailable')
   })
 })

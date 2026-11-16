@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain } from 'electron'
 import type { NextEpisodeRequest, PlaybackData, ProgressReport } from '@shared/types'
 import { BeaconClient } from './beacon/client'
 import { Catalog } from './beacon/catalog'
+import { credentialStorage } from './beacon/session'
 import { fetchCaptionFile, fetchMasterPlaylist } from './hls'
 
 export const client = new BeaconClient()
@@ -14,6 +15,7 @@ export function registerIpc(): void {
     client.signIn(email, password)
   )
   ipcMain.handle('auth:signOut', () => client.signOut())
+  ipcMain.handle('auth:storage', () => credentialStorage())
 
   ipcMain.handle('catalog:home', () => client.home())
   ipcMain.handle('catalog:collection', (_event, slug: string) => client.collection(slug))

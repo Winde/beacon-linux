@@ -11,6 +11,13 @@ export interface AuthStatus {
   user: User | null
 }
 
+/**
+ * Where the main process can keep a session. `plaintext` means Linux selected
+ * safeStorage's `basic_text` backend, which only obfuscates; both it and
+ * `unavailable` mean nothing is written and the member signs in each launch.
+ */
+export type CredentialStorage = 'keyring' | 'plaintext' | 'unavailable'
+
 export interface Card {
   kind: 'video' | 'series'
   slug: string
@@ -139,6 +146,7 @@ export interface BeaconApi {
     status(): Promise<AuthStatus>
     signIn(email: string, password: string): Promise<AuthStatus>
     signOut(): Promise<void>
+    storage(): Promise<CredentialStorage>
   }
   catalog: {
     home(): Promise<HomeData>

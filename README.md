@@ -42,7 +42,11 @@ HLS from JW Player — no Widevine. That makes a native client straightforward. 
 
 API calls live in the main process for two reasons: Beacon's CMS only accepts
 `beacon.tv` as a browser origin (so the renderer would be blocked by CORS), and
-tokens are encrypted at rest with the OS keyring via Electron's `safeStorage`.
+tokens stay out of the renderer. The session is encrypted at rest with the OS
+keyring via Electron's `safeStorage`. Where no real keyring is reachable (some
+SteamOS setups, a Flatpak without secret-service access) nothing is written —
+the tokens live in memory for that run and you sign in again next launch. The
+sign-in screen says so when that is the case.
 
 ## Run it
 

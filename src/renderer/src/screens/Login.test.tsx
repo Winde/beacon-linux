@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { CredentialStorage } from '@shared/types'
 import { focusFirst } from '../nav/focus'
 import { Login } from './Login'
 
@@ -16,9 +17,11 @@ beforeEach(() => {
   localStorage.clear()
 })
 
-function stubSignIn(): ReturnType<typeof vi.fn> {
+function stubSignIn(storage: CredentialStorage = 'keyring'): ReturnType<typeof vi.fn> {
   const signIn = vi.fn(() => Promise.resolve({ signedIn: true, user: null }))
-  vi.stubGlobal('beacon', { auth: { signIn } })
+  vi.stubGlobal('beacon', {
+    auth: { signIn, storage: vi.fn(() => Promise.resolve(storage)) }
+  })
   return signIn
 }
 
@@ -113,5 +116,19 @@ describe('Login', () => {
     fireEvent.click(screen.getByTestId('skip'))
 
     expect(onSkip).toHaveBeenCalled()
+  })
+
+  it('warns when the sign-in cannot be kept securely', async () => {
+    stubSignIn('plaintext')
+    render(<Login onSignedIn={vi.fn()} onSkip={vi.fn()} />)
+
+    expect(await screen.findByText(/can't save your sign-in/)).toBeDefined()
+  })
+
+  it('warns when no keyring is available at all', async () => {
+    stubSignIn('unavailable')
+    render(<Login onSignedIn={vi.fn()} onSkip={vi.fn()} />)
+
+    expect(await screen.findByText(/can't save your sign-in/)).toBeDefined()
   })
 })

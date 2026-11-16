@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { CredentialStorage } from '@shared/types'
 import { focusFirst } from '../nav/focus'
 import { cleanError } from '../lib/errors'
 import { ErrorNote } from '../components/ui'
@@ -13,9 +14,14 @@ export function Login({ onSignedIn, onSkip }: LoginProps): React.JSX.Element {
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [storage, setStorage] = useState<CredentialStorage | null>(null)
 
   useEffect(() => {
     focusFirst('[data-focus]')
+    void window.beacon.auth
+      .storage()
+      .then(setStorage)
+      .catch(() => setStorage('unavailable'))
   }, [])
 
   const submit = async (event: React.FormEvent): Promise<void> => {
@@ -43,6 +49,13 @@ export function Login({ onSignedIn, onSkip }: LoginProps): React.JSX.Element {
         <p className="login__lede">
           Use your Beacon member account. Free videos work without signing in.
         </p>
+
+        {storage && storage !== 'keyring' ? (
+          <p className="login__warning" role="status">
+            No secure keyring is available on this system, so Beacon can't save your sign-in.
+            You'll need to enter your password again after closing the app.
+          </p>
+        ) : null}
 
         <form onSubmit={submit} className="login__form">
           <label className="field">
@@ -102,7 +115,10 @@ export function Login({ onSignedIn, onSkip }: LoginProps): React.JSX.Element {
 
         <p className="login__hint">
           On a Steam Deck, press <kbd>STEAM</kbd> + <kbd>X</kbd> to bring up the on-screen
-          keyboard. Your password is never stored — only the sign-in tokens.
+          keyboard.{' '}
+          {storage && storage !== 'keyring'
+            ? 'Nothing is kept between launches; your password is never stored.'
+            : 'Your password is never stored — only the sign-in tokens.'}
         </p>
       </div>
     </div>

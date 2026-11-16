@@ -5,7 +5,8 @@ const api: BeaconApi = {
   auth: {
     status: () => ipcRenderer.invoke('auth:status'),
     signIn: (email: string, password: string) => ipcRenderer.invoke('auth:signIn', email, password),
-    signOut: () => ipcRenderer.invoke('auth:signOut')
+    signOut: () => ipcRenderer.invoke('auth:signOut'),
+    storage: () => ipcRenderer.invoke('auth:storage')
   },
   catalog: {
     home: () => ipcRenderer.invoke('catalog:home'),

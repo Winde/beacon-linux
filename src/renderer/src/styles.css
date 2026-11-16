@@ -728,6 +728,18 @@ kbd {
   line-height: 1.6;
 }
 
+/* A session that cannot be kept: say so before the member types a password. */
+.login__warning {
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(240, 184, 102, 0.12);
+  border: 1px solid rgba(240, 184, 102, 0.32);
+  color: #f2d3a0;
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
 /* ---------- search ---------- */
 
 .screen--search {
