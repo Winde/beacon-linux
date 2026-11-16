@@ -24,7 +24,7 @@ export function Row({ title, items, onSelect, onFocus }: RowProps): React.JSX.El
 
   return (
     <section className="row">
-      <h2 className="row__title">{title}</h2>
+      {title ? <h2 className="row__title">{title}</h2> : null}
       <div className="row__track">
         {items.map((card) => (
           <Tile

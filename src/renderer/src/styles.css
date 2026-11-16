@@ -193,11 +193,12 @@ kbd {
 /*
  * Normally the pinned header guillotines the rows scrolling under it, which
  * reads as the artwork being pasted over the list. Once the list moves, the
- * top of the scroller fades out so rows dissolve into the header instead.
+ * very top of the scroller fades out so rows dissolve into the header instead.
+ * Kept short: a deeper fade eats the top of a focused tile.
  */
 .screen__scroll.is-scrolled {
-  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 80px);
-  mask-image: linear-gradient(180deg, transparent 0, #000 80px);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 34px);
+  mask-image: linear-gradient(180deg, transparent 0, #000 34px);
 }
 
 .screen__scroll::-webkit-scrollbar {
@@ -310,7 +311,9 @@ kbd {
 /* ---------- rows ---------- */
 
 .rows {
-  padding: 8px 0 0;
+  /* Clear of the pinned header: a shelf with no heading has no title margin to
+   * hold its artwork away from the hero above it. */
+  padding: 14px 0 0;
 }
 
 .row {
@@ -509,6 +512,9 @@ kbd {
   display: flex;
   align-items: flex-end;
   margin-bottom: 28px;
+  /* Same guard as .hero: the art and shade are absolutely positioned, and a
+   * page head must never paint over the chips or grid below it. */
+  overflow: hidden;
 }
 
 .page-head--tall {
@@ -580,9 +586,14 @@ kbd {
 .tabs {
   display: flex;
   gap: 10px;
-  padding: 0 var(--gutter) 18px;
+  /* Top padding is room for the focus ring: the row scrolls horizontally, so
+   * its vertical overflow is clipped at the padding edge. */
+  padding: 10px var(--gutter) 18px;
   overflow-x: auto;
   scrollbar-width: none;
+  /* Above the page head's art, whatever happens to its stacking. */
+  position: relative;
+  z-index: 1;
 }
 
 .tabs::-webkit-scrollbar {
@@ -610,8 +621,10 @@ kbd {
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 22px 18px;
-  padding: 0 var(--gutter) 40px;
+  gap: 22px;
+  /* Top padding is room for the focus swell: without it the first row's tiles
+   * grow past the scroller's top edge and lose their top few pixels. */
+  padding: 16px var(--gutter) 40px;
 }
 
 .grid .tile {
