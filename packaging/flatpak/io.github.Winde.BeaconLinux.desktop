@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Beacon
+Exec=startbeacon %U
+Terminal=false
+Type=Application
+Icon=io.github.Winde.BeaconLinux
+StartupWMClass=Beacon
+Categories=AudioVideo;Video;
+Keywords=critical-role;streaming;tv;
+Comment=Unofficial Critical Role streaming client
+X-KDE-FormFactors=mediacenter,desktop,handset,tablet

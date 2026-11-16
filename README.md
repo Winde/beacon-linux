@@ -79,6 +79,13 @@ npm run build:win      # Windows installer
 npm run build:linux    # AppImage + .deb
 ```
 
+### Releases
+
+Pushing a tag that starts with `v` builds every artifact and publishes a GitHub
+Release: AppImage, `.deb` and `.tar.gz` for Linux, an installer for Windows, plus
+checksums. If any build fails, no release is created. See
+[docs/releasing.md](docs/releasing.md) for versioning rules and the checklist.
+
 ### Dev helpers
 
 `BEACON_OPEN=<slug>` opens a video or series directly. `BEACON_SHOT=<path>` renders
