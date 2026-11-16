@@ -3,11 +3,24 @@ import { backdropUrl, useBackdrop } from '../lib/images'
 
 interface HeroProps {
   card: Card
+  /** Open the card's own page (series/collection) or its details (video). */
+  onOpen: (card: Card) => void
   onPlay: (card: Card) => void
 }
 
-export function Hero({ card, onPlay }: HeroProps): React.JSX.Element {
-  const resuming = (card.progress ?? 0) > 0.01
+/**
+ * The home hero follows focus, so it can preview a video or a category
+ * (series/collection). A category is a link to a deeper screen, not something
+ * that plays, so it gets a Browse button instead of Play; a locked video opens
+ * its details, where the membership requirement is explained.
+ */
+export function Hero({ card, onOpen, onPlay }: HeroProps): React.JSX.Element {
+  const isVideo = card.kind === 'video'
+  const playable = isVideo && !card.locked
+  const resuming = playable && (card.progress ?? 0) > 0.01
+  const sub = isVideo
+    ? [card.subtitle, card.minutes ? `${card.minutes} min` : null]
+    : [card.count ? `${card.count} videos` : null]
   // Cards carry thumbnail URLs; the hero needs its own size. The card's own
   // thumbnail is already in the browser cache from its tile, so it stands in —
   // blurred — while the full-size backdrop decodes.
@@ -39,18 +52,16 @@ export function Hero({ card, onPlay }: HeroProps): React.JSX.Element {
       <div className="hero__body">
         <p className="hero__eyebrow">Featured</p>
         <h1 className="hero__title">{card.title}</h1>
-        <p className="hero__sub">
-          {[card.subtitle, card.minutes ? `${card.minutes} min` : null].filter(Boolean).join(' · ')}
-        </p>
+        <p className="hero__sub">{sub.filter(Boolean).join(' · ')}</p>
         <button
           type="button"
           className="button button--primary"
           data-focus
-          data-testid="hero-play"
+          data-testid={playable ? 'hero-play' : isVideo ? 'hero-details' : 'hero-browse'}
           tabIndex={-1}
-          onClick={() => onPlay(card)}
+          onClick={() => (playable ? onPlay(card) : onOpen(card))}
         >
-          {resuming ? 'Resume' : 'Play'}
+          {!isVideo ? 'Browse' : card.locked ? 'Details' : resuming ? 'Resume' : 'Play'}
         </button>
       </div>
     </section>

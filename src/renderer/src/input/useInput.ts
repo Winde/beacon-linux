@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import type { Direction } from '../nav/focus'
 
 export type Action =
@@ -84,29 +84,6 @@ const KEY_ACTIONS: Record<string, Action> = {
   '/': 'search'
 }
 
-// ---------- how many pads are plugged in (for button prompts) ----------
-
-let connectedPads = 0
-const padListeners = new Set<(count: number) => void>()
-
-function setConnectedPads(count: number): void {
-  if (count === connectedPads) return
-  connectedPads = count
-  for (const listener of padListeners) listener(count)
-}
-
-export function useGamepadCount(): number {
-  const [count, setCount] = useState(connectedPads)
-  useEffect(() => {
-    padListeners.add(setCount)
-    setCount(connectedPads)
-    return () => {
-      padListeners.delete(setCount)
-    }
-  }, [])
-  return count
-}
-
 /**
  * One place for every input source. Keyboard and gamepad both emit the same
  * actions, so screens never care which one the player is holding.
@@ -146,7 +123,6 @@ export function useInput(handler: (action: Action) => void): void {
 
     const loop = (): void => {
       const pads = navigator.getGamepads?.() ?? []
-      setConnectedPads(pads.filter((pad) => pad?.connected).length)
 
       if (!focused) {
         // Drop held state so nothing is stuck when focus comes back.

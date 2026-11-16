@@ -10,9 +10,10 @@ import { ErrorNote, Spinner } from '../components/ui'
 
 interface HomeProps {
   onOpen: (card: Card) => void
+  onPlay: (card: Card) => void
 }
 
-export function Home({ onOpen }: HomeProps): React.JSX.Element | null {
+export function Home({ onOpen, onPlay }: HomeProps): React.JSX.Element | null {
   const { data, error, loading } = useAsync(() => window.beacon.catalog.home(), [])
   // The hero previews whatever the player is pointing at, so the backdrop
   // changes as focus moves rather than staying on the first featured item.
@@ -45,7 +46,7 @@ export function Home({ onOpen }: HomeProps): React.JSX.Element | null {
 
   return (
     <div className="screen screen--split">
-      {featured ? <Hero card={featured} onPlay={onOpen} /> : null}
+      {featured ? <Hero card={featured} onOpen={onOpen} onPlay={onPlay} /> : null}
       <ScreenScroll>
         <div className="rows">
           {data.rows.map((row) => (

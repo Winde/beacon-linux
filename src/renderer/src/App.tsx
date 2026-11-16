@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Card } from '@shared/types'
-import { useGamepadCount, useInput } from './input/useInput'
+import { useInput } from './input/useInput'
 import { focusFirst, getFocused, move, setFocused } from './nav/focus'
 import { Home } from './screens/Home'
 import { Login } from './screens/Login'
@@ -28,7 +28,6 @@ export default function App(): React.JSX.Element {
   const playerRef = useRef<PlayerHandle>(null)
   const lastFocus = useRef<HTMLElement | null>(null)
   const nextId = useRef(0)
-  const pads = useGamepadCount()
 
   const push = useCallback((route: Route) => {
     setStack((current) => [...current, { id: nextId.current++, route }])
@@ -54,6 +53,8 @@ export default function App(): React.JSX.Element {
     lastFocus.current = getFocused()
     setPlayer({ slug, startAt })
   }, [])
+
+  const playCard = useCallback((card: Card) => play(card.slug), [play])
 
   const closePlayer = useCallback(() => {
     setPlayer(null)
@@ -146,7 +147,7 @@ export default function App(): React.JSX.Element {
           />
         )
       case 'home':
-        return <Home onOpen={openCard} />
+        return <Home onOpen={openCard} onPlay={playCard} />
       case 'collection':
         return <Collection slug={route.slug} onOpen={openCard} />
       case 'content':
@@ -169,37 +170,6 @@ export default function App(): React.JSX.Element {
           {renderRoute(entry.route)}
         </div>
       ))}
-
-      {current.route.name === 'home' ? (
-        <div className="hintbar">
-          <span className="hintbar__tag">Unofficial client</span>
-          {pads > 0 ? (
-            <>
-              <span>
-                <kbd>A</kbd> select
-              </span>
-              <span>
-                <kbd>B</kbd> back
-              </span>
-              <span>
-                <kbd>X</kbd> search
-              </span>
-            </>
-          ) : (
-            <>
-              <span>
-                <kbd>Enter</kbd> select
-              </span>
-              <span>
-                <kbd>Esc</kbd> back
-              </span>
-              <span>
-                <kbd>X</kbd> search
-              </span>
-            </>
-          )}
-        </div>
-      ) : null}
 
       {player ? (
         <Player

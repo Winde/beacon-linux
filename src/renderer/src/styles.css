@@ -782,35 +782,6 @@ kbd {
   color: var(--muted);
 }
 
-.hintbar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  gap: 22px;
-  padding: 14px var(--gutter);
-  font-size: 0.8rem;
-  color: var(--muted);
-  background: linear-gradient(0deg, rgba(8, 9, 12, 0.95), transparent);
-  pointer-events: none;
-}
-
-.hintbar kbd {
-  margin-right: 5px;
-}
-
-.hintbar__tag {
-  align-self: center;
-  padding-right: 18px;
-  border-right: 1px solid var(--line);
-  color: var(--accent);
-  opacity: 0.8;
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
