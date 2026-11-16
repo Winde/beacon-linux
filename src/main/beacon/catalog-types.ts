@@ -17,6 +17,8 @@ export interface IndexedVideo {
   tier: string | null
   level: number
   image: string | null
+  /** 2560-wide rendition, for full-bleed backdrops */
+  image2x: string | null
   released: string | null
   episode: number | null
   series: IndexedSeries | null
@@ -30,6 +32,8 @@ export interface IndexedCollection {
   itemCount: number | null
   released: string | null
   image: string | null
+  /** 2560-wide rendition, for full-bleed backdrops */
+  image2x: string | null
   portrait: string | null
 }
 

@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import type { Card } from '@shared/types'
 import { useAsync } from '../lib/useAsync'
 import { focusFirst } from '../nav/focus'
+import { backdropUrl } from '../lib/images'
 import { Tile } from '../components/Tile'
+import { ScreenScroll } from '../components/ScreenScroll'
 import { ErrorNote, Spinner } from '../components/ui'
 
 interface CollectionProps {
@@ -40,9 +42,9 @@ export function Collection({ slug, onOpen }: CollectionProps): React.JSX.Element
   const season = data.seasons[Math.min(seasonIndex, data.seasons.length - 1)]
 
   return (
-    <div className="screen">
+    <div className="screen screen--split">
       <header className="page-head">
-        {data.image ? <img className="page-head__bg" src={data.image} alt="" /> : null}
+        {data.image ? <img className="page-head__bg" src={backdropUrl(data.image, data.image2x) ?? undefined} alt="" /> : null}
         <div className="page-head__shade" />
         <div className="page-head__body">
           <h1 className="page-head__title">{data.title}</h1>
@@ -71,11 +73,13 @@ export function Collection({ slug, onOpen }: CollectionProps): React.JSX.Element
         </div>
       ) : null}
 
-      <div className="grid">
-        {season?.items.map((card) => (
-          <Tile key={card.slug} card={card} onSelect={onOpen} />
-        ))}
-      </div>
+      <ScreenScroll>
+        <div className="grid">
+          {season?.items.map((card) => (
+            <Tile key={card.slug} card={card} onSelect={onOpen} />
+          ))}
+        </div>
+      </ScreenScroll>
     </div>
   )
 }

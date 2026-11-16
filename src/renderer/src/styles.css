@@ -78,6 +78,51 @@ kbd {
   display: none;
 }
 
+/*
+ * Split screens pin their header (hero art, title, Play) and scroll only the
+ * rows beneath, so focus can never drag the backdrop or the Play button off
+ * screen.
+ */
+.screen--split {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+/* The header keeps its designed height; without this it is squeezed by the
+ * scroller whenever a screen has more rows. */
+.screen--split > .hero,
+.screen--split > .page-head,
+.screen--split > .tabs {
+  flex: 0 0 auto;
+}
+
+.screen__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 96px;
+  scrollbar-width: none;
+  /* Keep focus from parking a tile in the fade below the header. */
+  scroll-padding-top: 80px;
+}
+
+/*
+ * Normally the pinned header guillotines the rows scrolling under it, which
+ * reads as the artwork being pasted over the list. Once the list moves, the
+ * top of the scroller fades out so rows dissolve into the header instead.
+ */
+.screen__scroll.is-scrolled {
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 80px);
+  mask-image: linear-gradient(180deg, transparent 0, #000 80px);
+}
+
+.screen__scroll::-webkit-scrollbar {
+  display: none;
+}
+
 .screen--center {
   display: grid;
   place-items: center;
@@ -98,10 +143,15 @@ kbd {
 
 .hero {
   position: relative;
-  height: 54vh;
-  min-height: 380px;
+  /* Sized for a 1080p TV: the backdrop stays cinematic but the pinned header
+   * leaves room for two-plus shelves below it. */
+  height: clamp(320px, 42vh, 480px);
+  min-height: 320px;
   display: flex;
   align-items: flex-end;
+  /* The blurred stand-in is scaled past the hero box; without clipping its
+   * glow and blur spill over the first row of the shelf below. */
+  overflow: hidden;
 }
 
 .hero__bg {
@@ -110,6 +160,30 @@ kbd {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/*
+ * The stand-in is the same card's 480-wide thumbnail, already cached from its
+ * tile, blurred and scaled so a missing backdrop still looks intentional.
+ * The full-size art fades in over the top as soon as it decodes.
+ */
+.hero__bg--stand-in {
+  opacity: 0.6;
+  filter: blur(24px) saturate(0.9);
+  transform: scale(1.06);
+}
+
+.hero__bg--fresh {
+  animation: hero-backdrop-in 220ms ease both;
+}
+
+@keyframes hero-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .hero__shade {
@@ -178,6 +252,9 @@ kbd {
   overflow-y: hidden;
   scrollbar-width: none;
   scroll-snap-type: x proximity;
+  /* Without this the first tile snaps past the gutter and sits flush to the
+   * window edge on narrow screens. */
+  scroll-padding-inline: var(--gutter);
 }
 
 .row__track::-webkit-scrollbar {

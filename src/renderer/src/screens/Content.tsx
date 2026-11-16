@@ -2,7 +2,9 @@ import { useEffect } from 'react'
 import type { Card } from '@shared/types'
 import { useAsync } from '../lib/useAsync'
 import { focusFirst } from '../nav/focus'
+import { backdropUrl } from '../lib/images'
 import { Row } from '../components/Row'
+import { ScreenScroll } from '../components/ScreenScroll'
 import { ErrorNote, Spinner } from '../components/ui'
 
 interface ContentProps {
@@ -39,9 +41,9 @@ export function Content({ slug, onOpen, onPlay }: ContentProps): React.JSX.Eleme
   const resuming = data.resumeAt > 0
 
   return (
-    <div className="screen">
+    <div className="screen screen--split">
       <header className="page-head page-head--tall">
-        {data.image ? <img className="page-head__bg" src={data.image} alt="" /> : null}
+        {data.image ? <img className="page-head__bg" src={backdropUrl(data.image, data.image2x) ?? undefined} alt="" /> : null}
         <div className="page-head__shade" />
         <div className="page-head__body">
           {data.series ? <p className="page-head__eyebrow">{data.series.title}</p> : null}
@@ -87,11 +89,13 @@ export function Content({ slug, onOpen, onPlay }: ContentProps): React.JSX.Eleme
         </div>
       </header>
 
-      <div className="rows">
-        {data.rows.map((row) => (
-          <Row key={row.title} title={row.title} items={row.items} onSelect={onOpen} />
-        ))}
-      </div>
+      <ScreenScroll>
+        <div className="rows">
+          {data.rows.map((row) => (
+            <Row key={row.title} title={row.title} items={row.items} onSelect={onOpen} />
+          ))}
+        </div>
+      </ScreenScroll>
     </div>
   )
 }

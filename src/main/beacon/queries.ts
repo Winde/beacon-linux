@@ -8,7 +8,7 @@ const CARD = `
     id title duration slug contentType episodeNumber releaseDate
     contentTier { name planLevel }
     primaryCollection { id name slug isSeries }
-    thumbnail { sizes { landscape { url } } }
+    thumbnail { sizes { landscape { url } landscape2x { url } } }
   }
 `
 
@@ -71,7 +71,7 @@ export const COLLECTIONS = `
     collectionSearch(sort: "-releaseDate", page: $page, limit: $limit) {
       totalPages docs {
         id name slug isSeries itemCount releaseDate
-        thumbnail { sizes { landscape { url } portrait { url } } }
+        thumbnail { sizes { landscape { url } landscape2x { url } portrait { url } } }
       }
     }
   }

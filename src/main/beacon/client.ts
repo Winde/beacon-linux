@@ -40,6 +40,7 @@ export interface CatalogLike {
 interface CmsThumb {
   sizes?: {
     landscape?: { url?: string } | null
+    landscape2x?: { url?: string } | null
     portrait?: { url?: string } | null
   } | null
 }
@@ -291,6 +292,7 @@ export class BeaconClient {
       title: c.title,
       subtitle: c.primaryCollection?.name ?? '',
       image: img(c.thumbnail?.sizes?.landscape?.url, 480),
+      image2x: img(c.thumbnail?.sizes?.landscape2x?.url, 480),
       minutes: minutes(c.duration),
       locked: (c.contentTier?.planLevel ?? 0) > level,
       progress
@@ -304,6 +306,7 @@ export class BeaconClient {
       title: v.title,
       subtitle: v.series?.name ?? '',
       image: img(v.image, 480),
+      image2x: img(v.image2x, 480),
       minutes: minutes(v.duration),
       locked: v.level > level,
       progress
@@ -316,6 +319,7 @@ export class BeaconClient {
       slug: c.slug,
       title: c.name,
       image: img(c.thumbnail?.sizes?.landscape?.url ?? c.thumbnail?.sizes?.portrait?.url, 480),
+      image2x: img(c.thumbnail?.sizes?.landscape2x?.url, 480),
       count: c.itemCount ?? null
     }
   }
@@ -397,7 +401,8 @@ export class BeaconClient {
     const heroSource = recentDocs.filter((c) => (c.duration ?? 0) >= 20 * 60 * 1000)
     const hero = (heroSource.length ? heroSource : recentDocs).slice(0, 5).map((c) => ({
       ...this.videoCard(c, level),
-      image: img(c.thumbnail?.sizes?.landscape?.url, 1280)
+      image: img(c.thumbnail?.sizes?.landscape?.url, 1280),
+      image2x: img(c.thumbnail?.sizes?.landscape2x?.url, 1280)
     }))
 
     return { hero, rows: rows.filter((r) => r.items.length) }
@@ -434,6 +439,7 @@ export class BeaconClient {
           slug,
           title: known.name,
           image: img(known.image ?? known.portrait, 1280),
+          image2x: img(known.image2x, 1280),
           isSeries: true,
           seasons: [{ title: 'Episodes', items: await toCards(docsOf(first.fetchSeries)) }]
         }
@@ -453,6 +459,7 @@ export class BeaconClient {
         slug,
         title: known.name,
         image: img(known.image ?? known.portrait, 1280),
+        image2x: img(known.image2x, 1280),
         isSeries: true,
         seasons: grouped.filter((s) => s.items.length)
       }
@@ -475,6 +482,7 @@ export class BeaconClient {
       slug,
       title: known.name,
       image: img(known.image ?? known.portrait, 1280),
+      image2x: img(known.image2x, 1280),
       isSeries: false,
       seasons: [{ title: 'Videos', items: await toCards(docs) }]
     }
@@ -562,6 +570,7 @@ export class BeaconClient {
       title: doc.title,
       description: doc.description ?? '',
       image: img(doc.thumbnail?.sizes?.landscape?.url, 1280),
+      image2x: img(doc.thumbnail?.sizes?.landscape2x?.url, 1280),
       minutes: minutes(doc.duration),
       released: doc.releaseDate ?? null,
       series: series ? { slug: series.slug, title: series.name } : null,
@@ -643,6 +652,7 @@ export class BeaconClient {
         slug: c.slug,
         title: c.name,
         image: img(c.image ?? c.portrait, 480),
+        image2x: img(c.image2x, 480),
         count: c.itemCount
       })),
       videos: videos.slice(0, 48)

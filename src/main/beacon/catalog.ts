@@ -55,6 +55,7 @@ function rawVideo(c: Record<string, any>): IndexedVideo {
     tier: c.contentTier?.name ?? null,
     level: c.contentTier?.planLevel ?? 0,
     image: c.thumbnail?.sizes?.landscape?.url ?? null,
+    image2x: c.thumbnail?.sizes?.landscape2x?.url ?? null,
     released: c.releaseDate ?? null,
     episode: c.episodeNumber ?? null,
     series: series
@@ -73,6 +74,7 @@ function rawCollection(c: Record<string, any>): IndexedCollection {
     itemCount: c.itemCount ?? null,
     released: c.releaseDate ?? null,
     image: sizes?.landscape?.url ?? null,
+    image2x: sizes?.landscape2x?.url ?? null,
     portrait: sizes?.portrait?.url ?? null
   }
 }
@@ -158,6 +160,7 @@ export class Catalog implements CatalogLike {
           itemCount: own.length,
           released: own[0].released,
           image: own[0].image,
+          image2x: own[0].image2x,
           portrait: null
         })
       }

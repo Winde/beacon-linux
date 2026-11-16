@@ -17,6 +17,8 @@ export interface Card {
   title: string
   subtitle?: string
   image: string | null
+  /** 2560-wide rendition; use for full-bleed backdrops, fall back to `image` */
+  image2x?: string | null
   /** video only */
   minutes?: number | null
   /** series only */
@@ -46,6 +48,7 @@ export interface CollectionData {
   slug: string
   title: string
   image: string | null
+  image2x: string | null
   isSeries: boolean
   seasons: Season[]
 }
@@ -61,6 +64,7 @@ export interface ContentData {
   title: string
   description: string
   image: string | null
+  image2x: string | null
   minutes: number | null
   released: string | null
   series: { slug: string; title: string } | null
