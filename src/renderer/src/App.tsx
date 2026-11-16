@@ -83,6 +83,14 @@ export default function App(): React.JSX.Element {
     push({ name: 'search' })
   }, [push])
 
+  // Home is a root destination, not another screen on top of the current one:
+  // drop the whole stack so Back from Home exits instead of retracing a trail
+  // the player has already chosen to abandon.
+  const goHome = useCallback(() => {
+    setRailOpen(false)
+    reset({ name: 'home' })
+  }, [reset])
+
   // The rail is only focusable while open, so focus it once it is on screen.
   // Queried directly rather than through focusFirst(): that helper skips
   // elements whose computed visibility is hidden, which is exactly what the
@@ -212,7 +220,12 @@ export default function App(): React.JSX.Element {
 
   return (
     <div className={`app${railOpen ? ' app--rail' : ''}`}>
-      <NavRail open={railOpen} onSearch={openSearch} />
+      <NavRail
+        open={railOpen}
+        showHome={current.route.name !== 'home'}
+        onHome={goHome}
+        onSearch={openSearch}
+      />
       {stack.map((entry, index) => (
         <div
           key={entry.id}
