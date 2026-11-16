@@ -143,6 +143,7 @@ export class BeaconClient {
       const err = new BeaconError(
         body.error_description || body.error || `Sign-in failed (HTTP ${res.status})`
       )
+      err.status = res.status
       err.rejected = res.status === 400 || res.status === 401
       throw err
     }
@@ -194,7 +195,10 @@ export class BeaconClient {
         }
       }
     } catch (err) {
-      if ((err as BeaconError).status === 401) {
+      // A rejected refresh token has already signed the member out, and a 401
+      // from the CMS means the same. Only a transport failure keeps the session.
+      const failure = err as BeaconError
+      if (failure.status === 401 || failure.rejected) {
         await this.signOut()
         return { signedIn: false, user: null }
       }

@@ -207,21 +207,32 @@ describe('auth', () => {
     })
   })
 
-  it('reports a member after the refresh token signs them out', async () => {
-    // Known inconsistency: a rejected refresh clears the session, but the error
-    // carries no status, so status() takes its "network blip" branch and still
-    // answers as if the member is signed in. The next call sees no session.
-    net.fetch.mockImplementation(async () => response({}, 401))
+  it.each([400, 401])(
+    'drops the session when the refresh token is rejected with HTTP %i',
+    async (httpStatus) => {
+      net.fetch.mockImplementation(async (url: string) =>
+        String(url).includes('oauth/token')
+          ? response({ error: 'invalid_grant' }, httpStatus)
+          : response({}, 401)
+      )
+      const client = new BeaconClient()
+
+      await expect(client.status()).resolves.toEqual({ signedIn: false, user: null })
+      expect(saveSession).toHaveBeenCalledWith(null)
+    }
+  )
+
+  it('keeps the session when the token endpoint itself is down', async () => {
+    net.fetch.mockImplementation(async (url: string) =>
+      String(url).includes('oauth/token') ? response({}, 500) : response({}, 401)
+    )
     const client = new BeaconClient()
 
-    const status = await client.status()
-
-    expect(saveSession).toHaveBeenCalledWith(null)
-    expect(status).toEqual({
+    await expect(client.status()).resolves.toEqual({
       signedIn: true,
       user: { name: 'member@example.com', tier: null, active: true }
     })
-    await expect(client.status()).resolves.toEqual({ signedIn: false, user: null })
+    expect(saveSession).not.toHaveBeenCalledWith(null)
   })
 })
 
