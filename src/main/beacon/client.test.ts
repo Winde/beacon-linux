@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as Q from './queries'
 import type { IndexedCollection, IndexedVideo } from './catalog-types'
 import type { CatalogLike } from './client'
@@ -135,6 +135,10 @@ beforeEach(() => {
   net.fetch.mockReset()
 })
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('auth', () => {
   it('signs in with a password grant and reports the account', async () => {
     net.fetch.mockImplementation(async (url: string) => {
@@ -147,10 +151,17 @@ describe('auth', () => {
 
     const status = await client.signIn(' member@example.com ', 'hunter2')
 
-    const authUrl = String(net.fetch.mock.calls[0][0])
-    expect(authUrl).toContain('grant_type=password')
-    expect(authUrl).toContain('username=member%40example.com')
-    expect(authUrl).toContain('password=hunter2')
+    const [authUrl, authInit] = net.fetch.mock.calls[0] as [
+      string,
+      { body?: string; headers?: Record<string, string> }
+    ]
+    expect(authUrl).toBe('https://pocketbeacon.memberful.com/oauth/token')
+    expect(authUrl).not.toContain('hunter2')
+    expect(authInit.headers?.['content-type']).toBe('application/x-www-form-urlencoded')
+    const form = new URLSearchParams(authInit.body)
+    expect(form.get('grant_type')).toBe('password')
+    expect(form.get('username')).toBe('member@example.com')
+    expect(form.get('password')).toBe('hunter2')
     expect(saveSession).toHaveBeenCalledWith(
       expect.objectContaining({
         email: 'member@example.com',
@@ -639,7 +650,9 @@ describe('play', () => {
       captions: [
         { label: 'English', url: 'https://cdn.example/en.vtt' },
         { label: 'Subtitles', url: 'https://cdn.example/fr.vtt' }
-      ]
+      ],
+      episodeNumber: null,
+      collection: null
     })
   })
 
@@ -702,6 +715,82 @@ describe('play', () => {
   })
 })
 
+describe('nextEpisode', () => {
+  function routes(next: Card | null) {
+    return {
+      [Q.ME]: () => MEMBER,
+      [Q.SERIES]: () => ({ fetchSeries: { next } })
+    }
+  }
+
+  const request = {
+    contentId: 'e5',
+    collectionId: 's1',
+    isSeries: true,
+    episodeNumber: 5
+  }
+
+  it('offers the next episode of the series', async () => {
+    routeCms(
+      routes(cmsCard({ id: 'e6', slug: 'c1e6', title: 'Campaign 1 Episode 6', episodeNumber: 6 }))
+    )
+    const client = new BeaconClient()
+
+    await expect(client.nextEpisode(request)).resolves.toEqual({
+      slug: 'c1e6',
+      title: 'Campaign 1 Episode 6',
+      image: 'https://images.example/landscape/format=auto,width=480',
+      minutes: 55
+    })
+  })
+
+  it('asks nothing for a video in a collection folder', async () => {
+    routeCms({})
+    const client = new BeaconClient()
+
+    await expect(
+      client.nextEpisode({ ...request, isSeries: false })
+    ).resolves.toBeNull()
+    expect(net.fetch).not.toHaveBeenCalled()
+  })
+
+  it('refuses an episode the account cannot watch', async () => {
+    routeCms(
+      routes(
+        cmsCard({
+          episodeNumber: 6,
+          contentTier: { name: 'Exandria', planLevel: 3 }
+        })
+      )
+    )
+    const client = new BeaconClient()
+
+    await expect(client.nextEpisode(request)).resolves.toBeNull()
+  })
+
+  it('stops where the numbering restarts', async () => {
+    // The pointer crosses into another miniseries at a season boundary.
+    routeCms(routes(cmsCard({ episodeNumber: 1 })))
+    const client = new BeaconClient()
+
+    await expect(client.nextEpisode(request)).resolves.toBeNull()
+  })
+
+  it('returns null when the pointer has no next item', async () => {
+    routeCms(routes(null))
+    const client = new BeaconClient()
+
+    await expect(client.nextEpisode(request)).resolves.toBeNull()
+  })
+
+  it('returns null when Beacon cannot answer', async () => {
+    routeCms({ [Q.ME]: () => MEMBER })
+    const client = new BeaconClient()
+
+    await expect(client.nextEpisode(request)).resolves.toBeNull()
+  })
+})
+
 describe('trackProgress', () => {
   it('reports the rounded position and percentage', async () => {
     let event: Record<string, any> | null = null
@@ -755,6 +844,23 @@ describe('trackProgress', () => {
 
     expect(event!.videoProgress).toBe(0)
     expect(event!.duration).toBe(0)
+  })
+
+  it('never rounds a started video down to 0%', async () => {
+    let event: Record<string, any> | null = null
+    routeCms({
+      [Q.TRACK]: (variables) => {
+        event = variables.events[0]
+        return { trackView: { success: true } }
+      }
+    })
+    const client = new BeaconClient()
+
+    // 40 seconds into a four-hour episode.
+    await client.trackProgress('e1', 40, 4 * 3600)
+
+    expect(event!.videoProgressSeconds).toBe(40)
+    expect(event!.videoProgress).toBe(1)
   })
 
   it('does nothing when signed out', async () => {
@@ -824,6 +930,14 @@ describe('search', () => {
 })
 
 describe('caching', () => {
+  function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>((done) => {
+      resolve = done
+    })
+    return { promise, resolve }
+  }
+
   function cmsCalls(query: string): number {
     return net.fetch.mock.calls.filter((call) => {
       const body = (call[1] as { body?: string } | undefined)?.body
@@ -891,6 +1005,74 @@ describe('caching', () => {
     await client.home()
 
     expect(cmsCalls(Q.SEARCH)).toBe(1)
+  })
+
+  it('reads Home only after a progress report that was still on its way', async () => {
+    // The player closes and reports as the feed reloads; Beacon would answer
+    // "Continue watching" without the title if the read went first.
+    const report = deferred<unknown>()
+    let started = 0
+    routeCms(
+      homeRoutes({
+        [Q.TRACK]: () => {
+          started += 1
+          return report.promise
+        },
+        [Q.CONTINUE_WATCHING]: () => ({
+          continueWatching: { docs: [{ videoProgress: 4, content: cmsCard() }] }
+        })
+      })
+    )
+    const client = new BeaconClient()
+
+    const reported = client.trackProgress('e1', 120, 3300)
+    const feed = client.home()
+
+    await vi.waitFor(() => expect(started).toBe(1))
+    expect(cmsCalls(Q.CONTINUE_WATCHING)).toBe(0)
+
+    report.resolve({ trackView: { success: true } })
+    await reported
+    const home = await feed
+
+    expect(cmsCalls(Q.CONTINUE_WATCHING)).toBe(1)
+    expect(home.rows[0]).toMatchObject({ title: 'Continue watching' })
+    expect(home.rows[0].items[0].slug).toBe('c1e1')
+  })
+
+  it('reloads Home after the report lands', async () => {
+    let watching: unknown[] = []
+    routeCms(
+      homeRoutes({
+        [Q.TRACK]: (variables) => {
+          watching = [{ videoProgress: 4, content: cmsCard({ id: variables.events[0].content }) }]
+          return { trackView: { success: true } }
+        },
+        [Q.CONTINUE_WATCHING]: () => ({ continueWatching: { docs: watching } })
+      })
+    )
+    const client = new BeaconClient()
+
+    await expect(client.home()).resolves.toMatchObject({ rows: [] })
+
+    await client.trackProgress('e1', 120, 3300)
+    const home = await client.home()
+
+    expect(home.rows[0]).toMatchObject({ title: 'Continue watching' })
+    expect(home.rows[0].items[0]).toMatchObject({ slug: 'c1e1', progress: 0.04 })
+  })
+
+  it('reads Home rather than wait forever on a report that never lands', async () => {
+    vi.useFakeTimers()
+    routeCms(homeRoutes({ [Q.TRACK]: () => new Promise(() => {}) }))
+    const client = new BeaconClient()
+
+    void client.trackProgress('e1', 120, 3300)
+    const feed = client.home()
+
+    await vi.advanceTimersByTimeAsync(6_000)
+
+    await expect(feed).resolves.toMatchObject({ rows: [] })
   })
 
   it('serves an episode page from memory until progress is reported', async () => {
@@ -973,8 +1155,12 @@ describe('gql', () => {
 
     await expect(client.gql<{ ok: boolean }>(Q.ME)).resolves.toEqual({ ok: true })
 
-    const refreshUrl = String(net.fetch.mock.calls[1][0])
-    expect(refreshUrl).toContain('grant_type=refresh_token')
+    const [refreshUrl, refreshInit] = net.fetch.mock.calls[1] as [string, { body?: string }]
+    expect(refreshUrl).toBe('https://pocketbeacon.memberful.com/oauth/token')
+    expect(refreshUrl).not.toContain('refresh-1')
+    const form = new URLSearchParams(refreshInit.body)
+    expect(form.get('grant_type')).toBe('refresh_token')
+    expect(form.get('refresh_token')).toBe('refresh-1')
     expect(saveSession).toHaveBeenCalledWith(
       expect.objectContaining({ accessToken: 'access-2', refreshToken: 'refresh-2' })
     )

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BeaconApi, ProgressReport } from '@shared/types'
+import type { BeaconApi, NextEpisodeRequest, ProgressReport } from '@shared/types'
 
 const api: BeaconApi = {
   auth: {
@@ -17,6 +17,7 @@ const api: BeaconApi = {
   },
   playback: {
     open: (slug: string) => ipcRenderer.invoke('playback:open', slug),
+    next: (request: NextEpisodeRequest) => ipcRenderer.invoke('playback:next', request),
     progress: (report: ProgressReport) => ipcRenderer.invoke('playback:progress', report),
     captions: (url: string) => ipcRenderer.invoke('playback:captions', url)
   },

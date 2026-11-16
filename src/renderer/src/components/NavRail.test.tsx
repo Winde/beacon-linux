@@ -12,6 +12,7 @@ function rail(overrides: Partial<React.ComponentProps<typeof NavRail>> = {}): Re
       showHome
       onHome={vi.fn()}
       onSearch={vi.fn()}
+      onSignOut={vi.fn()}
       {...overrides}
     />
   )
@@ -41,5 +42,20 @@ describe('NavRail', () => {
     fireEvent.click(screen.getByTestId('rail-search'))
 
     expect(onSearch).toHaveBeenCalledOnce()
+  })
+
+  it('offers Sign out to a signed-in member', () => {
+    const onSignOut = vi.fn()
+    render(rail({ onSignOut }))
+
+    fireEvent.click(screen.getByTestId('rail-signout'))
+
+    expect(onSignOut).toHaveBeenCalledOnce()
+  })
+
+  it('hides Sign out from a free-video session', () => {
+    render(rail({ onSignOut: undefined }))
+
+    expect(screen.queryByTestId('rail-signout')).toBeNull()
   })
 })

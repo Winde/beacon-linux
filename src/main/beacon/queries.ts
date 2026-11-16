@@ -39,7 +39,11 @@ export const CONTENT = `
 export const MEDIA = `
   query Media($slug: String!) {
     Contents(where: { slug: { equals: $slug } }, limit: 1, draft: false) {
-      docs { id title duration ${VIDEO} }
+      docs {
+        id title duration episodeNumber
+        primaryCollection { id isSeries }
+        ${VIDEO}
+      }
     }
     currentProgress(slug: $slug) { videoProgress videoProgressSeconds }
   }

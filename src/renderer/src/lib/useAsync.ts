@@ -7,12 +7,29 @@ export interface AsyncState<T> {
   loading: boolean
 }
 
-export function useAsync<T>(load: () => Promise<T>, deps: unknown[]): AsyncState<T> {
+export interface AsyncOptions {
+  /**
+   * Keep the previous value on screen while a reload runs, instead of blanking
+   * the screen to a spinner. Meant for refreshes behind the viewer's back.
+   */
+  keepData?: boolean
+}
+
+export function useAsync<T>(
+  load: () => Promise<T>,
+  deps: unknown[],
+  options: AsyncOptions = {}
+): AsyncState<T> {
+  const { keepData = false } = options
   const [state, setState] = useState<AsyncState<T>>({ data: null, error: null, loading: true })
 
   useEffect(() => {
     let cancelled = false
-    setState({ data: null, error: null, loading: true })
+    setState((previous) =>
+      keepData && previous.data !== null
+        ? { ...previous, error: null }
+        : { data: null, error: null, loading: true }
+    )
     load().then(
       (data) => {
         if (!cancelled) setState({ data, error: null, loading: false })

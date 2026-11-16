@@ -31,6 +31,12 @@ export default function App(): React.JSX.Element {
   const nextId = useRef(0)
   const [railOpen, setRailOpen] = useState(false)
   const railReturn = useRef<HTMLElement | null>(null)
+  /** Whether the rail should offer Sign out; guests have no account to leave. */
+  const [signedIn, setSignedIn] = useState(false)
+  // Bumped when the player closes. What is behind it has just learned about
+  // progress it did not have when its data was built, and screens stay mounted
+  // while the player is open, so nothing else would refresh them.
+  const [progressVersion, setProgressVersion] = useState(0)
 
   const push = useCallback((route: Route) => {
     setStack((current) => [...current, { id: nextId.current++, route }])
@@ -61,9 +67,17 @@ export default function App(): React.JSX.Element {
 
   const closePlayer = useCallback(() => {
     setPlayer(null)
+    setProgressVersion((version) => version + 1)
     const previous = lastFocus.current
     if (previous?.isConnected) setFocused(previous)
     else focusFirst()
+  }, [])
+
+  // Advancing replaces the slug and nothing else: lastFocus still points at the
+  // card the run started from, so Back returns there rather than to an episode
+  // the viewer never picked.
+  const playNext = useCallback((slug: string) => {
+    setPlayer({ slug })
   }, [])
 
   const openRail = useCallback(() => {
@@ -91,6 +105,20 @@ export default function App(): React.JSX.Element {
     reset({ name: 'home' })
   }, [reset])
 
+  // Signing out clears the stored session, the cached rows and the prefilled
+  // address, so a shared Deck does not hand the next person the last account.
+  const signOut = useCallback(async () => {
+    setRailOpen(false)
+    await window.beacon.auth.signOut().catch(() => {})
+    try {
+      window.localStorage.removeItem('beacon.email')
+    } catch {
+      // Storage can be unavailable; the session itself is already gone.
+    }
+    setSignedIn(false)
+    reset({ name: 'login' })
+  }, [reset])
+
   // The rail is only focusable while open, so focus it once it is on screen.
   // Queried directly rather than through focusFirst(): that helper skips
   // elements whose computed visibility is hidden, which is exactly what the
@@ -106,6 +134,7 @@ export default function App(): React.JSX.Element {
     Promise.all([window.beacon.auth.status(), window.beacon.app.initialSlug()])
       .then(([status, slug]) => {
         if (cancelled) return
+        setSignedIn(status.signedIn)
         const home: Route = status.signedIn ? { name: 'home' } : { name: 'login' }
         if (slug) {
           setStack([
@@ -201,16 +230,26 @@ export default function App(): React.JSX.Element {
       case 'login':
         return (
           <Login
-            onSignedIn={() => reset({ name: 'home' })}
+            onSignedIn={() => {
+              setSignedIn(true)
+              reset({ name: 'home' })
+            }}
             onSkip={() => reset({ name: 'home' })}
           />
         )
       case 'home':
-        return <Home onOpen={openCard} onPlay={playCard} />
+        return <Home onOpen={openCard} onPlay={playCard} refreshKey={progressVersion} />
       case 'collection':
         return <Collection slug={route.slug} onOpen={openCard} />
       case 'content':
-        return <Content slug={route.slug} onOpen={openCard} onPlay={play} />
+        return (
+          <Content
+            slug={route.slug}
+            onOpen={openCard}
+            onPlay={play}
+            refreshKey={progressVersion}
+          />
+        )
       case 'search':
         return <Search onOpen={openCard} />
       default:
@@ -225,6 +264,7 @@ export default function App(): React.JSX.Element {
         showHome={current.route.name !== 'home'}
         onHome={goHome}
         onSearch={openSearch}
+        onSignOut={signedIn ? signOut : undefined}
       />
       {stack.map((entry, index) => (
         <div
@@ -243,6 +283,7 @@ export default function App(): React.JSX.Element {
           slug={player.slug}
           startAt={player.startAt}
           onClose={closePlayer}
+          onPlayNext={playNext}
         />
       ) : null}
     </div>

@@ -70,6 +70,7 @@ On a Steam Deck, `STEAM` + `X` opens the on-screen keyboard for the password fie
 | Player controls | D-pad up / down, Y / Start | ↑ / ↓, M |
 | Scrub while paused | ↑ then ← / →, A to jump, A again to play | ↑ then ← / →, Enter to jump, Enter again to play |
 | Choose in a player menu | D-pad + A | Arrows + Enter |
+| Ending card (last 15s) | A plays next, B keeps watching | Enter / Escape |
 | Quit | — | Ctrl+Q |
 | Fullscreen | — | F11 |
 
@@ -123,7 +124,7 @@ second monitor. `BEACON_SHOT_SCRIPT` runs JavaScript before the capture, and
 - [ ] Steam Input profile shipped with the app
 - [ ] Suspend / resume handling
 - [ ] Flatpak packaging
-- [ ] "Next episode" autoplay at the end of an episode
+- [x] "Next episode" autoplay at the end of an episode
 - [ ] Live-event support (Beacon's waiting room)
 
 ## Legal

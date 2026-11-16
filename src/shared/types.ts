@@ -91,6 +91,10 @@ export interface PlaybackData {
   /** seconds */
   resumeAt: number
   captions: CaptionTrack[]
+  /** position in its collection; null when the video has no number */
+  episodeNumber: number | null
+  /** the collection it belongs to; null for videos filed nowhere */
+  collection: { id: string; isSeries: boolean } | null
 }
 
 /** The episode the player offers once the current one is nearly over. */
@@ -100,6 +104,14 @@ export interface NextEpisode {
   image: string | null
   /** series only */
   minutes?: number | null
+}
+
+/** What the player knows about the video that is ending. */
+export interface NextEpisodeRequest {
+  contentId: string
+  collectionId: string
+  isSeries: boolean
+  episodeNumber: number | null
 }
 
 export interface SearchData {
@@ -138,6 +150,7 @@ export interface BeaconApi {
   }
   playback: {
     open(slug: string): Promise<PlaybackData | null>
+    next(request: NextEpisodeRequest): Promise<NextEpisode | null>
     progress(report: ProgressReport): Promise<boolean>
     captions(url: string): Promise<string>
   }

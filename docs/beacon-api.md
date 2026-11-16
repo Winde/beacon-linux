@@ -37,18 +37,21 @@ POST https://pocketbeacon.memberful.com/oauth/token
 ```
 
 `client_id=3Wdgxb5im239JhTBhS7KczZn` — beacon.tv's own public Memberful client.
-Parameters go in the query string; the body is empty (`content-length: 0`).
+Parameters go in the body, `application/x-www-form-urlencoded`. The endpoint
+answers `307` to `members.beacon.tv`, so the body travels with the redirect and
+nothing has to be in the URL: a query string is copied into the `Location`
+header and logged by Cloudflare and both origins.
 
 Password grant:
 
 ```
-?client_id=...&grant_type=password&username=<email>&password=<password>
+client_id=...&grant_type=password&username=<email>&password=<password>
 ```
 
 Refresh grant:
 
 ```
-?client_id=...&grant_type=refresh_token&refresh_token=<token>
+client_id=...&grant_type=refresh_token&refresh_token=<token>
 ```
 
 Response is a standard OAuth token body:

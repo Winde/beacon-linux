@@ -11,7 +11,7 @@ import {
   Pause,
   Play
 } from 'iconoir-react'
-import type { PlaybackData } from '@shared/types'
+import type { NextEpisode, PlaybackData } from '@shared/types'
 import type { Action } from '../input/useInput'
 import { cleanError } from '../lib/errors'
 import { ErrorNote, Spinner } from '../components/ui'
@@ -24,6 +24,8 @@ interface PlayerProps {
   slug: string
   startAt?: number
   onClose: () => void
+  /** Move the player on to the episode the ending one leads into. */
+  onPlayNext: (slug: string) => void
   ref?: React.Ref<PlayerHandle>
 }
 
@@ -61,6 +63,13 @@ const SCRUB_MAX_CEILING = 120
 const REPORT_EVERY = 15000
 const SUBTITLE_KEY = 'beacon.player.subtitles'
 const SPEEDS = [0.75, 1, 1.25, 1.5, 2]
+/**
+ * How long the "up next" card sits over the ending. Fifteen seconds is the
+ * television default Plex landed on; Netflix's five is the aggressive end of
+ * the range and reads as a grab. Long credits are the reason there is a window
+ * at all, and B is this player's "watch the credits".
+ */
+const UPNEXT_WINDOW = 15
 
 const PANEL_TITLES: Record<Panel, string> = {
   subtitles: 'Subtitles',
@@ -90,7 +99,7 @@ function speedLabel(speed: number): string {
   return `${speed}×`
 }
 
-export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.Element {
+export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps): React.JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<HlsPlayer | null>(null)
   const blobRef = useRef<string | null>(null)
@@ -127,6 +136,9 @@ export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.
   const [audioTracks, setAudioTracks] = useState<string[]>([])
   const [audioTrack, setAudioTrack] = useState(0)
   const [speed, setSpeed] = useState(1)
+
+  const [upNext, setUpNext] = useState<NextEpisode | null>(null)
+  const [upNextDismissed, setUpNextDismissed] = useState(false)
 
   // A menu stays open until it is dismissed; the bar itself may fade.
   useEffect(() => {
@@ -261,6 +273,43 @@ export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.
     video.addEventListener('loadedmetadata', start, { once: true })
     return () => video.removeEventListener('loadedmetadata', start)
   }, [data, startAt])
+
+  // Ask for the next episode once the stream is known. One small query runs
+  // alongside playback, so the card is ready long before the ending and a
+  // failure costs nothing: the video simply ends where it ends.
+  useEffect(() => {
+    if (!data?.collection?.isSeries || data.episodeNumber == null) return
+    let cancelled = false
+    window.beacon.playback
+      .next({
+        contentId: data.id,
+        collectionId: data.collection.id,
+        isSeries: data.collection.isSeries,
+        episodeNumber: data.episodeNumber
+      })
+      .then((episode) => {
+        if (!cancelled) setUpNext(episode)
+      })
+      .catch(() => {
+        // Nothing to offer; the video just ends.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [data])
+
+  // Playback decides when the episode is over, not the countdown: timeupdate
+  // ticks at about 4 Hz and could miss the last frame. The card is a picture of
+  // the remaining time, the element's own `ended` is the trigger.
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const onEnded = (): void => {
+      if (upNext && !upNextDismissed) onPlayNext(upNext.slug)
+    }
+    video.addEventListener('ended', onEnded)
+    return () => video.removeEventListener('ended', onEnded)
+  }, [upNext, upNextDismissed, onPlayNext])
 
   // Mirror the element's state into React for the overlay.
   useEffect(() => {
@@ -494,6 +543,10 @@ export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.
     poke()
   }
 
+  const playUpNext = (): void => {
+    if (upNext) onPlayNext(upNext.slug)
+  }
+
   const chooseCaptions = (index: number | null): void => {
     setCaptionIndex(index)
     try {
@@ -690,6 +743,10 @@ export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.
         setScrubFocus(false)
         setFocusBar(true)
         poke()
+      } else if (offer) {
+        // The first B is "not this one": the countdown stops and the card goes
+        // away, but the player stays. B again falls through to the chrome.
+        setUpNextDismissed(true)
       } else if (showControls) {
         setShowControls(false)
         setFocusBar(false)
@@ -733,6 +790,9 @@ export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.
         } else if (focusBar) {
           activateBar()
           poke()
+        } else if (offer) {
+          // With the card up, A is "play it now"; B is the way to keep watching.
+          playUpNext()
         } else {
           togglePlay()
         }
@@ -798,6 +858,15 @@ export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.
         ? `Auto ${playingLevel.height}p`
         : 'Auto'
   const captionsOn = captionIndex != null
+
+  const remaining = duration > 0 ? Math.max(0, duration - current) : 0
+  const upNextSeconds = Math.ceil(remaining)
+  // A menu owns the screen while it is open, and a dismissed card stays gone
+  // for the rest of this video (seeking back into the window does not revive it).
+  const offer =
+    upNext && !upNextDismissed && panel === null && duration > 0 && remaining <= UPNEXT_WINDOW
+      ? upNext
+      : null
 
   const focused = (id: BarId): string => (focusBar && barFocus === id ? ' is-focused' : '')
 
@@ -1048,6 +1117,42 @@ export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.
           </div>
         </div>
       </div>
+
+      {offer ? (
+        <div className="player__upnext">
+          <button
+            type="button"
+            className="player__upnext-card"
+            tabIndex={-1}
+            aria-label={`Play next: ${offer.title}`}
+            onClick={playUpNext}
+          >
+            {offer.image ? <img className="player__upnext-image" src={offer.image} alt="" /> : null}
+            <span className="player__upnext-text">
+              <span className="player__upnext-label">Up next</span>
+              <span className="player__upnext-title">{offer.title}</span>
+              <span className="player__upnext-meta">
+                {offer.minutes ? `${offer.minutes} min · ` : ''}
+                {upNextSeconds > 0 ? `Playing in ${upNextSeconds}s` : 'Playing now'}
+              </span>
+            </span>
+          </button>
+          <div className="player__upnext-timer" aria-hidden>
+            <div
+              className="player__upnext-fill"
+              style={{ width: `${(remaining / UPNEXT_WINDOW) * 100}%` }}
+            />
+          </div>
+          <button
+            type="button"
+            className="player__upnext-cancel"
+            tabIndex={-1}
+            onClick={() => setUpNextDismissed(true)}
+          >
+            Keep watching
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }

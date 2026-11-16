@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import type { Card } from '@shared/types'
 import { useAsync } from '../lib/useAsync'
 import { focusFirst } from '../nav/focus'
@@ -11,15 +11,30 @@ interface ContentProps {
   slug: string
   onOpen: (card: Card) => void
   onPlay: (slug: string, startAt?: number) => void
+  /** Bumped when playback ends; the resume point is stale from then on. */
+  refreshKey?: number
 }
 
 const stripHtml = (value: string): string => value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
 
-export function Content({ slug, onOpen, onPlay }: ContentProps): React.JSX.Element | null {
-  const { data, error, loading } = useAsync(() => window.beacon.catalog.content(slug), [slug])
+export function Content({
+  slug,
+  onOpen,
+  onPlay,
+  refreshKey = 0
+}: ContentProps): React.JSX.Element | null {
+  // Keep the page on screen while it reloads: it is what the player uncovers.
+  const { data, error, loading } = useAsync(
+    () => window.beacon.catalog.content(slug),
+    [slug, refreshKey],
+    { keepData: true }
+  )
+  const placed = useRef(false)
 
   useEffect(() => {
-    if (data) focusFirst('[data-focus]')
+    if (!data || placed.current) return
+    placed.current = true
+    focusFirst('[data-focus]')
   }, [data])
 
   if (loading) {

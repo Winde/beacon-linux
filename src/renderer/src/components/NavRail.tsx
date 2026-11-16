@@ -1,17 +1,25 @@
-import { Home, NavArrowLeft, Search } from 'iconoir-react'
+import { Home, LogOut, NavArrowLeft, Search } from 'iconoir-react'
 
 interface NavRailProps {
   open: boolean
   showHome: boolean
   onHome: () => void
   onSearch: () => void
+  /** Absent for a free-video session: there is no account to sign out of. */
+  onSignOut?: () => void
 }
 
 /**
  * Slides in from the left edge when focus reaches it: content keeps the full
  * width, and the rail only exists on screen while it has focus.
  */
-export function NavRail({ open, showHome, onHome, onSearch }: NavRailProps): React.JSX.Element {
+export function NavRail({
+  open,
+  showHome,
+  onHome,
+  onSearch,
+  onSignOut
+}: NavRailProps): React.JSX.Element {
   return (
     <>
       {/* Decor only: a quiet chevron in the gutter that says "there is more to
@@ -44,6 +52,19 @@ export function NavRail({ open, showHome, onHome, onSearch }: NavRailProps): Rea
           <Search className="rail__icon" width={20} height={20} strokeWidth={1.7} aria-hidden />
           <span className="rail__label">Search</span>
         </button>
+        {onSignOut ? (
+          <button
+            type="button"
+            className="rail__item rail__item--bottom"
+            data-focus
+            data-testid="rail-signout"
+            tabIndex={-1}
+            onClick={onSignOut}
+          >
+            <LogOut className="rail__icon" width={20} height={20} strokeWidth={1.7} aria-hidden />
+            <span className="rail__label">Sign out</span>
+          </button>
+        ) : null}
       </nav>
     </>
   )

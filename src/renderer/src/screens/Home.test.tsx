@@ -113,4 +113,28 @@ describe('Home', () => {
 
     expect(onOpen).toHaveBeenCalledWith(data.rows[0].items[1])
   })
+
+  it('refreshes the feed after playback without blanking it or moving focus', async () => {
+    const before = homeData()
+    const after = homeData({
+      rows: [
+        { title: 'Continue watching', items: [card('watched', 'Just Watched')] },
+        { title: 'Recently added', items: [card('a', 'Episode a')] }
+      ]
+    })
+    const home = vi.fn().mockResolvedValueOnce(before).mockResolvedValueOnce(after)
+    vi.stubGlobal('beacon', { catalog: { home } })
+
+    const { rerender } = render(<Home onOpen={vi.fn()} onPlay={vi.fn()} />)
+    await screen.findByRole('heading', { name: 'Recently added' })
+
+    rerender(<Home onOpen={vi.fn()} onPlay={vi.fn()} refreshKey={1} />)
+    // The feed the viewer is looking at stays up until the new one is ready.
+    expect(screen.getByRole('heading', { name: 'Recently added' })).toBeDefined()
+    expect(screen.queryByText('Loading Beacon')).toBeNull()
+
+    expect(await screen.findByRole('heading', { name: 'Continue watching' })).toBeDefined()
+    expect(home).toHaveBeenCalledTimes(2)
+    expect(focusFirst).toHaveBeenCalledTimes(1)
+  })
 })

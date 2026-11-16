@@ -1,5 +1,5 @@
 import { BrowserWindow, ipcMain } from 'electron'
-import type { PlaybackData, ProgressReport } from '@shared/types'
+import type { NextEpisodeRequest, PlaybackData, ProgressReport } from '@shared/types'
 import { BeaconClient } from './beacon/client'
 import { Catalog } from './beacon/catalog'
 import { fetchCaptionFile, fetchMasterPlaylist } from './hls'
@@ -35,6 +35,10 @@ export function registerIpc(): void {
     }
     return data
   })
+
+  ipcMain.handle('playback:next', (_event, request: NextEpisodeRequest) =>
+    client.nextEpisode(request)
+  )
 
   ipcMain.handle('playback:progress', (_event, report: ProgressReport) =>
     client.trackProgress(report.contentId, report.position, report.duration)

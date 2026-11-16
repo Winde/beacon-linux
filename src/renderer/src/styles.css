@@ -141,6 +141,11 @@ kbd {
   font-size: 1rem;
 }
 
+/* The account action sits apart from browsing, at the foot of the rail. */
+.rail__item--bottom {
+  margin-top: auto;
+}
+
 .boot {
   height: 100%;
   display: grid;
@@ -1215,6 +1220,109 @@ kbd {
   color: #fff;
   background: rgba(0, 0, 0, 0.72);
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9);
+}
+
+/* ---------- player: up next ---------- */
+
+.player__upnext {
+  position: absolute;
+  right: 44px;
+  bottom: 152px;
+  z-index: 2;
+  width: min(430px, 42vw);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: rgba(12, 14, 19, 0.92);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+}
+
+.player__upnext-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.player__upnext-image {
+  flex: none;
+  width: 132px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 9px;
+  background: var(--bg-raise);
+}
+
+.player__upnext-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.player__upnext-label {
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.player__upnext-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.player__upnext-card:hover .player__upnext-title {
+  color: var(--accent);
+}
+
+.player__upnext-meta {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.player__upnext-timer {
+  height: 3px;
+  margin: 0 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+
+.player__upnext-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 240ms linear;
+}
+
+.player__upnext-cancel {
+  align-self: flex-end;
+  padding: 4px 2px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.player__upnext-cancel:hover {
+  color: var(--fg);
 }
 
 /* ---------- bits ---------- */

@@ -10,20 +10,21 @@ import { useAsync, type AsyncState } from './useAsync'
 interface ProbeProps {
   load: () => Promise<unknown>
   deps: unknown[]
+  keepData?: boolean
 }
 
 let latest: AsyncState<unknown>
 let root: Root
 let container: HTMLDivElement
 
-function Probe({ load, deps }: ProbeProps): null {
-  latest = useAsync(load, deps)
+function Probe({ load, deps, keepData = false }: ProbeProps): null {
+  latest = useAsync(load, deps, { keepData })
   return null
 }
 
-function render(load: () => Promise<unknown>, deps: unknown[] = []): void {
+function render(load: () => Promise<unknown>, deps: unknown[] = [], keepData = false): void {
   act(() => {
-    root.render(createElement(Probe, { load, deps }))
+    root.render(createElement(Probe, { load, deps, keepData }))
   })
 }
 
@@ -87,6 +88,17 @@ describe('useAsync', () => {
     render(load, [2])
 
     expect(latest).toEqual({ data: null, error: null, loading: true })
+  })
+
+  it('holds the previous value on screen when a reload keeps it', async () => {
+    const load = vi.fn().mockResolvedValueOnce('first').mockReturnValueOnce(new Promise(() => {}))
+    render(load, [1], true)
+    await settle()
+    expect(latest.data).toBe('first')
+
+    render(load, [2], true)
+
+    expect(latest).toEqual({ data: 'first', error: null, loading: false })
   })
 
   it('ignores a response that belongs to an older request', async () => {

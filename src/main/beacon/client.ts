@@ -6,6 +6,8 @@ import type {
   CollectionData,
   ContentData,
   HomeData,
+  NextEpisode,
+  NextEpisodeRequest,
   PlaybackData,
   Row,
   SearchData
@@ -14,6 +16,7 @@ import { loadSession, saveSession, type Session } from './session'
 import { TtlCache } from './cache'
 import * as Q from './queries'
 import { episodeCode, imageUrl as img } from './text'
+import { chooseUpNext } from './upnext'
 import type { IndexedCollection, IndexedVideo } from './catalog-types'
 
 const CMS_URL = 'https://critrole-beacon-production-backend.clockhosting.com/api/graphql'
@@ -22,6 +25,8 @@ const OAUTH_URL = 'https://pocketbeacon.memberful.com/oauth/token'
 const CLIENT_ID = '3Wdgxb5im239JhTBhS7KczZn'
 
 const LEVEL_TTL = 10 * 60 * 1000
+/** How long a screen may wait for a progress report before reading anyway. */
+const REPORT_WAIT = 5_000
 
 export class BeaconError extends Error {
   status?: number
@@ -148,6 +153,12 @@ export class BeaconClient {
   private readonly searchCache = new TtlCache<string, SearchData>(5 * 60_000, 30)
   private readonly playbackCache = new TtlCache<string, PlaybackData | null>(5 * 60_000, 40)
   private readonly progressCache = new TtlCache<string, Record<string, number>>(30_000, 30)
+  /**
+   * Progress reports on their way to Beacon. The player closes and reports in
+   * the same breath as the screen below it reloads, and a read that ran ahead
+   * of the write would rebuild "Continue watching" without it.
+   */
+  private readonly reports = new Set<Promise<boolean>>()
 
   /** What an entry belongs to: a member's rows and tier are not shared. */
   private async scope(): Promise<string> {
@@ -195,8 +206,15 @@ export class BeaconClient {
     refresh_token?: string
     expires_in?: number
   }> {
-    const qs = new URLSearchParams({ client_id: CLIENT_ID, ...params }).toString()
-    const res = await net.fetch(`${OAUTH_URL}?${qs}`, { method: 'POST' })
+    // Credentials go in the body, never the URL. Memberful answers 307 and
+    // redirects to members.beacon.tv; a 307 carries the method and body along,
+    // while a query string would be copied into the Location header and logged
+    // by the proxy and both origins.
+    const res = await net.fetch(OAUTH_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: CLIENT_ID, ...params }).toString()
+    })
     let body: Record<string, string> = {}
     try {
       body = (await res.json()) as Record<string, string>
@@ -399,6 +417,7 @@ export class BeaconClient {
 
   async progressFor(ids: string[]): Promise<Record<string, number>> {
     if (!(await this.currentSession()) || !ids.length) return {}
+    await this.settleReports()
     const unique = [...new Set(ids)]
     // The ids come from whichever rows are on screen, so sort them into a
     // stable key: two screens asking for the same set share the answer.
@@ -424,6 +443,7 @@ export class BeaconClient {
   // ---------- screens ----------
 
   async home(): Promise<HomeData> {
+    await this.settleReports()
     const key = await this.scope()
     const data = await this.homeCache.load(key, () => this.buildHome())
     // A CMS hiccup must not be remembered as an empty home for a minute.
@@ -507,6 +527,7 @@ export class BeaconClient {
   }
 
   async collection(slug: string): Promise<CollectionData> {
+    await this.settleReports()
     const key = `${await this.scope()}|${slug}`
     return this.collectionCache.load(key, () => this.buildCollection(slug))
   }
@@ -592,6 +613,7 @@ export class BeaconClient {
   }
 
   async content(slug: string): Promise<ContentData> {
+    await this.settleReports()
     const key = `${await this.scope()}|${slug}`
     return this.contentCache.load(key, () => this.buildContent(slug))
   }
@@ -700,7 +722,11 @@ export class BeaconClient {
         playlist: null,
         duration: doc.duration ? Math.round(doc.duration / 1000) : null,
         resumeAt,
-        captions: captionsOf(video)
+        captions: captionsOf(video),
+        episodeNumber: doc.episodeNumber ?? null,
+        collection: doc.primaryCollection
+          ? { id: doc.primaryCollection.id, isSeries: Boolean(doc.primaryCollection.isSeries) }
+          : null
       })
     }
 
@@ -723,6 +749,7 @@ export class BeaconClient {
   }
 
   async play(slug: string): Promise<PlaybackData | null> {
+    await this.settleReports()
     const key = `${await this.scope()}|${slug}`
     return this.playbackCache.load(key, () => this.loadPlayback(slug))
   }
@@ -734,6 +761,8 @@ export class BeaconClient {
           id: string
           title: string
           duration?: number | null
+          episodeNumber?: number | null
+          primaryCollection?: { id: string; isSeries?: boolean } | null
           contentVideo?: {
             video?: { video?: string; videoData?: string; closedCaptions?: string } | null
           } | null
@@ -765,19 +794,100 @@ export class BeaconClient {
         )
           ? (cp.videoProgressSeconds ?? 0)
           : 0,
-      captions: captionsOf(video)
+      captions: captionsOf(video),
+      episodeNumber: doc?.episodeNumber ?? null,
+      collection: doc?.primaryCollection
+        ? { id: doc.primaryCollection.id, isSeries: Boolean(doc.primaryCollection.isSeries) }
+        : null
     }
   }
 
+  /**
+   * The episode to offer when this one ends, or null to let it end.
+   *
+   * Beacon answers `fetchSeries(...) { next }` with the next item in its own
+   * order, which skips trailers filed inside a series and resolves two-part
+   * episodes. It does not promise the candidate belongs to the same run, so the
+   * answer goes through chooseUpNext, which is where "never chain to something
+   * unrelated" lives.
+   */
+  async nextEpisode(request: NextEpisodeRequest): Promise<NextEpisode | null> {
+    if (!request.isSeries || !request.collectionId) return null
+
+    const r = await this.gql<{ fetchSeries?: { next?: CmsCard | null } }>(Q.SERIES, {
+      collection: request.collectionId,
+      content: request.contentId,
+      limit: 1
+    }).catch(() => null)
+
+    const candidate = r?.fetchSeries?.next
+    if (!candidate) return null
+
+    const level = await this.userLevel()
+    return chooseUpNext(
+      {
+        collectionId: request.collectionId,
+        isSeries: request.isSeries,
+        episodeNumber: request.episodeNumber
+      },
+      {
+        slug: candidate.slug,
+        title: candidate.title,
+        image: img(candidate.thumbnail?.sizes?.landscape?.url, 480),
+        minutes: minutes(candidate.duration),
+        locked: (candidate.contentTier?.planLevel ?? 0) > level,
+        episodeNumber: candidate.episodeNumber ?? null,
+        collectionId: candidate.primaryCollection?.id ?? ''
+      }
+    )
+  }
+
   async trackProgress(contentId: string, position: number, duration: number): Promise<boolean> {
+    // Register before the first await: a screen read issued right after this
+    // call must find the report and wait for it.
+    const pending = this.reportProgress(contentId, position, duration)
+    this.reports.add(pending)
+    void pending
+      .finally(() => {
+        this.reports.delete(pending)
+      })
+      .catch(() => {})
+    return pending
+  }
+
+  /** Let progress writes land before reading what they change. */
+  private async settleReports(): Promise<void> {
+    if (!this.reports.size) return
+    // A report that never lands must not hold the screen shut either: past a
+    // few seconds the read is better served stale than not at all.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, REPORT_WAIT)
+    })
+    try {
+      await Promise.race([Promise.allSettled([...this.reports]), deadline])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  private async reportProgress(
+    contentId: string,
+    position: number,
+    duration: number
+  ): Promise<boolean> {
     if (!(await this.currentSession()) || !contentId) return false
+    const seconds = Math.round(position)
+    const percent = duration ? Math.min(100, Math.round((seconds / duration) * 100)) : 0
     const event = {
       content: contentId,
       viewedAt: new Date().toISOString(),
       sessionId: this.sessionId,
       duration: Math.round(duration || 0),
-      videoProgressSeconds: Math.round(position),
-      videoProgress: duration ? Math.min(100, Math.round((position / duration) * 100)) : 0
+      videoProgressSeconds: seconds,
+      // A minute into a four-hour episode rounds to 0%, which reads as "never
+      // started" to Continue watching; anything played counts as at least 1%.
+      videoProgress: duration && seconds > 0 ? Math.max(1, percent) : percent
     }
     const r = await this.gql<{ trackView?: { success?: boolean } }>(Q.TRACK, {
       events: [event]

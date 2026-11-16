@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { createRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CaptionTrack, PlaybackData } from '@shared/types'
+import type { CaptionTrack, NextEpisode, PlaybackData } from '@shared/types'
 import { Player, type PlayerHandle } from './Player'
 
 const hlsMock = vi.hoisted(() => ({
@@ -58,7 +58,9 @@ const playback: PlaybackData = {
   captions: [
     { label: 'English', url: 'https://cdn.example/en.vtt' },
     { label: 'Deutsch', url: 'https://cdn.example/de.vtt' }
-  ]
+  ],
+  episodeNumber: null,
+  collection: null
 }
 
 function stubBeacon(captions: CaptionTrack[] = playback.captions): ReturnType<typeof vi.fn> {
@@ -66,12 +68,57 @@ function stubBeacon(captions: CaptionTrack[] = playback.captions): ReturnType<ty
   vi.stubGlobal('beacon', {
     playback: {
       open: vi.fn(() => Promise.resolve({ ...playback, captions })),
+      next: vi.fn(() => Promise.resolve(null)),
       progress: vi.fn(() => Promise.resolve(true)),
       captions: fetchCaptions
     },
     app: { toggleFullscreen: vi.fn() }
   })
   return fetchCaptions
+}
+
+/** A series episode, so the player asks for what comes next. */
+const episode: PlaybackData = {
+  ...playback,
+  id: 'c3-e121',
+  title: 'C3 E121 | A New Age Begins | Part 1',
+  episodeNumber: 121,
+  collection: { id: 'c3', isSeries: true }
+}
+
+const partTwo: NextEpisode = {
+  slug: 'c3-e121-a-new-age-begins-part-2',
+  title: 'C3 E121 | A New Age Begins | Part 2',
+  image: null,
+  minutes: 240
+}
+
+function stubEpisode(
+  overrides: Partial<PlaybackData> = {},
+  next: NextEpisode | null = partTwo
+): ReturnType<typeof vi.fn> {
+  const request = vi.fn(() => Promise.resolve(next))
+  vi.stubGlobal('beacon', {
+    playback: {
+      open: vi.fn(() => Promise.resolve({ ...episode, ...overrides })),
+      next: request,
+      progress: vi.fn(() => Promise.resolve(true)),
+      captions: vi.fn(() => Promise.resolve('WEBVTT'))
+    },
+    app: { toggleFullscreen: vi.fn() }
+  })
+  return request
+}
+
+/** Put the element's clock where the card belongs. */
+function playTo(container: HTMLElement, at: number): void {
+  const video = container.querySelector('video') as HTMLVideoElement
+  Object.defineProperty(video, 'duration', { configurable: true, value: 600 })
+  Object.defineProperty(video, 'currentTime', { configurable: true, writable: true, value: at })
+  act(() => {
+    video.dispatchEvent(new Event('durationchange'))
+    video.dispatchEvent(new Event('timeupdate'))
+  })
 }
 
 beforeEach(() => {
@@ -99,7 +146,7 @@ afterEach(() => {
 describe('Player', () => {
   it('shows real controls instead of the key hint line', async () => {
     stubBeacon()
-    render(<Player slug="v1" onClose={vi.fn()} />)
+    render(<Player slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
 
     expect(await screen.findByText('Test Episode')).toBeDefined()
     expect(screen.getByRole('button', { name: 'Back' })).toBeDefined()
@@ -115,7 +162,7 @@ describe('Player', () => {
   it('opens the subtitle menu from the control bar and turns captions on', async () => {
     const fetchCaptions = stubBeacon()
     const ref = createRef<PlayerHandle>()
-    render(<Player ref={ref} slug="v1" onClose={vi.fn()} />)
+    render(<Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
     await screen.findByText('Test Episode')
 
     act(() => void ref.current?.handle('menu'))
@@ -137,7 +184,7 @@ describe('Player', () => {
     stubBeacon()
     const onClose = vi.fn()
     const ref = createRef<PlayerHandle>()
-    const { container } = render(<Player ref={ref} slug="v1" onClose={onClose} />)
+    const { container } = render(<Player ref={ref} slug="v1" onClose={onClose} onPlayNext={vi.fn()} />)
     await screen.findByText('Test Episode')
 
     act(() => void ref.current?.handle('back'))
@@ -152,7 +199,7 @@ describe('Player', () => {
     stubBeacon()
     vi.useFakeTimers()
     const ref = createRef<PlayerHandle>()
-    const { container } = render(<Player ref={ref} slug="v1" onClose={vi.fn()} />)
+    const { container } = render(<Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
     await act(async () => {
       await Promise.resolve()
     })
@@ -170,7 +217,7 @@ describe('Player', () => {
 
   it('says so when a video has no subtitle track', async () => {
     stubBeacon([])
-    render(<Player slug="v1" onClose={vi.fn()} />)
+    render(<Player slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
     await screen.findByText('Test Episode')
 
     fireEvent.click(screen.getByRole('button', { name: 'Subtitles: off' }))
@@ -182,7 +229,7 @@ describe('Player', () => {
   it('scrubs in deliberate taps, accelerates while held, and jumps on accept', async () => {
     stubBeacon()
     const ref = createRef<PlayerHandle>()
-    const { container } = render(<Player ref={ref} slug="v1" onClose={vi.fn()} />)
+    const { container } = render(<Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
     await screen.findByText('Test Episode')
 
     const video = container.querySelector('video') as HTMLVideoElement
@@ -226,7 +273,7 @@ describe('Player', () => {
   it('keeps the 10 second skip while the video is playing', async () => {
     stubBeacon()
     const ref = createRef<PlayerHandle>()
-    const { container } = render(<Player ref={ref} slug="v1" onClose={vi.fn()} />)
+    const { container } = render(<Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
     await screen.findByText('Test Episode')
 
     const video = container.querySelector('video') as HTMLVideoElement
@@ -252,7 +299,7 @@ describe('Player', () => {
   it('disables the quality control when the stream has one rendition', async () => {
     stubBeacon()
     const ref = createRef<PlayerHandle>()
-    render(<Player ref={ref} slug="v1" onClose={vi.fn()} />)
+    render(<Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
     await screen.findByText('Test Episode')
     await vi.waitFor(() => expect(hlsMock.instances).toHaveLength(1))
 
@@ -276,7 +323,7 @@ describe('Player', () => {
 
   it('opens the quality menu when the stream has several renditions', async () => {
     stubBeacon()
-    render(<Player slug="v1" onClose={vi.fn()} />)
+    render(<Player slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
     await screen.findByText('Test Episode')
     await vi.waitFor(() => expect(hlsMock.instances).toHaveLength(1))
 
@@ -297,5 +344,105 @@ describe('Player', () => {
     expect(screen.getByRole('menuitemradio', { name: '1080p' })).toBeDefined()
     expect(screen.getByRole('menuitemradio', { name: '360p' })).toBeDefined()
     expect(screen.queryByText('Quality is fixed for this stream.')).toBeNull()
+  })
+
+  it('offers the next episode in the last fifteen seconds', async () => {
+    const request = stubEpisode()
+    const onPlayNext = vi.fn()
+    const ref = createRef<PlayerHandle>()
+    const { container } = render(
+      <Player ref={ref} slug="c3-e121" onClose={vi.fn()} onPlayNext={onPlayNext} />
+    )
+    await screen.findByText('C3 E121 | A New Age Begins | Part 1')
+
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith({
+        contentId: 'c3-e121',
+        collectionId: 'c3',
+        isSeries: true,
+        episodeNumber: 121
+      })
+    )
+
+    playTo(container, 590)
+
+    expect(screen.getByText('Up next')).toBeDefined()
+    expect(screen.getByText(/Playing in 10s/)).toBeDefined()
+
+    act(() => void ref.current?.handle('accept'))
+    expect(onPlayNext).toHaveBeenCalledWith('c3-e121-a-new-age-begins-part-2')
+  })
+
+  it('stays quiet before the ending window', async () => {
+    const request = stubEpisode()
+    const { container } = render(
+      <Player slug="c3-e121" onClose={vi.fn()} onPlayNext={vi.fn()} />
+    )
+    await screen.findByText('C3 E121 | A New Age Begins | Part 1')
+    await vi.waitFor(() => expect(request).toHaveBeenCalled())
+
+    playTo(container, 540)
+
+    expect(screen.queryByText('Up next')).toBeNull()
+  })
+
+  it('takes B as "not this one", once', async () => {
+    stubEpisode()
+    const onClose = vi.fn()
+    const ref = createRef<PlayerHandle>()
+    const { container } = render(
+      <Player ref={ref} slug="c3-e121" onClose={onClose} onPlayNext={vi.fn()} />
+    )
+    await screen.findByText('C3 E121 | A New Age Begins | Part 1')
+    playTo(container, 590)
+    await vi.waitFor(() => expect(screen.queryByText('Up next')).not.toBeNull())
+
+    act(() => void ref.current?.handle('back'))
+
+    expect(screen.queryByText('Up next')).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+
+    // Coming back into the window later does not revive the card.
+    playTo(container, 598)
+    expect(screen.queryByText('Up next')).toBeNull()
+  })
+
+  it('moves on when the stream itself ends', async () => {
+    stubEpisode()
+    const onPlayNext = vi.fn()
+    const { container } = render(
+      <Player slug="c3-e121" onClose={vi.fn()} onPlayNext={onPlayNext} />
+    )
+    await screen.findByText('C3 E121 | A New Age Begins | Part 1')
+    playTo(container, 598)
+    await vi.waitFor(() => expect(screen.queryByText('Up next')).not.toBeNull())
+
+    const video = container.querySelector('video') as HTMLVideoElement
+    act(() => {
+      video.dispatchEvent(new Event('ended'))
+    })
+
+    expect(onPlayNext).toHaveBeenCalledWith('c3-e121-a-new-age-begins-part-2')
+  })
+
+  it('asks nothing for a video in a collection folder', async () => {
+    const request = stubEpisode({ collection: { id: 'one-shots', isSeries: false } })
+    render(<Player slug="one-shot" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+    await screen.findByText('C3 E121 | A New Age Begins | Part 1')
+
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it('stays quiet when there is nothing next', async () => {
+    const request = stubEpisode({}, null)
+    const { container } = render(
+      <Player slug="c3-e121" onClose={vi.fn()} onPlayNext={vi.fn()} />
+    )
+    await screen.findByText('C3 E121 | A New Age Begins | Part 1')
+    await vi.waitFor(() => expect(request).toHaveBeenCalled())
+
+    playTo(container, 595)
+
+    expect(screen.queryByText('Up next')).toBeNull()
   })
 })

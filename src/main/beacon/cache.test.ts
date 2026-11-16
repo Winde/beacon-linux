@@ -5,6 +5,14 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
 describe('TtlCache', () => {
   it('serves a fresh value without asking the loader again', async () => {
     const cache = new TtlCache<string, number>(60_000)
@@ -79,5 +87,32 @@ describe('TtlCache', () => {
 
     cache.clear()
     expect(cache.get('b')).toBeUndefined()
+  })
+
+  it('does not remember a load that was cleared while it ran', async () => {
+    const cache = new TtlCache<string, number>(60_000)
+    const first = deferred<number>()
+    const load = vi.fn(() => first.promise)
+
+    const pending = cache.load('a', load)
+    cache.clear()
+    first.resolve(1)
+
+    await expect(pending).resolves.toBe(1)
+    expect(cache.get('a')).toBeUndefined()
+  })
+
+  it('asks again after a clear even while the old load is running', async () => {
+    const cache = new TtlCache<string, number>(60_000)
+    const first = deferred<number>()
+    const load = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValueOnce(2)
+
+    const stale = cache.load('a', load)
+    cache.clear()
+    await expect(cache.load('a', load)).resolves.toBe(2)
+
+    first.resolve(1)
+    await expect(stale).resolves.toBe(1)
+    expect(cache.get('a')).toBe(2)
   })
 })

@@ -8,6 +8,8 @@
 export class TtlCache<K, V> {
   private readonly entries = new Map<K, { at: number; value: V }>()
   private readonly inflight = new Map<K, Promise<V>>()
+  /** Bumped by clear(), so a load that started before it cannot write back. */
+  private generation = 0
 
   constructor(
     private readonly ttlMs: number,
@@ -45,6 +47,10 @@ export class TtlCache<K, V> {
 
   clear(): void {
     this.entries.clear()
+    // A load already running asked the CMS before whatever prompted the clear,
+    // so its answer is stale: a caller arriving now must start a fresh one.
+    this.inflight.clear()
+    this.generation += 1
   }
 
   /**
@@ -58,13 +64,17 @@ export class TtlCache<K, V> {
     const running = this.inflight.get(key)
     if (running) return running
 
+    const generation = this.generation
     const pending = loader()
       .then((value) => {
-        this.set(key, value)
+        // Cleared while this was in flight: the answer predates the change the
+        // caller wanted to see. Hand it back, but do not remember it.
+        if (generation === this.generation) this.set(key, value)
         return value
       })
       .finally(() => {
-        this.inflight.delete(key)
+        // Only retire our own entry: a clear() may have put a new load there.
+        if (this.inflight.get(key) === pending) this.inflight.delete(key)
       })
     this.inflight.set(key, pending)
     return pending
