@@ -101,7 +101,6 @@ second monitor. `BEACON_SHOT_SCRIPT` runs JavaScript before the capture, and
 - [ ] Flatpak packaging
 - [ ] "Next episode" autoplay at the end of an episode
 - [ ] Live-event support (Beacon's waiting room)
-- [ ] Downloads for offline viewing
 
 ## Legal
 
