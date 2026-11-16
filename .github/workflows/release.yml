@@ -49,6 +49,8 @@ jobs:
 
       - run: npm run typecheck
 
+      - run: npm test
+
   linux:
     name: Linux
     needs: verify
