@@ -13,14 +13,15 @@ Full license texts are in [`licenses/`](licenses/).
 | [React DOM](https://github.com/facebook/react) | see `package.json` | MIT | Meta Platforms, Inc. and affiliates |
 | [hls.js](https://github.com/video-dev/hls.js) | see `package.json` | Apache-2.0 | Dailymotion |
 | [Electron](https://github.com/electron/electron) | see `package.json` | MIT | Electron contributors |
-| [Iconoir](https://github.com/iconoir-icons/iconoir) | `hexagon-dice` | MIT | Luca Burgio |
+| [Iconoir](https://github.com/iconoir-icons/iconoir) | see `package.json` | MIT | Luca Burgio |
 
 `licenses/react.txt` covers both React and React DOM.
 
 The app icon (`packaging/flatpak/io.github.Winde.BeaconLinux.svg`, rasterised to
 `build/icon.png`) is Iconoir's `hexagon-dice` glyph placed on a square canvas —
 recoloured, rescaled and padded, with no other changes. It is not derived from
-any Critical Role or Beacon artwork. `licenses/iconoir.txt` covers it.
+any Critical Role or Beacon artwork. The renderer also imports `iconoir-react`
+for the search and navigation glyphs; `licenses/iconoir.txt` covers both.
 
 Electron ships its own notices with the packaged app — `LICENSE.electron.txt` and
 `LICENSES.chromium.html` — which cover Electron itself and Chromium, including
