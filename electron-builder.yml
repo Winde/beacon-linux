@@ -10,6 +10,15 @@ files:
   - out/**
   - package.json
 
+# Ship the license texts next to the app, not just in the repository.
+extraFiles:
+  - from: LICENSE
+    to: LICENSE
+  - from: THIRD-PARTY-NOTICES.md
+    to: THIRD-PARTY-NOTICES.md
+  - from: licenses
+    to: licenses
+
 asar: true
 
 linux:

@@ -102,7 +102,8 @@ with the manifest and generated sources. Flathub requires:
 
 - an app id you control — `io.github.Winde.BeaconLinux` follows their GitHub
   convention;
-- an icon at `io.github.Winde.BeaconLinux.svg` (or `.png`) — **not yet drawn**;
+- an icon at `io.github.Winde.BeaconLinux.svg` — `packaging/flatpak/` has one,
+  built from Iconoir's `hexagon-dice` (MIT, see `licenses/iconoir.txt`);
 - AppStream metadata that passes `appstreamcli validate`;
 - a tagged git source, so the manifest must point at a real release tag.
 

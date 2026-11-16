@@ -36,3 +36,4 @@ and remain the property of their owners.
 - [React](https://github.com/facebook/react) — MIT
 - [hls.js](https://github.com/video-dev/hls.js) — Apache-2.0
 - [Vite](https://github.com/vitejs/vite) and [electron-vite](https://github.com/alex8088/electron-vite) — MIT
+- [Iconoir](https://github.com/iconoir-icons/iconoir) — MIT, for the `hexagon-dice` app icon

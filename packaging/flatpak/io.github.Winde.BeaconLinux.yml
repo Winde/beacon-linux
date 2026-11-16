@@ -3,7 +3,6 @@
 # Missing before this can build:
 #   1. flatpak-sources.json, generated with flatpak-node-generator (see docs/releasing.md)
 #   2. the Electron binary vendored as a source, or provided by the base app
-#   3. an icon at io.github.Winde.BeaconLinux.svg
 #
 # The git source must point at a real release tag; bump `tag:` each release.
 
@@ -56,6 +55,7 @@ modules:
       - install -Dm755 ../startbeacon /app/bin/startbeacon
       - install -Dm644 io.github.Winde.BeaconLinux.metainfo.xml -t /app/share/metainfo/
       - install -Dm644 io.github.Winde.BeaconLinux.desktop -t /app/share/applications/
+      - install -Dm644 io.github.Winde.BeaconLinux.svg /app/share/icons/hicolor/scalable/apps/io.github.Winde.BeaconLinux.svg
     sources:
       - flatpak-sources.json
       - type: git
@@ -64,3 +64,5 @@ modules:
         dest: main
       - type: file
         path: startbeacon
+      - type: file
+        path: io.github.Winde.BeaconLinux.svg
