@@ -5,19 +5,15 @@
 [shy1132/VacuumTube](https://github.com/shy1132/VacuumTube) — MIT License,
 Copyright (c) 2025-2026 shy.
 
-VacuumTube is the reference for how a media app should feel on SteamOS: an
-Electron shell, a frameless fullscreen window, controller-first navigation, and
-AppImage/Flatpak packaging. This project follows that approach.
+Reference for the platform shape, not the implementation: an Electron shell, a
+frameless window, a controller-first UI, AppImage distribution and, later,
+Flatpak. VacuumTube wraps YouTube Leanback and drives it with synthetic key
+events; this app has its own screens and spatial navigation.
 
-No VacuumTube source code is included here. Its controller module was read to
-understand how Steam Input presents a pad and which pitfalls matter (preferring
-the Steam virtual device, ignoring input while unfocused, holding a repeat
-delay); the implementation in `src/renderer/src/input/useInput.ts` is written
-from scratch for React and emits semantic actions rather than synthetic key
-events, because this app owns its own navigation instead of driving a vendor UI.
-
-If any VacuumTube code is ever copied in, the MIT notice above must be carried
-with it.
+Its controller module was read for Steam Input behaviour — prefer the virtual
+pad, ignore input while unfocused, hold-to-repeat. No source code is included;
+`src/renderer/src/input/useInput.ts` is an independent implementation that
+emits semantic actions.
 
 ## Beacon (Critical Role)
 
