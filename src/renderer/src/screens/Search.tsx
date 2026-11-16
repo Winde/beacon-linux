@@ -3,7 +3,7 @@ import type { Card, SearchData } from '@shared/types'
 import { focusFirst, setFocused } from '../nav/focus'
 import { OnScreenKeyboard } from '../components/OnScreenKeyboard'
 import { Row } from '../components/Row'
-import { Empty, Spinner } from '../components/ui'
+import { Empty } from '../components/ui'
 
 const MAX_QUERY = 40
 
@@ -24,6 +24,9 @@ export function Search({ onOpen }: SearchProps): React.JSX.Element {
   const [results, setResults] = useState<SearchData | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
+  // A spinner that appears on every keystroke reads as flicker; only show one
+  // once the search has actually taken a moment.
+  const [busy, setBusy] = useState(false)
   const root = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -109,13 +112,22 @@ export function Search({ onOpen }: SearchProps): React.JSX.Element {
     }
   }, [query])
 
+  useEffect(() => {
+    if (!loading) {
+      setBusy(false)
+      return
+    }
+    const timer = window.setTimeout(() => setBusy(true), 220)
+    return () => window.clearTimeout(timer)
+  }, [loading])
+
   /** Hand focus to the results, the way a TV search jumps to its hits. */
   const submit = (): void => {
     const first = root.current?.querySelector<HTMLElement>('.search__results [data-focus]')
     if (first) setFocused(first)
   }
 
-  const empty = results && !results.series.length && !results.videos.length
+  const empty = results && !loading && !results.series.length && !results.videos.length
 
   return (
     <div className="screen screen--search" ref={root}>
@@ -128,6 +140,15 @@ export function Search({ onOpen }: SearchProps): React.JSX.Element {
             <span className="search__placeholder">Series, episode, or c4e12</span>
           )}
           <span className="search__caret" />
+          {/* Fixed-size slot: the indicator fades in without moving anything. */}
+          <span className={`search__busy${busy ? ' is-visible' : ''}`} role="status">
+            {busy ? (
+              <>
+                <span className="spinner__ring spinner__ring--small" aria-hidden />
+                <span className="sr-only">Searching</span>
+              </>
+            ) : null}
+          </span>
         </div>
       </header>
 
@@ -157,9 +178,7 @@ export function Search({ onOpen }: SearchProps): React.JSX.Element {
           ) : null}
         </div>
 
-        <div className="search__results">
-          {loading ? <Spinner label="Searching" /> : null}
-
+        <div className={`search__results${loading ? ' is-stale' : ''}`}>
           {empty ? <Empty>Nothing matches “{query.trim()}”.</Empty> : null}
 
           {results && results.series.length ? (
