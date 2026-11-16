@@ -93,6 +93,15 @@ export interface PlaybackData {
   captions: CaptionTrack[]
 }
 
+/** The episode the player offers once the current one is nearly over. */
+export interface NextEpisode {
+  slug: string
+  title: string
+  image: string | null
+  /** series only */
+  minutes?: number | null
+}
+
 export interface SearchData {
   series: Card[]
   videos: Card[]
