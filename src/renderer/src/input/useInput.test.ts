@@ -49,6 +49,16 @@ function key(keyName: string, target: EventTarget = window): KeyboardEvent {
   return event
 }
 
+function keyUp(keyName: string, target: EventTarget = window): KeyboardEvent {
+  const event = new KeyboardEvent('keyup', {
+    key: keyName,
+    bubbles: true,
+    cancelable: true
+  })
+  target.dispatchEvent(event)
+  return event
+}
+
 function gamepad(overrides: { id?: string; pressed?: number[]; axes?: number[] } = {}): Gamepad {
   const pressed = new Set(overrides.pressed ?? [])
   return {
@@ -85,6 +95,7 @@ afterEach(() => {
   unmount()
   container.remove()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 describe('keyboard', () => {
@@ -165,6 +176,37 @@ describe('keyboard', () => {
 
     expect(actions).toEqual([])
     expect(cancelAnimationFrame).toHaveBeenCalled()
+  })
+
+  it('repeats a held direction on its own clock, not the OS key repeat', () => {
+    vi.useFakeTimers()
+    const actions: Action[] = []
+    render((action) => actions.push(action))
+
+    key('ArrowRight')
+    expect(actions).toEqual(['right'])
+
+    // An OS-generated repeat must not double the rate.
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', repeat: true, bubbles: true })
+    )
+    expect(actions).toEqual(['right'])
+
+    act(() => vi.advanceTimersByTime(379))
+    expect(actions).toEqual(['right'])
+
+    act(() => vi.advanceTimersByTime(1))
+    expect(actions).toEqual(['right'])
+
+    act(() => vi.advanceTimersByTime(110))
+    expect(actions).toEqual(['right', 'right'])
+
+    act(() => vi.advanceTimersByTime(220))
+    expect(actions).toEqual(['right', 'right', 'right', 'right'])
+
+    keyUp('ArrowRight')
+    act(() => vi.advanceTimersByTime(1000))
+    expect(actions).toHaveLength(4)
   })
 })
 

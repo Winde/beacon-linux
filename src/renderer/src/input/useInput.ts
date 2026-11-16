@@ -72,6 +72,10 @@ function isTyping(target: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || element.isContentEditable
 }
 
+function isDirection(action: Action): action is Direction {
+  return action === 'up' || action === 'down' || action === 'left' || action === 'right'
+}
+
 const KEY_ACTIONS: Record<string, Action> = {
   ArrowUp: 'up',
   ArrowDown: 'down',
@@ -99,13 +103,41 @@ export function useInput(handler: (action: Action) => void): void {
   handlerRef.current = handler
 
   useEffect(() => {
+    let heldKey: string | null = null
+    let repeatDelay: number | undefined
+    let repeatTimer: number | undefined
+
+    const stopRepeat = (): void => {
+      window.clearTimeout(repeatDelay)
+      window.clearInterval(repeatTimer)
+      repeatDelay = undefined
+      repeatTimer = undefined
+      heldKey = null
+    }
+
     const onKeyDown = (event: KeyboardEvent): void => {
       // Arrow keys belong to the caret while a text field has focus.
       if (isTyping(event.target) && event.key !== 'Escape') return
       const action = KEY_ACTIONS[event.key]
       if (!action) return
       event.preventDefault()
+      // Held directions are repeated on our own clock, like the gamepad.
+      // The OS's own key repeat would run at a different rate (and may be
+      // disabled on some desktops), so ignore those events.
+      if (event.repeat) return
       handlerRef.current(action)
+      if (!isDirection(action)) return
+      stopRepeat()
+      heldKey = event.key
+      repeatDelay = window.setTimeout(() => {
+        repeatTimer = window.setInterval(() => {
+          handlerRef.current(action)
+        }, REPEAT_RATE)
+      }, REPEAT_DELAY)
+    }
+
+    const onKeyUp = (event: KeyboardEvent): void => {
+      if (event.key === heldKey) stopRepeat()
     }
 
     let focused = document.hasFocus()
@@ -114,10 +146,12 @@ export function useInput(handler: (action: Action) => void): void {
     }
     const onBlur = (): void => {
       focused = false
+      stopRepeat()
     }
     window.addEventListener('focus', onFocus)
     window.addEventListener('blur', onBlur)
     window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
 
     let frame = 0
     let lastDirection: Direction | null = null
@@ -169,9 +203,11 @@ export function useInput(handler: (action: Action) => void): void {
     frame = requestAnimationFrame(loop)
 
     return () => {
+      stopRepeat()
       window.removeEventListener('focus', onFocus)
       window.removeEventListener('blur', onBlur)
       window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
       cancelAnimationFrame(frame)
     }
   }, [])

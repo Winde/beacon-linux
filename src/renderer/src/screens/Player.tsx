@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import Hls from 'hls.js'
+import type HlsPlayer from 'hls.js'
+import {
+  Check,
+  ClosedCaptionsTagSolid,
+  DashboardSpeed,
+  HdDisplay,
+  Headset,
+  Maximize,
+  NavArrowLeft,
+  Pause,
+  Play
+} from 'iconoir-react'
 import type { PlaybackData } from '@shared/types'
 import type { Action } from '../input/useInput'
 import { cleanError } from '../lib/errors'
@@ -16,10 +27,47 @@ interface PlayerProps {
   ref?: React.Ref<PlayerHandle>
 }
 
+type Panel = 'subtitles' | 'audio' | 'quality' | 'speed'
+type BarId =
+  | 'exit'
+  | 'play'
+  | 'subtitles'
+  | 'audio'
+  | 'quality'
+  | 'speed'
+  | 'fullscreen'
+
+interface QualityLevel {
+  /** Index into hls.levels. */
+  index: number
+  height: number | null
+  bitrate: number
+}
+
+interface MenuOption {
+  key: string
+  label: string
+  selected: boolean
+  run: () => void
+}
+
 const CONTROLS_TIMEOUT = 4000
 const SEEK_STEP = 10
 const SEEK_JUMP = 60
+const SCRUB_HOLD_GAP = 350
+const SCRUB_ACCELERATION = 1.5
+const SCRUB_MIN_CEILING = 30
+const SCRUB_MAX_CEILING = 120
 const REPORT_EVERY = 15000
+const SUBTITLE_KEY = 'beacon.player.subtitles'
+const SPEEDS = [0.75, 1, 1.25, 1.5, 2]
+
+const PANEL_TITLES: Record<Panel, string> = {
+  subtitles: 'Subtitles',
+  audio: 'Audio',
+  quality: 'Quality',
+  speed: 'Playback speed'
+}
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
@@ -31,12 +79,29 @@ function formatTime(seconds: number): string {
   return hours ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${minutes}:${pad(secs)}`
 }
 
+function levelLabel(level: QualityLevel | undefined): string {
+  if (!level) return 'Auto'
+  if (level.height) return `${level.height}p`
+  if (level.bitrate) return `${Math.round(level.bitrate / 1000)} kbps`
+  return 'Level'
+}
+
+function speedLabel(speed: number): string {
+  return `${speed}×`
+}
+
 export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const hlsRef = useRef<Hls | null>(null)
+  const hlsRef = useRef<HlsPlayer | null>(null)
   const blobRef = useRef<string | null>(null)
+  const captionCache = useRef(new Map<string, string>())
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([])
+  const anchorRefs = useRef<Partial<Record<Panel, HTMLButtonElement | null>>>({})
   const lastRef = useRef({ position: 0, duration: 0 })
   const hideTimer = useRef<number | undefined>(undefined)
+  const panelRef = useRef(false)
+  const scrubMotion = useRef({ direction: 0, at: 0, step: 0 })
+  const scrubJumped = useRef(false)
 
   const [data, setData] = useState<PlaybackData | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -44,13 +109,45 @@ export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(0)
   const [showControls, setShowControls] = useState(true)
-  const [captionsOn, setCaptionsOn] = useState(false)
+  const [focusBar, setFocusBar] = useState(false)
+  const [barFocus, setBarFocus] = useState<BarId>('play')
+  const [scrubFocus, setScrubFocus] = useState(false)
+  const [scrubAt, setScrubAt] = useState(0)
+  const [panel, setPanel] = useState<Panel | null>(null)
+  const [panelPosition, setPanelPosition] = useState<{ left: number; bottom: number } | null>(null)
+  const [optionFocus, setOptionFocus] = useState(0)
+
+  const [captionIndex, setCaptionIndex] = useState<number | null>(null)
   const [captionUrl, setCaptionUrl] = useState<string | null>(null)
+  const [captionError, setCaptionError] = useState<string | null>(null)
+
+  const [levels, setLevels] = useState<QualityLevel[]>([])
+  const [quality, setQuality] = useState(-1)
+  const [activeLevel, setActiveLevel] = useState(-1)
+  const [audioTracks, setAudioTracks] = useState<string[]>([])
+  const [audioTrack, setAudioTrack] = useState(0)
+  const [speed, setSpeed] = useState(1)
+
+  // A menu stays open until it is dismissed; the bar itself may fade.
+  useEffect(() => {
+    panelRef.current = panel !== null
+  }, [panel])
+
+  // Seeking from the bar only exists while paused. If playback starts again
+  // (a click on the video, say), the bar must stop behaving as a scrubber.
+  useEffect(() => {
+    if (playing) setScrubFocus(false)
+  }, [playing])
 
   const poke = useCallback(() => {
     setShowControls(true)
     window.clearTimeout(hideTimer.current)
-    hideTimer.current = window.setTimeout(() => setShowControls(false), CONTROLS_TIMEOUT)
+    hideTimer.current = window.setTimeout(() => {
+      if (panelRef.current) return
+      setShowControls(false)
+      setFocusBar(false)
+      setScrubFocus(false)
+    }, CONTROLS_TIMEOUT)
   }, [])
 
   // Load the stream and attach it to the video element.
@@ -61,7 +158,7 @@ export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.
 
     window.beacon.playback
       .open(slug)
-      .then((playback) => {
+      .then(async (playback) => {
         if (cancelled) return
         if (!playback) {
           setError('This video is not available for your account.')
@@ -80,10 +177,44 @@ export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.
           source = blobRef.current
         }
 
-        if (Hls.isSupported()) {
+        // hls.js is most of the renderer bundle. Loading it here keeps the
+        // browse screens' startup chunk small; a stream is the only thing that
+        // needs it.
+        let Hls: typeof import('hls.js').default | null = null
+        try {
+          Hls = (await import('hls.js')).default
+        } catch {
+          // Fall through to the engine's own player, or the error below.
+        }
+        if (cancelled) return
+
+        if (Hls?.isSupported()) {
           const hls = new Hls({ enableWorker: true })
+          // Beacon's captions are fetched as a separate VTT file and drawn by
+          // the renderer. Left on, hls.js also renders the stream's own
+          // subtitle track, which paints every cue twice.
+          hls.subtitleDisplay = false
+
+          const syncTracks = (): void => {
+            setLevels(
+              hls.levels.map((level, index) => ({
+                index,
+                height: level.height || null,
+                bitrate: level.bitrate || 0
+              }))
+            )
+            setAudioTracks(
+              hls.audioTracks.map((track, index) => track.name || track.lang || `Track ${index + 1}`)
+            )
+            setAudioTrack(hls.audioTrack >= 0 ? hls.audioTrack : 0)
+          }
+
           hls.loadSource(source)
           hls.attachMedia(video)
+          hls.on(Hls.Events.MANIFEST_PARSED, syncTracks)
+          hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, syncTracks)
+          hls.on(Hls.Events.LEVEL_SWITCHED, (_event, payload) => setActiveLevel(payload.level))
+          hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_event, payload) => setAudioTrack(payload.id))
           hls.on(Hls.Events.ERROR, (_event, payload) => {
             if (payload.fatal) setError(`Playback failed (${payload.details}).`)
           })
@@ -147,16 +278,19 @@ export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.
     }
     const onPlay = (): void => setPlaying(true)
     const onPause = (): void => setPlaying(false)
+    const onRate = (): void => setSpeed(video.playbackRate)
 
     video.addEventListener('timeupdate', onTime)
     video.addEventListener('durationchange', onDuration)
     video.addEventListener('play', onPlay)
     video.addEventListener('pause', onPause)
+    video.addEventListener('ratechange', onRate)
     return () => {
       video.removeEventListener('timeupdate', onTime)
       video.removeEventListener('durationchange', onDuration)
       video.removeEventListener('play', onPlay)
       video.removeEventListener('pause', onPause)
+      video.removeEventListener('ratechange', onRate)
     }
   }, [])
 
@@ -179,95 +313,518 @@ export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.
     }
   }, [data])
 
+  // Remember the chosen subtitle language and pick it again on the next video.
+  useEffect(() => {
+    if (!data?.captions.length) return
+    let saved: string | null = null
+    try {
+      saved = window.localStorage.getItem(SUBTITLE_KEY)
+    } catch {
+      // Storage can be unavailable; captions still work for this session.
+    }
+    if (!saved) return
+    const index = data.captions.findIndex((track) => track.label === saved)
+    if (index >= 0) setCaptionIndex(index)
+  }, [data])
+
   // Subtitles: JW Player's caption host sends no CORS headers, so the main
   // process fetches the file and we hand the player a local blob.
   useEffect(() => {
-    if (!captionsOn || !data?.captions.length) {
+    const track = captionIndex == null ? null : data?.captions[captionIndex]
+    if (!track) {
       setCaptionUrl(null)
+      setCaptionError(null)
       return
     }
+
+    const cached = captionCache.current.get(track.url)
+    if (cached) {
+      setCaptionUrl(cached)
+      setCaptionError(null)
+      return
+    }
+
     let cancelled = false
-    let created: string | null = null
+    setCaptionUrl(null)
+    setCaptionError(null)
     window.beacon.playback
-      .captions(data.captions[0].url)
+      .captions(track.url)
       .then((text) => {
         if (cancelled) return
-        created = URL.createObjectURL(new Blob([text], { type: 'text/vtt' }))
-        setCaptionUrl(created)
+        const url = URL.createObjectURL(new Blob([text], { type: 'text/vtt' }))
+        captionCache.current.set(track.url, url)
+        setCaptionUrl(url)
       })
       .catch(() => {
-        if (!cancelled) setError('Subtitles could not be loaded.')
+        if (!cancelled) setCaptionError('Subtitles could not be loaded.')
       })
     return () => {
       cancelled = true
-      if (created) URL.revokeObjectURL(created)
     }
-  }, [captionsOn, data])
+  }, [captionIndex, data])
+
+  useEffect(() => {
+    return () => {
+      for (const url of captionCache.current.values()) URL.revokeObjectURL(url)
+      captionCache.current.clear()
+    }
+  }, [])
+
+  const caption = captionIndex == null ? undefined : data?.captions[captionIndex]
 
   useEffect(() => {
     const video = videoRef.current
-    const track = video?.textTracks[0]
-    if (track) track.mode = captionUrl ? 'showing' : 'disabled'
-  }, [captionUrl])
+    if (!video?.textTracks) return
+    // Show only the externally fetched track. hls.js may have added its own
+    // subtitle tracks for the same stream, and two visible tracks double-render.
+    const own = video.querySelector<HTMLTrackElement>('track[data-own="captions"]')?.track ?? null
+    for (const track of Array.from(video.textTracks)) {
+      track.mode = captionUrl && track === own ? 'showing' : 'disabled'
+    }
+  }, [captionUrl, caption])
 
+  // Hide the overlay after a few idle seconds, playing or paused. Only an open
+  // menu holds it: otherwise a focused control would stay on screen forever.
   useEffect(() => {
-    if (playing) poke()
-  }, [playing, poke])
+    if (panel) return
+    poke()
+  }, [playing, panel, poke])
 
   useEffect(() => {
     return () => window.clearTimeout(hideTimer.current)
   }, [])
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      handle(action: Action): boolean {
-        const video = videoRef.current
-        if (!video) return false
+  useEffect(() => {
+    if (!panel) return
+    optionRefs.current[optionFocus]?.scrollIntoView?.({ block: 'nearest' })
+  }, [panel, optionFocus])
+
+  const seekBy = (delta: number): void => {
+    const video = videoRef.current
+    if (!video) return
+    const total = Number.isFinite(video.duration) ? video.duration : 0
+    const next = video.currentTime + delta
+    video.currentTime = total ? Math.max(0, Math.min(total, next)) : Math.max(0, next)
+  }
+
+  const jump = (delta: number): void => {
+    seekBy(delta)
+    poke()
+  }
+
+  /** Put the seek bar in its paused scrub mode, with the marker at the playhead. */
+  const startScrub = (): void => {
+    const video = videoRef.current
+    if (!video || !video.paused) return
+    scrubMotion.current = { direction: 0, at: 0, step: 0 }
+    scrubJumped.current = false
+    setScrubAt(video.currentTime)
+    setScrubFocus(true)
+    setFocusBar(false)
+    poke()
+  }
+
+  /**
+   * A tap moves a precise 10 seconds. Holding a direction keeps moving, and
+   * each repeat grows the step so a four-hour episode can still be crossed in
+   * seconds. The ceiling scales with the video, so short clips do not leap
+   * around when held.
+   */
+  const nudgeScrub = (direction: 1 | -1): void => {
+    const video = videoRef.current
+    if (!video) return
+    const total = Number.isFinite(video.duration) ? video.duration : 0
+    const ceiling = Math.min(SCRUB_MAX_CEILING, Math.max(SCRUB_MIN_CEILING, total / 30))
+    const now = performance.now()
+    const motion = scrubMotion.current
+    const holding = motion.direction === direction && now - motion.at < SCRUB_HOLD_GAP
+    const step = holding
+      ? Math.min(ceiling, motion.step * SCRUB_ACCELERATION)
+      : Math.min(ceiling, SEEK_STEP)
+    scrubMotion.current = { direction, at: now, step }
+    scrubJumped.current = false
+    setScrubAt((value) => {
+      const next = value + direction * step
+      return total ? Math.max(0, Math.min(total, next)) : Math.max(0, next)
+    })
+    poke()
+  }
+
+  /** LT/RT always move a full minute; they also reset hold acceleration. */
+  const jumpScrub = (delta: number): void => {
+    const video = videoRef.current
+    if (!video) return
+    const total = Number.isFinite(video.duration) ? video.duration : 0
+    scrubMotion.current = { direction: 0, at: 0, step: 0 }
+    scrubJumped.current = false
+    setScrubAt((value) => {
+      const next = value + delta
+      return total ? Math.max(0, Math.min(total, next)) : Math.max(0, next)
+    })
+    poke()
+  }
+
+  const commitScrub = (): void => {
+    const video = videoRef.current
+    if (!video) return
+    scrubMotion.current = { direction: 0, at: 0, step: 0 }
+    video.currentTime = scrubAt
+    setCurrent(scrubAt)
+    lastRef.current.position = scrubAt
+    // A second accept without moving the marker starts playback.
+    scrubJumped.current = true
+    poke()
+  }
+
+  const playFromScrub = (): void => {
+    const video = videoRef.current
+    if (!video) return
+    scrubJumped.current = false
+    setScrubFocus(false)
+    setFocusBar(false)
+    void video.play().catch(() => {})
+    poke()
+  }
+
+  const togglePlay = (): void => {
+    const video = videoRef.current
+    if (!video) return
+    if (video.paused) void video.play().catch(() => {})
+    else video.pause()
+    poke()
+  }
+
+  const chooseCaptions = (index: number | null): void => {
+    setCaptionIndex(index)
+    try {
+      if (index == null) window.localStorage.removeItem(SUBTITLE_KEY)
+      else window.localStorage.setItem(SUBTITLE_KEY, data?.captions[index]?.label ?? '')
+    } catch {
+      // Preference is a convenience; playback does not depend on it.
+    }
+  }
+
+  const chooseQuality = (index: number): void => {
+    const hls = hlsRef.current
+    if (!hls) return
+    hls.currentLevel = index
+    setQuality(index)
+  }
+
+  const chooseAudio = (index: number): void => {
+    const hls = hlsRef.current
+    if (!hls) return
+    hls.audioTrack = index
+    setAudioTrack(index)
+  }
+
+  const chooseSpeed = (value: number): void => {
+    const video = videoRef.current
+    if (!video) return
+    video.playbackRate = value
+    setSpeed(value)
+  }
+
+  const subtitleOptions: MenuOption[] = (data?.captions ?? []).map((track, index) => ({
+    key: `subtitle-${index}`,
+    label: track.label,
+    selected: captionIndex === index,
+    run: () => chooseCaptions(index)
+  }))
+  if (subtitleOptions.length) {
+    subtitleOptions.unshift({
+      key: 'subtitles-off',
+      label: 'Off',
+      selected: captionIndex == null,
+      run: () => chooseCaptions(null)
+    })
+  }
+
+  const qualityChoices = levels
+    .slice()
+    .sort((a, b) => (b.height ?? 0) - (a.height ?? 0) || b.bitrate - a.bitrate)
+    .filter(
+      (level, index, all) =>
+        level.height == null || all.findIndex((other) => other.height === level.height) === index
+    )
+
+  // A single rendition leaves nothing to choose. Keep the control visible so the
+  // quality is still readable, but do not pretend it opens a menu.
+  const qualityFixed = levels.length > 0 && qualityChoices.length <= 1
+
+  const qualityOptions: MenuOption[] = levels.length
+    ? [
+        {
+          key: 'quality-auto',
+          label: 'Auto',
+          selected: quality === -1,
+          run: () => chooseQuality(-1)
+        },
+        ...qualityChoices.map((level) => ({
+          key: `quality-${level.index}`,
+          label: levelLabel(level),
+          selected: quality === level.index,
+          run: () => chooseQuality(level.index)
+        }))
+      ]
+    : []
+
+  const audioOptions: MenuOption[] = audioTracks.map((name, index) => ({
+    key: `audio-${index}`,
+    label: name,
+    selected: audioTrack === index,
+    run: () => chooseAudio(index)
+  }))
+
+  const speedOptions: MenuOption[] = SPEEDS.map((value) => ({
+    key: `speed-${value}`,
+    label: value === 1 ? 'Normal' : speedLabel(value),
+    selected: speed === value,
+    run: () => chooseSpeed(value)
+  }))
+
+  const optionsFor = (target: Panel): MenuOption[] => {
+    switch (target) {
+      case 'subtitles':
+        return subtitleOptions
+      case 'audio':
+        return audioOptions
+      case 'quality':
+        return qualityOptions
+      case 'speed':
+        return speedOptions
+    }
+  }
+
+  const options = panel ? optionsFor(panel) : []
+
+  const openPanel = (target: Panel): void => {
+    const list = optionsFor(target)
+    const selected = list.findIndex((option) => option.selected)
+    setOptionFocus(selected >= 0 ? selected : 0)
+    setPanel(target)
+
+    // Open just above the button that was pressed, kept inside the viewport.
+    const anchor = anchorRefs.current[target]
+    if (anchor) {
+      const rect = anchor.getBoundingClientRect()
+      const width = Math.min(340, window.innerWidth - 88)
+      const half = width / 2
+      const center = rect.left + rect.width / 2
+      setPanelPosition({
+        left: Math.max(44 + half, Math.min(window.innerWidth - 44 - half, center)),
+        bottom: window.innerHeight - rect.top + 12
+      })
+    } else {
+      setPanelPosition(null)
+    }
+
+    setFocusBar(true)
+    setScrubFocus(false)
+    setShowControls(true)
+    window.clearTimeout(hideTimer.current)
+  }
+
+  const closePanel = (): void => {
+    setPanel(null)
+    poke()
+  }
+
+  const chooseOption = (index: number): void => {
+    options[index]?.run()
+    closePanel()
+  }
+
+  const barOrder: BarId[] = ['exit', 'play', 'subtitles']
+  if (audioTracks.length > 1) barOrder.push('audio')
+  if (levels.length && !qualityFixed) barOrder.push('quality')
+  barOrder.push('speed', 'fullscreen')
+
+  const moveBar = (delta: number): void => {
+    const index = Math.max(0, barOrder.indexOf(barFocus))
+    const next = (index + delta + barOrder.length) % barOrder.length
+    setBarFocus(barOrder[next])
+    setFocusBar(true)
+    poke()
+  }
+
+  const moveOption = (delta: number): void => {
+    if (!options.length) return
+    setOptionFocus((index) => (index + delta + options.length) % options.length)
+    poke()
+  }
+
+  const activateBar = (): void => {
+    switch (barFocus) {
+      case 'exit':
+        onClose()
+        return
+      case 'play':
+        togglePlay()
+        return
+      case 'subtitles':
+        openPanel('subtitles')
+        return
+      case 'audio':
+        openPanel('audio')
+        return
+      case 'quality':
+        if (!qualityFixed) openPanel('quality')
+        return
+      case 'speed':
+        openPanel('speed')
+        return
+      case 'fullscreen':
+        window.beacon.app.toggleFullscreen()
+        return
+    }
+  }
+
+  const handle = (action: Action): boolean => {
+    if (!videoRef.current) return false
+
+    if (action === 'back') {
+      if (panel) closePanel()
+      else if (scrubFocus) {
+        // Step out of scrubbing before hiding the whole overlay.
+        setScrubFocus(false)
+        setFocusBar(true)
         poke()
-        switch (action) {
-          case 'accept':
-            if (video.paused) void video.play().catch(() => {})
-            else video.pause()
-            return true
-          case 'up':
-          case 'down':
-            return true
-          case 'left':
-            video.currentTime = Math.max(0, video.currentTime - SEEK_STEP)
-            return true
-          case 'right':
-            video.currentTime = Math.min(video.duration || 0, video.currentTime + SEEK_STEP)
-            return true
-          case 'seekBack':
-          case 'prevSection':
-            video.currentTime = Math.max(0, video.currentTime - SEEK_JUMP)
-            return true
-          case 'seekForward':
-          case 'nextSection':
-            video.currentTime = Math.min(video.duration || 0, video.currentTime + SEEK_JUMP)
-            return true
-          case 'search':
-            setCaptionsOn((value) => !value)
-            return true
-          case 'back':
-            onClose()
-            return true
-          default:
-            return false
-        }
+      } else if (showControls) {
+        setShowControls(false)
+        setFocusBar(false)
+        window.clearTimeout(hideTimer.current)
+      } else onClose()
+      return true
+    }
+
+    if (panel) {
+      switch (action) {
+        case 'accept':
+          chooseOption(optionFocus)
+          return true
+        case 'up':
+        case 'left':
+          moveOption(-1)
+          return true
+        case 'down':
+        case 'right':
+          moveOption(1)
+          return true
+        case 'seekBack':
+        case 'seekForward':
+        case 'prevSection':
+        case 'nextSection':
+          jump(action === 'seekBack' || action === 'prevSection' ? -SEEK_JUMP : SEEK_JUMP)
+          return true
+        case 'menu':
+          closePanel()
+          return true
+        default:
+          return true
       }
-    }),
-    [onClose, poke]
-  )
+    }
+
+    switch (action) {
+      case 'accept':
+        if (scrubFocus) {
+          if (scrubJumped.current) playFromScrub()
+          else commitScrub()
+        } else if (focusBar) {
+          activateBar()
+          poke()
+        } else {
+          togglePlay()
+        }
+        return true
+      case 'left':
+      case 'right':
+        if (scrubFocus) nudgeScrub(action === 'left' ? -1 : 1)
+        else if (focusBar) moveBar(action === 'left' ? -1 : 1)
+        else jump(action === 'left' ? -SEEK_STEP : SEEK_STEP)
+        return true
+      case 'up':
+      case 'down':
+        if (scrubFocus) {
+          // Down steps back to the control bar; up has nowhere else to go.
+          if (action === 'down') {
+            setScrubFocus(false)
+            setFocusBar(true)
+          }
+        } else if (action === 'up' && !playing) {
+          startScrub()
+        } else {
+          setFocusBar((focused) => !focused)
+        }
+        poke()
+        return true
+      case 'seekBack':
+      case 'prevSection':
+        if (scrubFocus) jumpScrub(-SEEK_JUMP)
+        else jump(-SEEK_JUMP)
+        return true
+      case 'seekForward':
+      case 'nextSection':
+        if (scrubFocus) jumpScrub(SEEK_JUMP)
+        else jump(SEEK_JUMP)
+        return true
+      case 'menu':
+        setScrubFocus(false)
+        setFocusBar(true)
+        poke()
+        return true
+      case 'search':
+        openPanel('subtitles')
+        return true
+      default:
+        return false
+    }
+  }
+
+  useImperativeHandle(ref, () => ({ handle }))
 
   const percent = duration ? Math.min(100, (current / duration) * 100) : 0
+  const scrubbing = scrubFocus && !playing
+  const scrubPercent = duration ? Math.min(100, Math.max(0, (scrubAt / duration) * 100)) : 0
+  const scrubStart = Math.min(percent, scrubPercent)
+  const scrubWidth = Math.abs(scrubPercent - percent)
+  const playingLevel = levels.find((level) => level.index === activeLevel)
+  const selectedLevel = levels.find((level) => level.index === quality)
+  const qualityValue = qualityFixed
+    ? `${levelLabel(qualityChoices[0])} (fixed)`
+    : quality >= 0
+      ? levelLabel(selectedLevel)
+      : playingLevel?.height
+        ? `Auto ${playingLevel.height}p`
+        : 'Auto'
+  const captionsOn = captionIndex != null
+
+  const focused = (id: BarId): string => (focusBar && barFocus === id ? ' is-focused' : '')
+
+  let panelNote: string | null = null
+  if (panel === 'subtitles') {
+    if (captionError) panelNote = captionError
+    else if (!options.length) panelNote = 'This video has no subtitles.'
+  } else if (panel === 'audio') {
+    panelNote = 'This stream has one audio track.'
+  } else if (panel === 'quality' && qualityFixed) {
+    panelNote = 'Quality is fixed for this stream.'
+  }
 
   return (
-    <div className="player">
+    <div className="player" onPointerMove={poke}>
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <video ref={videoRef} className="player__video" playsInline>
-        {captionUrl ? <track key={captionUrl} kind="subtitles" src={captionUrl} default /> : null}
+      <video ref={videoRef} className="player__video" playsInline onClick={togglePlay}>
+        {captionUrl ? (
+          <track
+            key={captionUrl}
+            data-own="captions"
+            kind="subtitles"
+            label={caption?.label}
+            src={captionUrl}
+            default
+          />
+        ) : null}
       </video>
 
       {!data && !error ? (
@@ -282,20 +839,212 @@ export function Player({ slug, startAt, onClose, ref }: PlayerProps): React.JSX.
         </div>
       ) : null}
 
-      <div className={`player__chrome${showControls || !playing ? ' is-visible' : ''}`}>
+      <div className={`player__chrome${showControls ? ' is-visible' : ''}`}>
         <div className="player__top">
           <h1 className="player__title">{data?.title ?? ''}</h1>
         </div>
+
         <div className="player__bottom">
-          <div className="player__bar">
-            <div className="player__bar-fill" style={{ width: `${percent}%` }} />
-          </div>
-          <div className="player__meta">
-            <span>{formatTime(current)}</span>
-            <span className="player__hint">
-              A play/pause · ←→ 10s · LT/RT 1min · X subtitles · B back
+          {panel ? (
+            <div
+              className="player__panel"
+              role="menu"
+              aria-label={PANEL_TITLES[panel]}
+              style={panelPosition ?? undefined}
+            >
+              <p className="player__panel-title">{PANEL_TITLES[panel]}</p>
+              {options.map((option, index) => (
+                <button
+                  key={option.key}
+                  ref={(element) => {
+                    optionRefs.current[index] = element
+                  }}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={option.selected}
+                  className={`player__option${optionFocus === index ? ' is-focused' : ''}`}
+                  tabIndex={-1}
+                  onClick={() => chooseOption(index)}
+                >
+                  <span>{option.label}</span>
+                  {option.selected ? (
+                    <Check width={20} height={20} strokeWidth={2} aria-hidden />
+                  ) : null}
+                </button>
+              ))}
+              {panelNote ? <p className="player__panel-note">{panelNote}</p> : null}
+            </div>
+          ) : null}
+
+          <div className={`player__progress${scrubbing ? ' is-scrubbing' : ''}`}>
+            <div className="player__bar" aria-hidden>
+              <div className="player__bar-fill" style={{ width: `${percent}%` }} />
+              {scrubbing ? (
+                <div
+                  className="player__bar-scrub"
+                  style={{ left: `${scrubStart}%`, width: `${scrubWidth}%` }}
+                />
+              ) : null}
+            </div>
+            {scrubbing ? (
+              <span
+                className="player__bar-thumb"
+                style={{ left: `${scrubPercent}%` }}
+                aria-hidden
+              />
+            ) : null}
+            <span
+              className={`player__time player__time--current${scrubbing ? ' is-target' : ''}`}
+            >
+              {formatTime(scrubbing ? scrubAt : current)}
             </span>
-            <span>{formatTime(duration)}</span>
+            <span className="player__time player__time--total">{formatTime(duration)}</span>
+          </div>
+
+          <div className="player__controls">
+            <div className="player__group player__group--left">
+              <button
+                type="button"
+                className={`player__control player__control--icon${focused('exit')}`}
+                tabIndex={-1}
+                aria-label="Back"
+                title="Back"
+                onClick={() => onClose()}
+              >
+                <NavArrowLeft width={24} height={24} strokeWidth={1.8} aria-hidden />
+              </button>
+            </div>
+
+            <div className="player__group player__group--center">
+              <button
+                type="button"
+                className={`player__control player__control--primary${focused('play')}`}
+                tabIndex={-1}
+                aria-label={playing ? 'Pause' : 'Play'}
+                title={playing ? 'Pause' : 'Play'}
+                onClick={() => {
+                  setBarFocus('play')
+                  setFocusBar(true)
+                  togglePlay()
+                }}
+              >
+                {playing ? (
+                  <Pause width={24} height={24} strokeWidth={1.8} aria-hidden />
+                ) : (
+                  <Play width={24} height={24} strokeWidth={1.8} aria-hidden />
+                )}
+                <span className="player__control-value">{playing ? 'Pause' : 'Play'}</span>
+              </button>
+            </div>
+
+            <div className="player__group player__group--right">
+              <button
+                type="button"
+                ref={(element) => {
+                  anchorRefs.current.subtitles = element
+                }}
+                className={`player__control${focused('subtitles')}${captionsOn ? ' is-active' : ''}`}
+                tabIndex={-1}
+                aria-haspopup="menu"
+                aria-expanded={panel === 'subtitles'}
+                aria-label={captionsOn ? `Subtitles: ${caption?.label ?? 'on'}` : 'Subtitles: off'}
+                title="Subtitles"
+                onClick={() => {
+                  setBarFocus('subtitles')
+                  openPanel('subtitles')
+                }}
+              >
+                <ClosedCaptionsTagSolid
+                  width={24}
+                  height={24}
+                  strokeWidth={1.8}
+                  aria-hidden
+                />
+                <span className="player__control-value">
+                  {captionsOn ? (caption?.label ?? 'On') : 'Subtitles'}
+                </span>
+              </button>
+
+              {audioTracks.length > 1 ? (
+                <button
+                  type="button"
+                  ref={(element) => {
+                    anchorRefs.current.audio = element
+                  }}
+                  className={`player__control player__control--icon${focused('audio')}`}
+                  tabIndex={-1}
+                  aria-haspopup="menu"
+                  aria-expanded={panel === 'audio'}
+                  aria-label={`Audio: ${audioTracks[audioTrack] ?? 'default'}`}
+                  title={`Audio: ${audioTracks[audioTrack] ?? 'default'}`}
+                  onClick={() => {
+                    setBarFocus('audio')
+                    openPanel('audio')
+                  }}
+                >
+                  <Headset width={24} height={24} strokeWidth={1.8} aria-hidden />
+                </button>
+              ) : null}
+
+              {levels.length ? (
+                <button
+                  type="button"
+                  ref={(element) => {
+                    anchorRefs.current.quality = element
+                  }}
+                  className={`player__control${focused('quality')}`}
+                  tabIndex={-1}
+                  disabled={qualityFixed}
+                  aria-haspopup={qualityFixed ? undefined : 'menu'}
+                  aria-expanded={qualityFixed ? undefined : panel === 'quality'}
+                  aria-label={`Quality: ${qualityValue}`}
+                  title={qualityFixed ? 'Quality is fixed for this stream' : 'Quality'}
+                  onClick={() => {
+                    if (qualityFixed) return
+                    setBarFocus('quality')
+                    openPanel('quality')
+                  }}
+                >
+                  <HdDisplay width={24} height={24} strokeWidth={1.8} aria-hidden />
+                  <span className="player__control-value">{qualityValue}</span>
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                ref={(element) => {
+                  anchorRefs.current.speed = element
+                }}
+                className={`player__control${focused('speed')}`}
+                tabIndex={-1}
+                aria-haspopup="menu"
+                aria-expanded={panel === 'speed'}
+                aria-label={`Playback speed: ${speedLabel(speed)}`}
+                title="Playback speed"
+                onClick={() => {
+                  setBarFocus('speed')
+                  openPanel('speed')
+                }}
+              >
+                <DashboardSpeed width={24} height={24} strokeWidth={1.8} aria-hidden />
+                <span className="player__control-value">{speedLabel(speed)}</span>
+              </button>
+
+              <button
+                type="button"
+                className={`player__control player__control--icon${focused('fullscreen')}`}
+                tabIndex={-1}
+                aria-label="Fullscreen"
+                title="Fullscreen"
+                onClick={() => {
+                  setBarFocus('fullscreen')
+                  setFocusBar(true)
+                  window.beacon.app.toggleFullscreen()
+                }}
+              >
+                <Maximize width={24} height={24} strokeWidth={1.8} aria-hidden />
+              </button>
+            </div>
           </div>
         </div>
       </div>

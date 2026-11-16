@@ -67,9 +67,19 @@ On a Steam Deck, `STEAM` + `X` opens the on-screen keyboard for the password fie
 | Play / pause | A | Space |
 | Seek ±10s | D-pad left / right | ← / → |
 | Seek ±1min | LT / RT | — |
-| Subtitles | X | — |
+| Player controls | D-pad up / down, Y / Start | ↑ / ↓, M |
+| Scrub while paused | ↑ then ← / →, A to jump, A again to play | ↑ then ← / →, Enter to jump, Enter again to play |
+| Choose in a player menu | D-pad + A | Arrows + Enter |
 | Quit | — | Ctrl+Q |
 | Fullscreen | — | F11 |
+
+In the player, ↑/↓ (or Y/Start) reaches the controls, where ←/→ moves
+between them. While the bar is unfocused, ←/→ seek. When paused, ↑ goes
+instead to the progress bar: ←/→ move the seek marker and A/Enter jumps to that
+time. Press A/Enter again without moving the marker to play from there. ↓ leaves
+the scrubber for the controls. The bar has
+subtitles, audio track, quality, playback speed and fullscreen; a chosen
+subtitle language is remembered for the next video.
 
 ### Build
 
