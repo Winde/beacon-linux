@@ -1,0 +1,33 @@
+{
+  "name": "beacon-linux",
+  "version": "0.1.0",
+  "description": "Unofficial, controller-first Beacon (Critical Role) client for Linux and SteamOS",
+  "main": "./out/main/index.js",
+  "author": "Winde",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "build:win": "npm run build && electron-builder --win",
+    "build:linux": "npm run build && electron-builder --linux"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "electron": "^45.3.3",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  },
+  "dependencies": {
+    "hls.js": "^1.7.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  }
+}

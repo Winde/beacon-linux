@@ -1,0 +1,8 @@
+node_modules/
+out/
+dist/
+release/
+reference/apk/*
+!reference/apk/.gitkeep
+*.log
+.DS_Store
