@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { registerIpc } from './ipc'
 
 const isDev = !app.isPackaged
@@ -18,6 +19,9 @@ let mainWindow: BrowserWindow | null = null
  * Handy for checking layout without a second monitor.
  */
 function captureIfRequested(window: BrowserWindow): void {
+  // A development aid, not part of a packaged app: BEACON_SHOT_SCRIPT runs
+  // arbitrary JavaScript in the renderer, so it must not ship.
+  if (!isDev) return
   const target = process.env['BEACON_SHOT']
   if (!target) return
   window.webContents.once('did-finish-load', () => {
@@ -42,6 +46,13 @@ function captureIfRequested(window: BrowserWindow): void {
 }
 
 function createWindow(): void {
+  const devUrl = process.env['ELECTRON_RENDERER_URL']
+  // The one document this window may show. A page-initiated navigation away
+  // from it would hand the preload bridge to whatever loaded next.
+  const appUrl = new URL(
+    isDev && devUrl ? devUrl : pathToFileURL(join(__dirname, '../renderer/index.html')).href
+  ).href
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -53,7 +64,7 @@ function createWindow(): void {
     frame: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
     }
@@ -72,13 +83,32 @@ function createWindow(): void {
     console.error('[window] did-fail-load', code, description, url)
   })
 
-  mainWindow.webContents.on('console-message', (event) => {
-    const details = event as unknown as { level?: string; message?: string; sourceId?: string }
-    console.log(`[renderer:${details.level ?? 'log'}] ${details.message ?? ''}`)
+  if (isDev) {
+    // Only in development: renderer logs can quote remote URLs and responses,
+    // and a packaged app has no terminal to read them from anyway.
+    mainWindow.webContents.on('console-message', (event) => {
+      const details = event as unknown as { level?: string; message?: string; sourceId?: string }
+      console.log(`[renderer:${details.level ?? 'log'}] ${details.message ?? ''}`)
+    })
+  }
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url !== appUrl) event.preventDefault()
+  })
+
+  mainWindow.webContents.on('will-redirect', (event, url) => {
+    if (url !== appUrl) event.preventDefault()
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    // Nothing opens a window today; if something ever does, only a real web
+    // address goes to the desktop, never a local path or a custom scheme.
+    try {
+      const target = new URL(url)
+      if (target.protocol === 'https:') void shell.openExternal(target.href)
+    } catch {
+      // Unparseable: drop it.
+    }
     return { action: 'deny' }
   })
 
@@ -95,7 +125,6 @@ function createWindow(): void {
     }
   })
 
-  const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (isDev && devUrl) {
     void mainWindow.loadURL(devUrl)
   } else {

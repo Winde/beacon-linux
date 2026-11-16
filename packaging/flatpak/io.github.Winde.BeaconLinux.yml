@@ -31,6 +31,12 @@ finish-args:
   - --device=all
   # Controllers are not registered without this
   - --filesystem=/run/udev:ro
+  # Electron's safeStorage needs the desktop keyring to keep the session; a
+  # sandboxed app cannot see it otherwise, so every launch would ask for the
+  # password. KWallet is not behind the Secret Service name.
+  - --talk-name=org.freedesktop.secrets
+  - --talk-name=org.kde.kwalletd5
+  - --talk-name=org.kde.kwalletd6
   # Let Chromium inhibit the screensaver while playing
   - --talk-name=org.freedesktop.ScreenSaver
   - --talk-name=org.gnome.ScreenSaver
