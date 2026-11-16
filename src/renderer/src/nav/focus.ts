@@ -36,6 +36,42 @@ function candidates(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(isVisible)
 }
 
+interface Box {
+  left: number
+  top: number
+  right: number
+  bottom: number
+  width: number
+  height: number
+}
+
+/**
+ * Bounding box in layout space: the scroll offsets of every ancestor are
+ * added back in, so scrolling does not change the geometry navigation sees.
+ *
+ * Without this, a shelf scrolled up under a pinned header is physically far
+ * above the current tile, which makes the header's Play button the nearest
+ * candidate for "up". Focus then jumps straight back to the hero instead of
+ * walking up the rows in order.
+ */
+function layoutBox(element: HTMLElement): Box {
+  const rect = element.getBoundingClientRect()
+  let left = rect.left
+  let top = rect.top
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    left += parent.scrollLeft
+    top += parent.scrollTop
+  }
+  return {
+    left,
+    top,
+    right: left + rect.width,
+    bottom: top + rect.height,
+    width: rect.width,
+    height: rect.height
+  }
+}
+
 export function setFocused(element: HTMLElement | null, scroll = true): void {
   if (element === current) return
   current?.classList.remove(FOCUS_CLASS)
@@ -59,7 +95,7 @@ export function focusFirst(prefer?: string): void {
 }
 
 function pick(from: HTMLElement, pool: HTMLElement[], direction: Direction): HTMLElement | null {
-  const a = from.getBoundingClientRect()
+  const a = layoutBox(from)
   const ax = a.left + a.width / 2
   const ay = a.top + a.height / 2
   const horizontal = direction === 'left' || direction === 'right'
@@ -69,7 +105,7 @@ function pick(from: HTMLElement, pool: HTMLElement[], direction: Direction): HTM
 
   for (const element of pool) {
     if (element === from) continue
-    const b = element.getBoundingClientRect()
+    const b = layoutBox(element)
     const dx = b.left + b.width / 2 - ax
     const dy = b.top + b.height / 2 - ay
 
