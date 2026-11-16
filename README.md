@@ -1,4 +1,4 @@
-# beacon-linux
+# beacon-linux (Unofficial)
 
 An unofficial, controller-first Beacon (Critical Role) client for Linux and SteamOS.
 
