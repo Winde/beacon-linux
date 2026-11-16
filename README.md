@@ -81,10 +81,12 @@ npm run build:linux    # AppImage + .deb
 
 ### Releases
 
-Pushing a tag that starts with `v` builds every artifact and publishes a GitHub
-Release: AppImage, `.deb` and `.tar.gz` for Linux, an installer for Windows, plus
-checksums. If any build fails, no release is created. See
-[docs/releasing.md](docs/releasing.md) for versioning rules and the checklist.
+Releases are started by hand, not by pushing a tag: tag the commit, create the
+release in the GitHub UI, then run the Release workflow with that tag. It builds
+an AppImage, `.deb` and `.tar.gz` for Linux plus an installer for Windows and
+checksums, and attaches them to that release. If any build fails, nothing is
+uploaded. See [docs/releasing.md](docs/releasing.md) for versioning rules and the
+checklist.
 
 ### Dev helpers
 
