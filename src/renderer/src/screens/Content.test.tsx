@@ -63,7 +63,7 @@ describe('Content', () => {
     expect(screen.getByText('55 min · Apprentice')).toBeDefined()
     expect(screen.getByText('An episode.')).toBeDefined()
     expect(content).toHaveBeenCalledWith('c1e5')
-    expect(focusFirst).toHaveBeenCalledWith('[data-testid="play"]')
+    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('[data-testid="play"]'))
   })
 
   it('clamps the description and reveals the continued summary on See More', async () => {

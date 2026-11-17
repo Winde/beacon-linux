@@ -69,7 +69,7 @@ describe('Collection', () => {
     expect(screen.queryByRole('tablist')).toBeNull()
     expect(screen.getAllByRole('button')).toHaveLength(3)
     expect(collection).toHaveBeenCalledWith('campaign-1')
-    expect(focusFirst).toHaveBeenCalledWith('.grid [data-focus]')
+    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('.grid [data-focus]'))
   })
 
   it('calls a non-series entry a collection', async () => {
@@ -115,7 +115,7 @@ describe('Collection', () => {
     render(<Collection slug="campaign-1" onOpen={vi.fn()} />)
     await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })
 
-    expect(focusFirst).toHaveBeenCalledWith('.tab')
+    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('.tab'))
   })
 
   it('favourites the whole series', async () => {

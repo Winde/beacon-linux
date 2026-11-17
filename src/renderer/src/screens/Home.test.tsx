@@ -88,7 +88,7 @@ describe('Home', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Featured One' })).toBeDefined()
     expect(screen.getByRole('heading', { name: 'Recently added' })).toBeDefined()
-    expect(focusFirst).toHaveBeenCalledWith('[data-focus]')
+    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('[data-focus]'))
     expect(preloadAll).toHaveBeenCalledWith([
       `https://images.example/feat-1x/format=auto,width=${HERO_WIDTH}`,
       `https://images.example/feat-2x/format=auto,width=${HERO_WIDTH}`
@@ -301,6 +301,6 @@ describe('Home', () => {
 
     expect(await screen.findByRole('heading', { name: 'Continue watching' })).toBeDefined()
     expect(home).toHaveBeenCalledTimes(2)
-    expect(focusFirst).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledTimes(1))
   })
 })

@@ -33,11 +33,11 @@ function fill(email: string, password: string): void {
 const submit = (): HTMLElement => screen.getByRole('button', { name: /^Sign in$/ })
 
 describe('Login', () => {
-  it('focuses the form on mount', () => {
+  it('focuses the form on mount', async () => {
     stubSignIn()
     render(<Login onSignedIn={vi.fn()} onSkip={vi.fn()} />)
 
-    expect(focusFirst).toHaveBeenCalledWith('[data-focus]')
+    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('[data-focus]'))
   })
 
   it('remembers the last email', () => {
