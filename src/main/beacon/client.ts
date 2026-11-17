@@ -98,6 +98,18 @@ const RESUME_TAIL = 3 * 60 // seconds
 /** A position this close to the start is not worth offering as a resume. */
 const RESUME_MIN = 5 // seconds
 
+/**
+ * A drop smaller than this is a player's own jitter, not a rewind. Beacon keeps
+ * the furthest point a session has reported and silently drops a lower one
+ * (`success: true`, point unchanged), so anything bigger needs a new session.
+ */
+const REWIND_SLACK_SECONDS = 10
+
+/** One id Beacon treats as a single viewing session. */
+function newSessionId(): string {
+  return 'linux-' + Math.random().toString(36).slice(2, 10)
+}
+
 export class BeaconClient {
   // Loaded once, on first use and after the app is ready: safeStorage needs that,
   // and this class is constructed at module load, before it.
@@ -105,7 +117,14 @@ export class BeaconClient {
   private sessionLoad: Promise<Session | null> | null = null
   private refreshing: Promise<string | null> | null = null
   private level: { at: number; value: number } | null = null
-  private sessionId = 'linux-' + Math.random().toString(36).slice(2, 10)
+  /**
+   * The session Beacon files reports under. It is not just bookkeeping: the
+   * CMS keeps the furthest point a session has reported and drops a lower one
+   * without saying so, so a rewind or a rewatch only saves from a new session.
+   */
+  private sessionId = newSessionId()
+  /** What this session has reported per content, so a drop can start a new one. */
+  private readonly sessionFloor = new Map<string, number>()
   /** Explicit marks, kept per account until real playback supersedes them. */
   private readonly watchmarks = new WatchMarkStore()
   /** In-flight favourite writes, keyed by collection id. */
@@ -941,6 +960,26 @@ export class BeaconClient {
   }
 
   /**
+   * The session a point should be filed under.
+   *
+   * Beacon keeps the furthest point a session has reported: a lower report is
+   * accepted (`success: true`) and then ignored, so a rewind, or a rewatch
+   * after a watched mark, would never reach the account from the session that
+   * wrote the mark. A fresh session has no such floor and its first report can
+   * land anywhere, so start one whenever this process is about to report a
+   * point below what its current session already did.
+   */
+  private sessionFor(contentId: string, seconds: number): string {
+    const floor = this.sessionFloor.get(contentId)
+    if (floor != null && seconds + REWIND_SLACK_SECONDS < floor) {
+      this.sessionId = newSessionId()
+      this.sessionFloor.clear()
+    }
+    this.sessionFloor.set(contentId, Math.max(seconds, this.sessionFloor.get(contentId) ?? 0))
+    return this.sessionId
+  }
+
+  /**
    * Queue one playback position. It leaves for Beacon within twenty seconds
    * (or sooner if ten are waiting), and a read that would show it flushes the
    * queue first.
@@ -965,7 +1004,7 @@ export class BeaconClient {
         videoProgress: shown,
         videoProgressSeconds: seconds
       },
-      this.sessionId
+      this.sessionFor(contentId, seconds)
     )
     // Playing the episode is a newer decision than the mark, whether or not the
     // report has landed. From here the server's own point takes over again.
@@ -1128,6 +1167,10 @@ export class BeaconClient {
     // Both ends are a trap: a 0% and a near-end 98%+ report are accepted and
     // then discarded. Stay far enough inside each end to be stored, and close
     // enough to the end that the read still counts as finished.
+    const target = watched ? Math.max(1, durationSec - 1) : 1
+    // A mark is an explicit decision, so it must land even when this process
+    // has already reported a higher point for the title (it would otherwise be
+    // a lower report in the same session, which Beacon drops).
     this.progressQueue.dropContent(account, id)
     this.progressQueue.add(
       account,
@@ -1135,12 +1178,12 @@ export class BeaconClient {
         content: id,
         duration: durationSec,
         videoProgress: watched ? WATCHED_PERCENT : 1,
-        videoProgressSeconds: watched ? Math.max(1, durationSec - 1) : 1,
+        videoProgressSeconds: target,
         removeFromContinueWatching: !watched,
         explicitMark: true,
         retryOfMark: retry
       },
-      this.sessionId
+      this.sessionFor(id, target)
     )
   }
 

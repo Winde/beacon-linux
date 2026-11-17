@@ -310,6 +310,30 @@ is the same as never calling it. The client marks an episode only when the
 member asks; finishing one by playback is detected from the progress
 (`videoProgress` plus `videoProgressSeconds` against the runtime).
 
+### Progress is monotonic **within a session**
+
+Measured 2026-11-17 on C4 E004 (runtime 17842 s), one event per mutation:
+
+| event | response | saved point |
+| --- | --- | --- |
+| 97% → **50%**, first event of session S4 | `success: true` | 50% |
+| 50% → **40%**, same S4 | `success: true` | 50% (ignored) |
+| 50% → **60%**, same S4 | `success: true` | 60% |
+| 60% → **20%**, first event of session S5 | `success: true` | 20% |
+
+So a report lower than the furthest one **its own `sessionId`** has already
+reported is accepted and then dropped, and a new `sessionId` has no such floor:
+its first report may land anywhere. A client that keeps one session id for a
+whole process therefore cannot save a rewind, a rewatch, or a mark that lowers
+the point once it has reported past it — the read stays where it was, with no
+error anywhere.
+
+That is why this client starts a new session whenever a position would go
+backwards (`sessionFor` in `client.ts`), and why a title stuck at a finished
+point on another machine usually clears itself when that machine restarts the
+app: the restart is what makes a new session.
+
+
 `trackView` success does not prove the point was stored, so the local mark is
 also a retry record: each mark keeps the point the member was looking at, and on
 launch the client re-sends a carried-over mark only when that point is unchanged.
