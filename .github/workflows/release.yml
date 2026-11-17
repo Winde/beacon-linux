@@ -2,18 +2,18 @@ name: Release
 
 # Manual only. Nothing runs when a tag is pushed.
 #
+# The release version is the semver tag on the commit the run starts from;
+# there is nothing to type in.
+#
 # 1. Bump the version, commit, tag, push the tag.
 # 2. Create the release for that tag in the GitHub UI.
-# 3. Actions -> Release -> Run workflow, and type the tag.
-#    Turn dry_run on to build and test without touching the release.
+# 3. Actions -> Release -> Run workflow, from the tagged commit (pick the tag
+#    under "Use workflow from", or main if its head is the tagged commit).
+#    Turn dry_run on to build and test without needing a tag or a release.
 
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Release tag, e.g. v0.1.0 (must already exist)'
-        required: true
-        type: string
       dry_run:
         description: 'Build and verify only; do not touch the release'
         required: false
@@ -24,26 +24,88 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ inputs.tag }}
+  group: release-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
   verify:
     name: Verify tag
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag }}
+          # Tags have to be present to resolve the release version.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
-      - name: Tag matches package.json
+      - name: Resolve the release tag
+        id: tag
         env:
-          TAG: ${{ inputs.tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          # vMAJOR.MINOR.PATCH, with optional prerelease/build suffix.
+          pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+
+          tags=()
+          while IFS= read -r name; do
+            [ -n "$name" ] || continue
+            if [[ "$name" =~ $pattern ]]; then
+              tags+=("$name")
+            fi
+          done < <(git tag --points-at "$GITHUB_SHA")
+
+          if [ "${#tags[@]}" -eq 0 ]; then
+            if [ "${DRY_RUN}" = "true" ]; then
+              echo "::notice::Dry run on untagged commit ${GITHUB_SHA}; building it as-is."
+              exit 0
+            fi
+            echo "::error::Commit ${GITHUB_SHA} is not tagged vMAJOR.MINOR.PATCH. Tag it and run this from that commit."
+            exit 1
+          fi
+
+          if [ "${#tags[@]}" -gt 1 ]; then
+            echo "::error::Commit ${GITHUB_SHA} carries more than one release tag (${tags[*]}); leave exactly one."
+            exit 1
+          fi
+
+          tag="${tags[0]}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Release version: ${tag}"
+
+      - name: Release exists and matches the tag
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::No release exists for ${TAG}. Create it in the GitHub UI, then run this again."
+            exit 1
+          fi
+
+          is_pre="$(gh release view "$TAG" --json isPrerelease -q .isPrerelease)"
+          case "$TAG" in
+            *-*) want=true ;;
+            *)   want=false ;;
+          esac
+          if [ "$is_pre" != "$want" ]; then
+            echo "::error::Release ${TAG} has isPrerelease=${is_pre}, expected ${want}. Tick or untick 'Set as a pre-release' on the release."
+            exit 1
+          fi
+
+      - name: Tag matches package.json
+        if: ${{ steps.tag.outputs.tag != '' }}
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           version="$(node -p "require('./package.json').version")"
           if [ "v${version}" != "${TAG}" ]; then
@@ -63,9 +125,8 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     steps:
+      # github.sha is the commit the run started from, which is the tag's commit.
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.tag }}
 
       - uses: actions/setup-node@v7
         with:
@@ -100,7 +161,7 @@ jobs:
 
   publish:
     name: Publish
-    needs: linux
+    needs: [verify, linux]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
@@ -117,31 +178,9 @@ jobs:
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Release exists and matches the tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::error::No release exists for ${TAG}. Create it in the GitHub UI, then run this again."
-            exit 1
-          fi
-
-          is_pre="$(gh release view "$TAG" --json isPrerelease -q .isPrerelease)"
-          case "$TAG" in
-            *-*) want=true ;;
-            *)   want=false ;;
-          esac
-          if [ "$is_pre" != "$want" ]; then
-            echo "::error::Release ${TAG} has isPrerelease=${is_pre}, expected ${want}. Tick or untick 'Set as a pre-release' on the release."
-            exit 1
-          fi
-
       - name: Upload to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ needs.verify.outputs.tag }}
         run: gh release upload "$TAG" artifacts/* --clobber

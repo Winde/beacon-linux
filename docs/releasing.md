@@ -2,8 +2,9 @@
 
 Releases are cut from tags, but nothing is automatic. Pushing a tag builds
 nothing and publishes nothing. You create the release yourself, then run
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) by hand for
-that tag, and it attaches the artifacts.
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) by hand from
+the tagged commit; it takes that tag as the release version and attaches the
+artifacts.
 
 ## Versioning
 
@@ -50,15 +51,21 @@ distributions; FUSE 2 is its only system dependency (SteamOS has it, and
 
 4. Create the release in the GitHub UI for that tag. Tick **Set as a
    pre-release** if the tag has a hyphen.
-5. Go to **Actions → Release → Run workflow**, enter the tag, and leave
-   `dry_run` off.
+5. Go to **Actions → Release → Run workflow**. Under **Use workflow from**, pick
+   the tag (or `main` if its head is the tagged commit), and leave `dry_run`
+   off.
 6. Check the run and the assets on the release.
 
-The run checks out that tag, fails immediately if it disagrees with
-`package.json`, runs `npm run verify` (lint, format, typecheck and tests), builds
-the AppImage, and uploads it and the checksums to the release you created. If the
-release does not exist, the publish job stops with a message telling you to
-create it.
+There is no version to type in: the run reads the semver tag `vMAJOR.MINOR.PATCH`
+that points at the commit it starts from and uses it as the release version. It
+fails immediately if that commit is untagged, carries more than one release tag,
+or its tag disagrees with `package.json`.
+
+It also checks up front that the release exists and that its pre-release
+checkbox matches the tag, before running `npm run verify` (lint, format,
+typecheck and tests), building the AppImage, and uploading it and the checksums.
+A missing or mismatched release therefore fails in seconds rather than after the
+build.
 
 The publish job only runs after the Linux build passes, so a failed build leaves
 the release untouched.
@@ -68,22 +75,25 @@ the release untouched.
 The tag must match `package.json` exactly, so choose the version first. A
 rehearsal uses a prerelease version and `dry_run`; that runs the same checks and
 the AppImage build but skips the publish job, so no release is needed and
-nothing is modified.
+nothing is modified. A dry run needs no tag either: it can build any commit as
+it stands, and if the commit is tagged the version checks still run.
 
 1. Set `version` in `package.json` to the prerelease you are rehearsing, for
    example `0.2.0-rc.1`. Commit it and push.
-2. Tag that commit and push the tag:
+2. Optionally tag that commit and push the tag, to rehearse the tag checks too:
 
    ```sh
    git tag -a v0.2.0-rc.1 -m "release rehearsal"
    git push origin v0.2.0-rc.1
    ```
 
-3. Run **Actions → Release** with that tag and `dry_run` on.
+3. Run **Actions → Release** with `dry_run` on, from the tagged commit or from
+   `main`.
 4. Download the `linux` artifact from the run.
 5. Install and run the AppImage on a Steam Machine or Deck: sign in, play a
    video, use the controller. See [install-steamos.md](install-steamos.md).
-6. If the build is not what you want, fix it, delete the tag and repeat:
+6. If the build is not what you want, fix it, and if you tagged it, delete the
+   tag and repeat:
 
    ```sh
    git tag -d v0.2.0-rc.1
@@ -101,8 +111,8 @@ again with `dry_run` off.
 
 ## Re-running
 
-Run the workflow again with the same tag. Uploads use `--clobber`, so artifacts
-are replaced rather than duplicated.
+Run the workflow again from the same tagged commit. Uploads use `--clobber`, so
+artifacts are replaced rather than duplicated.
 
 To abandon a release, delete it in the GitHub UI and delete the tag:
 

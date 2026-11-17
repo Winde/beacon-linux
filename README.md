@@ -244,12 +244,13 @@ still needs the TypeScript 6 API. `@typescript/native` supplies the TypeScript 7
 ### Releases
 
 Releases are started by hand, not by pushing a tag: tag the commit, create the
-release in the GitHub UI, then run the Release workflow with that tag. It builds
-the Linux AppImage and checksums and attaches them to that release, along with
-`install.sh` and `steam-art.zip`. If the build fails, nothing is uploaded. The
-workflow can also be run with `dry_run` to build and test everything without
-touching the release. See [docs/releasing.md](docs/releasing.md) for versioning
-rules and the checklist.
+release in the GitHub UI, then run the Release workflow from that tagged commit.
+It reads the version from the tag, builds the Linux AppImage and checksums, and
+attaches them to that release, along with `install.sh` and `steam-art.zip`. A
+missing or mismatched release fails before the build. If the build fails, nothing
+is uploaded. The workflow can also be run with `dry_run` on any commit to build
+and test everything without touching the release. See
+[docs/releasing.md](docs/releasing.md) for versioning rules and the checklist.
 
 ### Dev helpers
 
