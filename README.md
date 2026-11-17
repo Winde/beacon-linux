@@ -15,8 +15,12 @@ does for YouTube.
 ## Status
 
 Working end to end: sign-in, home, series, episode pages, search, favourites, and
-video playback with resume and progress sync. Controller navigation is in place
-but has only been exercised with a keyboard so far.
+video playback with resume, progress sync and next-episode autoplay. Verified on
+SteamOS in Game Mode with a real Steam Controller, using one of the layouts under
+[Controller layout](#controller-layout-one-time).
+
+Beacon updates itself from the left menu (a manual check, no silent install), and
+flushes watch progress when the machine suspends.
 
 Verified against the live service on 2026-11-16.
 
@@ -214,11 +218,6 @@ second monitor. `BEACON_SHOT_SCRIPT` runs JavaScript before the capture, and
 
 ## Roadmap
 
-- [ ] Verify on SteamOS with a real Steam Controller
-- [ ] Steam Input profile shipped with the app
-- [ ] Suspend / resume handling
-- [ ] Update check from inside the app (manual, no silent install)
-- [x] "Next episode" autoplay at the end of an episode
 - [ ] Live-event support (Beacon's waiting room)
 
 ## Legal

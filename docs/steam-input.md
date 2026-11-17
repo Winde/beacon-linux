@@ -114,6 +114,10 @@ matters when running the app on Windows during development; the target platform
 
 - **AppImage**: no extra permissions are needed; the app reads the gamepad
   through the normal Gamepad API.
+- **Controller layout**: cannot be shipped with the app. Steam Input keeps a
+  shortcut's configuration in the player's own profile, and distributing one for
+  a non-Steam game would mean using the Steamworks SDK. The install guide and the
+  README name the templates to pick instead, so setup is a one-time choice.
 - **Steam Runtime**: Electron under the Steam Runtime may need `--no-sandbox`.
 - **`uinput`**: Steam Input creates the virtual pad through `/dev/uinput`. On
   systems with systemd 258 the module failed to load, which broke controller
