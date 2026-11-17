@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavArrowDown, NavArrowUp } from 'iconoir-react'
-import type {
-  Card,
-  FavouriteItem,
-  FavouritesAnchor,
-  HomeData,
-  HomeRow
-} from '@shared/types'
+import type { Card, FavouriteItem, FavouritesAnchor, HomeData, HomeRow } from '@shared/types'
 import { isFavourite, toCard } from '@shared/favourites'
 import { useAsync } from '../lib/useAsync'
 import { backdropUrl, preloadAll } from '../lib/images'
@@ -53,11 +47,10 @@ export function Home({
   // After sign-in there is no previous feed yet, so the app passes the one it
   // fetched while the sign-in panel was still up, and this screen never blanks
   // to a spinner of its own.
-  const { data, error, loading } = useAsync(
-    () => window.beacon.catalog.home(),
-    [refreshKey],
-    { keepData: true, initial }
-  )
+  const { data, error, loading } = useAsync(() => window.beacon.catalog.home(), [refreshKey], {
+    keepData: true,
+    initial
+  })
   // The hero previews whatever the player is pointing at, so the backdrop
   // changes as focus moves rather than staying on the first featured item.
   const [preview, setPreview] = useState<Card | null>(null)
@@ -73,12 +66,16 @@ export function Home({
     // deleted, or an editor recreated it) falls back to that same place.
     const preferred = base.find((row) => row.kind === 'continue')?.id ?? 'top'
     const chosen = favouritesAfter ?? preferred
-    const anchor =
-      chosen === 'top' || base.some((row) => row.id === chosen) ? chosen : preferred
+    const anchor = chosen === 'top' || base.some((row) => row.id === chosen) ? chosen : preferred
     const at = anchor === 'top' ? 0 : base.findIndex((row) => row.id === anchor) + 1
     return [
       ...base.slice(0, at),
-      { id: 'favourites', kind: 'favourites', title: FAVOURITES_ROW, items: favourites.map(toCard) },
+      {
+        id: 'favourites',
+        kind: 'favourites',
+        title: FAVOURITES_ROW,
+        items: favourites.map(toCard)
+      },
       ...base.slice(at)
     ]
   }, [data, favourites, favouritesAfter])

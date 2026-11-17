@@ -110,9 +110,13 @@ describe('reorderMasterPlaylist', () => {
   })
 
   it('sorts variants without a reported bandwidth last', () => {
-    const text = ['#EXTM3U', variantLine(null, '640x360'), 'low.m3u8', variantLine(500000), 'high.m3u8'].join(
-      '\n'
-    )
+    const text = [
+      '#EXTM3U',
+      variantLine(null, '640x360'),
+      'low.m3u8',
+      variantLine(500000),
+      'high.m3u8'
+    ].join('\n')
     const out = reorderMasterPlaylist(text, BASE)!
     expect(out.indexOf('500000')).toBeLessThan(out.indexOf('640x360'))
   })
@@ -175,6 +179,17 @@ describe('fetchMasterPlaylist', () => {
     await expect(fetchMasterPlaylist(BASE)).rejects.toThrow('HTTP 404')
   })
 
+  it('does not remember a failed fetch, so a retry asks again', async () => {
+    net.fetch
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => master })
+
+    await expect(fetchMasterPlaylist(BASE)).rejects.toThrow('offline')
+    await expect(fetchMasterPlaylist(BASE)).resolves.toContain('1920x1080')
+
+    expect(net.fetch).toHaveBeenCalledTimes(2)
+  })
+
   it('serves a replay from the cache', async () => {
     net.fetch.mockResolvedValue({ ok: true, status: 200, text: async () => master })
 
@@ -199,7 +214,9 @@ describe('fetchCaptionFile', () => {
     net.fetch.mockResolvedValue({ ok: true, status: 200, text: async () => 'WEBVTT' })
 
     await expect(fetchCaptionFile(caption)).resolves.toBe('WEBVTT')
-    expect(net.fetch).toHaveBeenCalledWith(caption)
+    expect(net.fetch).toHaveBeenCalledWith(caption, {
+      signal: expect.any(AbortSignal)
+    })
   })
 
   it('reports an HTTP failure', async () => {

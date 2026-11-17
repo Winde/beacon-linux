@@ -38,12 +38,23 @@ function card(slug: string, title: string, overrides: Partial<Card> = {}): Card 
 function homeData(overrides: Partial<HomeData> = {}): HomeData {
   return {
     hero: [card('feat-1', 'Featured One'), card('feat-2', 'Featured Two')],
-    rows: [{ id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a'), card('b', 'Episode b')] }],
+    rows: [
+      {
+        id: 'recent',
+        kind: 'latest',
+        title: 'Recently added',
+        items: [card('a', 'Episode a'), card('b', 'Episode b')]
+      }
+    ],
     ...overrides
   }
 }
 
-function favourite(slug: string, title: string, overrides: Partial<FavouriteItem> = {}): FavouriteItem {
+function favourite(
+  slug: string,
+  title: string,
+  overrides: Partial<FavouriteItem> = {}
+): FavouriteItem {
   return {
     kind: 'series',
     id: `id-${slug}`,
@@ -85,7 +96,9 @@ describe('Home', () => {
   })
 
   it('shows a clean error from the main process', async () => {
-    stubHome(Promise.reject(new Error("Error invoking remote method 'catalog:home': Error: Network down")))
+    stubHome(
+      Promise.reject(new Error("Error invoking remote method 'catalog:home': Error: Network down"))
+    )
     render(<Home onOpen={vi.fn()} onPlay={vi.fn()} />)
 
     expect(await screen.findByText('Network down')).toBeDefined()
@@ -144,14 +157,17 @@ describe('Home', () => {
     stubHome(
       homeData({
         rows: [
-          { id: 'cw', kind: 'continue', title: 'Continue watching', items: [card('cw', 'Watching')] },
+          {
+            id: 'cw',
+            kind: 'continue',
+            title: 'Continue watching',
+            items: [card('cw', 'Watching')]
+          },
           { id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a')] }
         ]
       })
     )
-    render(
-      <Home onOpen={vi.fn()} onPlay={vi.fn()} favourites={[favourite('w1', 'Saved One')]} />
-    )
+    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} favourites={[favourite('w1', 'Saved One')]} />)
 
     expect(await screen.findByRole('heading', { name: 'Favourites' })).toBeDefined()
     expect(shelfTitles()).toEqual(['Continue watching', 'Favourites', 'Recently added'])
@@ -161,12 +177,12 @@ describe('Home', () => {
   it('puts the favourites first when there is nothing to continue', async () => {
     stubHome(
       homeData({
-        rows: [{ id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a')] }]
+        rows: [
+          { id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a')] }
+        ]
       })
     )
-    render(
-      <Home onOpen={vi.fn()} onPlay={vi.fn()} favourites={[favourite('w1', 'Saved One')]} />
-    )
+    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} favourites={[favourite('w1', 'Saved One')]} />)
 
     await screen.findByRole('heading', { name: 'Favourites' })
     expect(shelfTitles()).toEqual(['Favourites', 'Recently added'])
@@ -176,7 +192,12 @@ describe('Home', () => {
     stubHome(
       homeData({
         rows: [
-          { id: 'cw', kind: 'continue', title: 'Continue watching', items: [card('cw', 'Watching')] },
+          {
+            id: 'cw',
+            kind: 'continue',
+            title: 'Continue watching',
+            items: [card('cw', 'Watching')]
+          },
           { id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a')] }
         ]
       })
@@ -207,7 +228,12 @@ describe('Home', () => {
     stubHome(
       homeData({
         rows: [
-          { id: 'cw', kind: 'continue', title: 'Continue watching', items: [card('cw', 'Watching')] },
+          {
+            id: 'cw',
+            kind: 'continue',
+            title: 'Continue watching',
+            items: [card('cw', 'Watching')]
+          },
           { id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a')] }
         ]
       })
@@ -234,7 +260,12 @@ describe('Home', () => {
     stubHome(
       homeData({
         rows: [
-          { id: 'cw', kind: 'continue', title: 'Continue watching', items: [card('cw', 'Watching')] },
+          {
+            id: 'cw',
+            kind: 'continue',
+            title: 'Continue watching',
+            items: [card('cw', 'Watching')]
+          },
           { id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a')] }
         ]
       })
@@ -293,7 +324,12 @@ describe('Home', () => {
     const before = homeData()
     const after = homeData({
       rows: [
-        { id: 'cw', kind: 'continue', title: 'Continue watching', items: [card('watched', 'Just Watched')] },
+        {
+          id: 'cw',
+          kind: 'continue',
+          title: 'Continue watching',
+          items: [card('watched', 'Just Watched')]
+        },
         { id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a')] }
       ]
     })

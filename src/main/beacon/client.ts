@@ -2,11 +2,9 @@ import { net } from 'electron'
 import type {
   AuthStatus,
   Card,
-  CaptionTrack,
   CollectionData,
   ContentData,
   HomeData,
-  HomeRow,
   NextEpisode,
   NextEpisodeRequest,
   PlaybackData,
@@ -22,6 +20,10 @@ import type { IndexedCollection, IndexedVideo } from './catalog-types'
 import { WatchMarkStore, type WatchMark } from './watchmarks'
 import { accountKey } from './account'
 import { BATCH_SIZE, ProgressQueue, type QueuedEvent } from './progress-queue'
+import { captionsOf, closingStretch, indexedVideoCard, minutes, videoCard } from './cards'
+import type { CmsCard, ProgressInfo } from './cms-types'
+import { buildHome } from './home'
+import { PLATFORM } from './platform'
 
 const CMS_URL = 'https://critrole-beacon-production-backend.clockhosting.com/api/graphql'
 const OAUTH_URL = 'https://pocketbeacon.memberful.com/oauth/token'
@@ -33,11 +35,8 @@ const LEVEL_TTL = 10 * 60 * 1000
 const REPORT_WAIT = 5_000
 /** The app's own client flushes progress on this interval. */
 const FLUSH_EVERY = 20_000
-
-/** Must match the `x-platform` header sent with every request. */
-const PLATFORM = 'web'
-/** The content types this client can open today. */
-const VIDEO_TYPES = new Set(['video', 'videoPodcast'])
+/** A CMS or token request that hangs must not hold a screen open forever. */
+const API_TIMEOUT = 30_000
 
 export class BeaconError extends Error {
   status?: number
@@ -53,122 +52,11 @@ export interface CatalogLike {
   videoById(id: string): IndexedVideo | null
   collectionById(id: string): IndexedCollection | null
   seriesVideos(seriesId: string): IndexedVideo[]
-  localSearch(q: string, limit?: number): { collections: IndexedCollection[]; videos: IndexedVideo[] }
+  localSearch(
+    q: string,
+    limit?: number
+  ): { collections: IndexedCollection[]; videos: IndexedVideo[] }
   suggest(q: string, limit?: number): string[]
-}
-
-interface CmsThumb {
-  sizes?: {
-    landscape?: { url?: string } | null
-    landscape2x?: { url?: string } | null
-    portrait?: { url?: string } | null
-  } | null
-}
-
-interface CmsCard {
-  id: string
-  title: string
-  /** The editor's short, display-oriented title; falls back to `title`. */
-  ottTitle?: string | null
-  duration?: number | null
-  slug: string
-  contentType?: string | null
-  episodeNumber?: number | null
-  releaseDate?: string | null
-  contentTier?: { name?: string; planLevel?: number } | null
-  primaryCollection?: { id: string; name: string; slug: string; isSeries: boolean } | null
-  thumbnail?: CmsThumb | null
-}
-
-/** What Beacon remembers about one video: how far, and where exactly. */
-interface ProgressInfo {
-  /** 0..1 */
-  progress: number
-  position: number | null
-}
-
-interface CmsCollection {
-  id: string
-  name: string
-  slug: string
-  isSeries?: boolean
-  itemCount?: number | null
-  releaseDate?: string | null
-  thumbnail?: CmsThumb | null
-}
-
-/** A home block as it arrives from Beacon; only some types carry fields. */
-interface PlatformExclusions {
-  ios?: boolean
-  android?: boolean
-  web?: boolean
-}
-
-interface BlockContent {
-  __typename?: string
-  id: string
-  title?: string
-  ottTitle?: string | null
-  slug: string
-  duration?: number | null
-  contentType?: string | null
-  episodeNumber?: number | null
-  releaseDate?: string | null
-  contentTier?: { name?: string; planLevel?: number } | null
-  primaryCollection?: { id: string; name: string; slug: string; isSeries?: boolean } | null
-  thumbnail?: CmsThumb | null
-}
-
-interface BlockCollection {
-  __typename?: string
-  id: string
-  name: string
-  slug: string
-  itemCount?: number | null
-  thumbnail?: CmsThumb | null
-}
-
-interface HomeBlock {
-  __typename?: string
-  id?: string
-  title?: string
-  limit?: number | null
-  content?: (BlockContent | BlockCollection)[]
-  items?: { item?: { value?: BlockContent | BlockCollection } }[]
-  excludedPlatforms?: PlatformExclusions | null
-}
-
-interface ContinueWatchingDoc {
-  videoProgress?: number
-  videoProgressSeconds?: number
-  content?: CmsCard
-}
-
-interface ContinueWatchingResult {
-  continueWatching?: { docs?: ContinueWatchingDoc[] }
-}
-
-const minutes = (ms?: number | null): number | null =>
-  ms ? Math.max(1, Math.round(ms / 60000)) : null
-
-function captionsOf(video: { videoData?: string; closedCaptions?: string }): CaptionTrack[] {
-  const out: CaptionTrack[] = []
-  try {
-    const data = JSON.parse(video.videoData || '{}') as {
-      playlist?: { tracks?: { kind?: string; label?: string; file?: string }[] }[]
-    }
-    for (const track of data.playlist?.[0]?.tracks ?? []) {
-      if ((track.kind === 'captions' || track.kind === 'subtitles') && track.file) {
-        out.push({ label: track.label || 'Subtitles', url: track.file })
-      }
-    }
-  } catch {
-    // no playlist data
-  }
-  if (!out.length && typeof video.closedCaptions === 'string' && /^https?:/.test(video.closedCaptions)) {
-    out.push({ label: 'Subtitles', url: video.closedCaptions })
-  }
-  return out
 }
 
 /**
@@ -179,6 +67,27 @@ function captionsOf(video: { videoData?: string; closedCaptions?: string }): Cap
 const FINISHED_SHARE = 92
 const FINISHED_TAIL = 5 * 60 // seconds
 
+/** A position this close to the mark's own point is the same point, not a watch. */
+const MARK_SLACK_SECONDS = 10
+
+/**
+ * How many launches may re-send one mark. Beacon drops a point it does not like
+ * without saying so, and a mark whose episode never moves would otherwise be
+ * retried at every launch forever. Only a send that reached Beacon counts; a
+ * launch that was offline does not spend the budget. After this many, the mark
+ * is no longer re-queued, but a screen or launch read can still confirm it or
+ * drop it when the server has moved on.
+ */
+export const MARK_RETRIES = 3
+
+/**
+ * What a hand-made "watched" mark reports. The CMS silently drops a near-end
+ * report at 98% or more (it reads as a finished view, and Beacon stores no
+ * finished flag), so the last second is reported as 97%: still inside the
+ * closing stretch for every reader, but below the cutoff that gets discarded.
+ */
+const WATCHED_PERCENT = 97
+
 /**
  * A stored position this far into the closing stretch is not worth resuming:
  * the player would open on the credits. Same two-part rule, with a tighter
@@ -188,27 +97,6 @@ const RESUME_SHARE = 95
 const RESUME_TAIL = 3 * 60 // seconds
 /** A position this close to the start is not worth offering as a resume. */
 const RESUME_MIN = 5 // seconds
-
-/**
- * Whether a video is in its closing stretch: past `share` percent and, when
- * the runtime is known, with no more than `tail` seconds left.
- */
-function closingStretch(
-  progress: number,
-  position: number | null | undefined,
-  runtimeSec: number | null | undefined,
-  share: number,
-  tail: number
-): boolean {
-  if (progress < share) return false
-  // Without a runtime there is no tail to measure; keep the plain share rule.
-  if (!runtimeSec) return true
-  const left =
-    position != null && position >= 0 && position <= runtimeSec
-      ? runtimeSec - position
-      : (runtimeSec * (100 - progress)) / 100
-  return left <= tail
-}
 
 export class BeaconClient {
   // Loaded once, on first use and after the app is ready: safeStorage needs that,
@@ -239,16 +127,13 @@ export class BeaconClient {
    * and before any read that would show the result. A send that fails or runs
    * offline stays on disk, so closing the app cannot lose the last position.
    */
-  private readonly progressQueue = new ProgressQueue(
-    undefined,
-    () => {
-      try {
-        return typeof net.isOnline === 'function' ? net.isOnline() : true
-      } catch {
-        return true
-      }
+  private readonly progressQueue = new ProgressQueue(undefined, () => {
+    try {
+      return typeof net.isOnline === 'function' ? net.isOnline() : true
+    } catch {
+      return true
     }
-  )
+  })
   private flushTimer: ReturnType<typeof setInterval> | undefined
 
   /** What an entry belongs to: a member's rows and tier are not shared. */
@@ -273,9 +158,18 @@ export class BeaconClient {
         this.sessionState = session
         // A queue left by the previous run still owes Beacon. Send it now,
         // rather than making the next launch wait out the timer; a failed
-        // send starts the timer as usual.
-        if (session && this.progressQueue.size(accountKey(session.email))) {
-          void this.flushProgress().catch(() => {})
+        // send starts the timer as usual. Then give any mark Beacon never
+        // confirmed another chance, so a dropped write cannot stay on this
+        // machine alone. Both are background work: a slow launch is worse
+        // than a late mark.
+        if (session) {
+          // Snapshot here: these are the marks the previous run left
+          // unconfirmed. A mark made during this run is already on its way.
+          const carried = Object.keys(this.watchmarks.marks(session.email ?? null))
+          void (async () => {
+            await this.flushProgress().catch(() => false)
+            if (carried.length) await this.reconcileMarks(carried)
+          })().catch(() => {})
         }
         return session
       })
@@ -320,7 +214,8 @@ export class BeaconClient {
     const res = await net.fetch(OAUTH_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ client_id: CLIENT_ID, ...params }).toString()
+      body: new URLSearchParams({ client_id: CLIENT_ID, ...params }).toString(),
+      signal: AbortSignal.timeout(API_TIMEOUT)
     })
     let body: Record<string, string> = {}
     try {
@@ -458,7 +353,8 @@ export class BeaconClient {
           'x-has-waiting-room': 'true',
           ...(token ? { authorization: `Bearer ${token}` } : {})
         },
-        body: JSON.stringify({ query, variables })
+        body: JSON.stringify({ query, variables }),
+        signal: AbortSignal.timeout(API_TIMEOUT)
       })
       if (res.status === 401 && token && n === 0) return attempt(1)
       const json = (await res.json().catch(() => ({}))) as {
@@ -488,40 +384,6 @@ export class BeaconClient {
     return value
   }
 
-  // ---------- cards ----------
-
-  private videoCard(c: CmsCard, level: number, state?: WatchState): Card {
-    return {
-      kind: 'video',
-      id: c.id,
-      slug: c.slug,
-      title: displayTitle(c),
-      subtitle: c.primaryCollection?.name ?? '',
-      image: img(c.thumbnail?.sizes?.landscape?.url, 480),
-      image2x: img(c.thumbnail?.sizes?.landscape2x?.url, 480),
-      minutes: minutes(c.duration),
-      locked: (c.contentTier?.planLevel ?? 0) > level,
-      progress: state?.progress ?? 0,
-      watched: state?.watched ?? false
-    }
-  }
-
-  private indexedVideoCard(v: IndexedVideo, level: number, state?: WatchState): Card {
-    return {
-      kind: 'video',
-      id: v.id,
-      slug: v.slug,
-      title: displayTitle(v),
-      subtitle: v.series?.name ?? '',
-      image: img(v.image, 480),
-      image2x: img(v.image2x, 480),
-      minutes: minutes(v.duration),
-      locked: v.level > level,
-      progress: state?.progress ?? 0,
-      watched: state?.watched ?? false
-    }
-  }
-
   private async watchMarks(): Promise<{
     email: string | null
     marks: Record<string, WatchMark>
@@ -534,8 +396,9 @@ export class BeaconClient {
   /**
    * A video's state from what Beacon remembers and how long it runs. An
    * explicit mark wins, because Beacon accepts a progress write and then keeps
-   * reporting the old point. Once Beacon's read agrees with the mark, the mark
-   * is dropped so a later watch on another device is not masked.
+   * reporting the old point. Once Beacon's read agrees with the mark, or the
+   * point has moved since the mark was made, the local copy is dropped so a
+   * later watch on another device is not masked.
    */
   private effectiveWatch(
     id: string,
@@ -556,25 +419,80 @@ export class BeaconClient {
     if (!mark) return { progress, watched }
     // "Unwatched" also means the point is gone, so it converges only when the
     // server is back at the start, not merely below the finished threshold.
-    const atStart =
-      progress <= 0.01 || (position != null && position > 0 && position <= RESUME_MIN)
-    if (mark.watched ? watched : atStart) {
+    if (this.markAgrees(mark, durationMs, progress, position)) {
+      this.watchmarks.clear(email, id)
+      return { progress, watched }
+    }
+    // The point moved after the member's choice, so a watch elsewhere is newer.
+    if (this.markMovedSince(mark, progress, position)) {
       this.watchmarks.clear(email, id)
       return { progress, watched }
     }
     return { watched: mark.watched, progress: mark.watched ? 1 : 0 }
   }
 
-  private seriesCard(c: CmsCollection): Card {
-    return {
-      kind: 'series',
-      id: c.id,
-      slug: c.slug,
-      title: c.name,
-      image: img(c.thumbnail?.sizes?.landscape?.url ?? c.thumbnail?.sizes?.portrait?.url, 480),
-      image2x: img(c.thumbnail?.sizes?.landscape2x?.url, 480),
-      count: c.itemCount ?? null
+  /**
+   * The state a screen or the player should show for one video, plus whether
+   * the member's own mark is still the thing deciding it. `effectiveWatch`
+   * clears a mark that has been confirmed or superseded, so `marked` has to be
+   * read after that call, never from the store before it.
+   */
+  private resolveWatch(
+    id: string,
+    durationMs: number | null | undefined,
+    progress: number,
+    position: number | null | undefined,
+    email: string | null,
+    marks: Record<string, WatchMark>
+  ): WatchState & { marked: boolean } {
+    const state = this.effectiveWatch(id, durationMs, progress, position, email, marks)
+    return { ...state, marked: Boolean(marks[id]) }
+  }
+
+  /** Whether Beacon's own read has caught up with a hand-made mark. */
+  private markAgrees(
+    mark: WatchMark,
+    durationMs: number | null | undefined,
+    progress: number,
+    position: number | null | undefined
+  ): boolean {
+    if (!mark.watched) {
+      return progress <= 0.01 || (position != null && position > 0 && position <= RESUME_MIN)
     }
+    return closingStretch(
+      progress * 100,
+      position,
+      (durationMs ?? 0) / 1000,
+      FINISHED_SHARE,
+      FINISHED_TAIL
+    )
+  }
+
+  /**
+   * Whether Beacon's point has moved since the mark was made. A moved point
+   * means somebody watched the title elsewhere after the member's choice, so
+   * the mark is stale: it must neither mask the row nor be sent again.
+   */
+  private markMovedSince(
+    mark: WatchMark,
+    progress: number,
+    position: number | null | undefined
+  ): boolean {
+    const base = mark.base
+    if (!base) return false
+    if (base.position != null && position != null) {
+      return Math.abs(base.position - position) > MARK_SLACK_SECONDS
+    }
+    return Math.abs(base.progress - progress) > 0.01
+  }
+
+  /**
+   * Whether a mark with no recorded point is still safe to assert. A watched
+   * mark on an episode nobody had started only fills in a point that did not
+   * exist; anything else may belong to a later watch on another device.
+   */
+  private markWithoutBaseIsSafe(mark: WatchMark, progress: number): boolean {
+    return mark.watched && progress <= 0.01
   }
 
   async progressFor(ids: string[]): Promise<Record<string, ProgressInfo>> {
@@ -588,14 +506,19 @@ export class BeaconClient {
   }
 
   private async loadProgress(ids: string[]): Promise<Record<string, ProgressInfo>> {
+    return this.fetchProgress(ids).catch(() => ({}))
+  }
+
+  /** A progress read that fails loudly: a retry must not rest on an empty answer. */
+  private async fetchProgress(ids: string[]): Promise<Record<string, ProgressInfo>> {
     const map: Record<string, ProgressInfo> = {}
     for (let i = 0; i < ids.length; i += 100) {
       const r = await this.gql<{
         getProgressForContent?: {
           timeMap?: { contentId: string; videoProgress?: number; videoProgressSeconds?: number }[]
         }
-      }>(Q.PROGRESS_FOR, { ids: ids.slice(i, i + 100) }).catch(() => null)
-      for (const p of r?.getProgressForContent?.timeMap ?? []) {
+      }>(Q.PROGRESS_FOR, { ids: ids.slice(i, i + 100) })
+      for (const p of r.getProgressForContent?.timeMap ?? []) {
         map[p.contentId] = {
           progress: Math.min(1, (p.videoProgress ?? 0) / 100),
           position: p.videoProgressSeconds ?? null
@@ -610,170 +533,20 @@ export class BeaconClient {
   async home(): Promise<HomeData> {
     await this.settleReports()
     const key = await this.scope()
-    const data = await this.homeCache.load(key, () => this.buildHome())
+    const data = await this.homeCache.load(key, () =>
+      buildHome({
+        gql: (query, variables) => this.gql(query, variables),
+        isSignedIn: () => this.isSignedIn(),
+        userLevel: () => this.userLevel(),
+        catalog: this.catalog,
+        watchMarks: () => this.watchMarks(),
+        watchState: (id, durationMs, progress, position, email, marks) =>
+          this.effectiveWatch(id, durationMs, progress, position, email, marks)
+      })
+    )
     // A CMS hiccup must not be remembered as an empty home for a minute.
     if (!data.hero.length && !data.rows.length) this.homeCache.delete(key)
     return data
-  }
-
-  private async buildHome(): Promise<HomeData> {
-    const signed = await this.isSignedIn()
-    const level = await this.userLevel()
-    this.catalog?.ensure().catch(() => {})
-
-    const [page, cw] = await Promise.all([
-      this.gql<{ MemberHomePage?: { pageContent?: HomeBlock[] } }>(Q.HOME_BLOCKS),
-      signed
-        ? this.gql<ContinueWatchingResult>(Q.CONTINUE_WATCHING, { limit: 50 }).catch(() => null)
-        : Promise.resolve(null)
-    ])
-
-    const rows: HomeRow[] = []
-    let hero: Card[] = []
-
-    for (const block of page.MemberHomePage?.pageContent ?? []) {
-      if (!this.blockVisible(block)) continue
-
-      switch (block.__typename) {
-        case 'RedesignHeroCarousel':
-          hero = (block.items ?? [])
-            .map((entry) => entry.item?.value)
-            .filter((value): value is BlockContent | BlockCollection => Boolean(value))
-            .map((value) => this.blockCard(value, level))
-            .filter((card): card is Card => card !== null)
-            .map((card) => this.heroSized(card))
-            .slice(0, 8)
-          break
-
-        case 'ContinueWatchingV2': {
-          if (!cw) break
-          const limit = Math.max(1, Math.min(50, block.limit ?? 20))
-          const row = await this.continueWatchingRow(cw, level, limit, block.id)
-          if (row) rows.push(row)
-          break
-        }
-
-        case 'FeaturedCarousel':
-        case 'LatestCarousel': {
-          const kind = block.__typename === 'FeaturedCarousel' ? 'featured' : 'latest'
-          const items = this.blockCards(block.content, level)
-          if (items.length) {
-            rows.push({
-              id: block.id ?? kind,
-              kind,
-              title: block.title || (kind === 'featured' ? 'Featured' : 'Latest'),
-              items
-            })
-          }
-          break
-        }
-
-        case 'SeriesCarousel': {
-          const items = (block.content ?? [])
-            .filter((value): value is BlockCollection => 'name' in value)
-            .map((value) => this.seriesCard(value))
-          if (items.length) {
-            rows.push({
-              id: block.id ?? 'series',
-              kind: 'series',
-              title: block.title || 'Series',
-              items
-            })
-          }
-          break
-        }
-      }
-    }
-
-    // A hero block can be missing or hold only kinds we cannot open; the first
-    // video shelf is a serviceable stand-in.
-    if (!hero.length) {
-      const source =
-        rows.find((row) => row.kind === 'featured') ?? rows.find((row) => row.kind === 'latest')
-      hero = (source?.items ?? [])
-        .filter((card) => card.kind === 'video')
-        .slice(0, 5)
-        .map((card) => this.heroSized(card))
-    }
-
-    return { hero, rows: rows.filter((row) => row.items.length) }
-  }
-
-  /** Blocks excluded for the platform we identify as are not rendered at all. */
-  private blockVisible(block: HomeBlock): boolean {
-    return !block.excludedPlatforms?.[PLATFORM]
-  }
-
-  private blockCards(
-    values: (BlockContent | BlockCollection)[] | undefined,
-    level: number
-  ): Card[] {
-    return (values ?? [])
-      .map((value) => this.blockCard(value, level))
-      .filter((card): card is Card => card !== null)
-  }
-
-  /** A block item, or null when it is a kind this TV client cannot open. */
-  private blockCard(value: BlockContent | BlockCollection, level: number): Card | null {
-    if ('name' in value) return this.seriesCard(value)
-    return VIDEO_TYPES.has(value.contentType ?? '')
-      ? this.videoCard(value as CmsCard, level)
-      : null
-  }
-
-  /** The hero asks for its own image size; a tile's is too soft full-bleed. */
-  private heroSized(card: Card): Card {
-    return {
-      ...card,
-      image: img(card.image, 1280),
-      image2x: img(card.image2x, 1280)
-    }
-  }
-
-  private async continueWatchingRow(
-    cw: ContinueWatchingResult,
-    level: number,
-    limit: number,
-    blockId?: string
-  ): Promise<HomeRow | null> {
-    const watching = (cw.continueWatching?.docs ?? [])
-      .filter((doc) => doc.content)
-      .slice(0, limit)
-    if (!watching.length) return null
-
-    const { email, marks } = await this.watchMarks()
-    const states = new Map(
-      watching.map((doc) => {
-        const content = doc.content!
-        return [
-          content.id,
-          this.effectiveWatch(
-            content.id,
-            content.duration,
-            Math.min(1, (doc.videoProgress ?? 0) / 100),
-            doc.videoProgressSeconds,
-            email,
-            marks
-          )
-        ] as const
-      })
-    )
-    // A cleared episode sits at one second, which Beacon may still list as
-    // started. Neither a mark nor that residue belongs in this row.
-    const unfinished = watching.filter((doc) => {
-      const state = states.get(doc.content!.id)!
-      return !state.watched && state.progress > 0.01
-    })
-    if (!unfinished.length) return null
-
-    return {
-      id: blockId ?? 'continue',
-      kind: 'continue',
-      title: 'Continue watching',
-      items: unfinished.map((doc) =>
-        this.videoCard(doc.content!, level, states.get(doc.content!.id))
-      )
-    }
   }
 
   async collection(slug: string): Promise<CollectionData> {
@@ -798,17 +571,10 @@ export class BeaconClient {
       const progress = await this.progressFor(docs.map((d) => d.id))
       return docs.map((d) => {
         const info = progress[d.id]
-        return this.videoCard(
+        return videoCard(
           d,
           level,
-          this.effectiveWatch(
-            d.id,
-            d.duration,
-            info?.progress ?? 0,
-            info?.position,
-            email,
-            marks
-          )
+          this.effectiveWatch(d.id, d.duration, info?.progress ?? 0, info?.position, email, marks)
         )
       })
     }
@@ -937,7 +703,7 @@ export class BeaconClient {
       const nextDoc = next?.fetchSeries?.next
       if (nextDoc) {
         addMeta(nextDoc)
-        rows.push({ title: 'Next episode', items: [this.videoCard(nextDoc, level)] })
+        rows.push({ title: 'Next episode', items: [videoCard(nextDoc, level)] })
       }
     }
 
@@ -949,7 +715,10 @@ export class BeaconClient {
         .filter((v) => v.id !== known?.id && episodeCode(v.title) === code)
       if (versions.length) {
         for (const v of versions) meta.set(v.slug, { id: v.id, duration: v.duration })
-        rows.push({ title: 'Other versions', items: versions.map((v) => this.indexedVideoCard(v, level)) })
+        rows.push({
+          title: 'Other versions',
+          items: versions.map((v) => indexedVideoCard(v, level))
+        })
       }
     }
 
@@ -957,12 +726,16 @@ export class BeaconClient {
       const list = this.catalog.seriesVideos(series.id)
       const index = list.findIndex((v) => v.slug === slug)
       let around = index >= 0 ? list.slice(index + 1, index + 13) : []
-      if (!around.length) around = list.filter((v) => v.slug !== slug).slice(-12).reverse()
+      if (!around.length)
+        around = list
+          .filter((v) => v.slug !== slug)
+          .slice(-12)
+          .reverse()
       if (around.length) {
         for (const v of around) meta.set(v.slug, { id: v.id, duration: v.duration })
         rows.push({
           title: `More from ${series.name}`,
-          items: around.map((v) => this.indexedVideoCard(v, level))
+          items: around.map((v) => indexedVideoCard(v, level))
         })
       }
     }
@@ -972,7 +745,7 @@ export class BeaconClient {
       .filter((c): c is CmsCard => Boolean(c))
     if (suggested.length) {
       for (const c of suggested) addMeta(c)
-      rows.push({ title: 'Recommended', items: suggested.map((c) => this.videoCard(c, level)) })
+      rows.push({ title: 'Recommended', items: suggested.map((c) => videoCard(c, level)) })
     }
 
     const progress = await this.progressFor([...meta.values()].map((m) => m.id))
@@ -1003,19 +776,14 @@ export class BeaconClient {
     const docProgress = info ? info.progress : Math.min(1, (cp?.videoProgress ?? 0) / 100)
     const docPosition = info ? info.position : (cp?.videoProgressSeconds ?? null)
     // A mark means the member has said where this episode stands, whatever the
-    // server still reports; start it from the beginning either way.
-    const marked = Boolean(marks[doc.id])
-    const docWatched = this.effectiveWatch(
-      doc.id,
-      doc.duration,
-      docProgress,
-      docPosition,
-      email,
-      marks
-    ).watched
+    // server still reports; if it is still in force, start from the beginning.
+    // `marked` must come from the resolved state: `effectiveWatch` drops a mark
+    // Beacon has confirmed or one a watch elsewhere superseded, and reading the
+    // store before it would keep starting a part-watched episode over.
+    const state = this.resolveWatch(doc.id, doc.duration, docProgress, docPosition, email, marks)
     const resumeFrom = docPosition ?? 0
     const resumeAt =
-      !marked &&
+      !state.marked &&
       docPosition != null &&
       resumeFrom > RESUME_MIN &&
       !closingStretch(
@@ -1061,7 +829,7 @@ export class BeaconClient {
       locked: !video?.video,
       signInNeeded: !video?.video && !signedIn,
       signedIn,
-      watched: docWatched,
+      watched: state.watched,
       resumeAt,
       rows
     }
@@ -1096,9 +864,12 @@ export class BeaconClient {
 
     const cp = r.currentProgress
     const runtimeSec = (doc?.duration ?? 0) / 1000
-    const resumeFrom = cp?.videoProgressSeconds ?? 0
-    const { marks } = await this.watchMarks()
-    const marked = Boolean(doc?.id && marks[doc.id])
+    const progress = Math.min(1, (cp?.videoProgress ?? 0) / 100)
+    const position = cp?.videoProgressSeconds ?? null
+    const { email, marks } = await this.watchMarks()
+    // Resolve the mark exactly as the content page does, so a stale one is
+    // dropped here too and cannot pin playback to the start of the episode.
+    const state = this.resolveWatch(doc?.id ?? '', doc?.duration, progress, position, email, marks)
     return {
       id: doc?.id ?? '',
       title: doc?.title ?? '',
@@ -1106,17 +877,11 @@ export class BeaconClient {
       playlist: null,
       duration: doc?.duration ? Math.round(doc.duration / 1000) : null,
       resumeAt:
-        !marked &&
-        cp &&
-        resumeFrom > RESUME_MIN &&
-        !closingStretch(
-          cp.videoProgress ?? 0,
-          cp.videoProgressSeconds,
-          runtimeSec,
-          RESUME_SHARE,
-          RESUME_TAIL
-        )
-          ? resumeFrom
+        !state.marked &&
+        position != null &&
+        position > RESUME_MIN &&
+        !closingStretch(progress * 100, position, runtimeSec, RESUME_SHARE, RESUME_TAIL)
+          ? position
           : 0,
       captions: captionsOf(video),
       episodeNumber: doc?.episodeNumber ?? null,
@@ -1275,12 +1040,15 @@ export class BeaconClient {
    * Mark one episode watched or unwatched.
    *
    * The mark is kept locally first: Beacon answers `trackView` with success but
-   * keeps reporting the old point for both extremes, so a server-only mark
-   * would visibly bounce back. The mark then goes through the progress queue:
-   * any older position still queued for this title is dropped, the 99%/1% point
-   * is sent after whatever is already in flight, and the Continue-watching
-   * removal follows the point that landed. Once Beacon's own read agrees with
-   * the mark, the local copy is dropped.
+   * quietly discards a near-end 98% report, so a server-only mark would visibly
+   * bounce back. The mark then goes through the progress queue: any older
+   * position still queued for this title is dropped, and the 97%/1% point is
+   * sent after whatever is already in flight. An unwatched mark also removes
+   * the title from Continue watching, but only for that direction: the
+   * mutation zeroes the saved point, so it would undo a watched mark. The point
+   * the member was looking at is recorded with the mark, so a watch on another
+   * device makes it stale rather than being overwritten. Once Beacon's own read
+   * agrees with the mark, the local copy is dropped.
    */
   async markWatched(slug: string, watched: boolean): Promise<WatchState> {
     const session = await this.currentSession()
@@ -1291,38 +1059,33 @@ export class BeaconClient {
     const known = this.catalog?.videoBySlug(slug) ?? null
     let id = known?.id ?? null
     let durationMs = known?.duration ?? null
-    if (!id) {
+    // The index may know the id but not the runtime; without it a watched mark
+    // can only be placed at one second, which reads as unfinished elsewhere.
+    if (!id || !durationMs) {
       const r = await this.gql<{
         Contents?: { docs?: { id: string; duration?: number | null }[] }
-      }>(Q.LOOKUP, { slug })
-      const doc = r.Contents?.docs?.[0]
-      id = doc?.id ?? null
-      durationMs = doc?.duration ?? null
+      }>(Q.LOOKUP, { slug }).catch(() => null)
+      const doc = r?.Contents?.docs?.[0]
+      id = id ?? doc?.id ?? null
+      durationMs = durationMs ?? doc?.duration ?? null
     }
     if (!id) throw new BeaconError('Video not found.')
 
-    this.watchmarks.set(session.email ?? null, id, watched)
+    // The point the member is looking at, kept with the mark so a later retry
+    // can tell a write that was lost from a watch that happened elsewhere.
+    // Read it directly: settling would send a queued position just to learn
+    // what it is (the mark is about to drop it), and the cached read can be
+    // older than the point the mark must be protected against.
+    const current = await this.fetchProgress([id]).catch(() => null)
+    const info = current?.[id]
 
-    const durationSec = Math.round((durationMs ?? 0) / 1000)
-    // Both 0 and 100 come back unchanged from the CMS, so stay one step inside
-    // each end. The results still read as finished or at the start.
-    const seconds = watched ? Math.max(1, durationSec - 1) : 1
-    const account = accountKey(session.email)
-    // A mark is a newer decision than any position still queued for this title.
-    // Replaying an older one after the mark would move Beacon back (it keeps
-    // the last point it is told) and put the title in the row again.
-    this.progressQueue.dropContent(account, id)
-    this.progressQueue.add(
-      account,
-      {
-        content: id,
-        duration: durationSec,
-        videoProgress: watched ? 99 : 1,
-        videoProgressSeconds: seconds,
-        removeFromContinueWatching: true
-      },
-      this.sessionId
+    this.watchmarks.set(
+      session.email ?? null,
+      id,
+      watched,
+      info ? { progress: info.progress, position: info.position } : undefined
     )
+    this.queueMark(accountKey(session.email), id, watched, durationMs)
     this.startFlushTimer()
     // Put it after any batch already in flight, but never hold the screen shut
     // on a stalled network; an unsent mark stays queued for the timer/launch.
@@ -1330,6 +1093,112 @@ export class BeaconClient {
 
     this.invalidateProgress()
     return { watched, progress: watched ? 1 : 0 }
+  }
+
+  /**
+   * Put a mark's point on the wire. A mark is a newer decision than any
+   * position still queued for this title: replaying an older one after the mark
+   * would move Beacon back (it keeps the last point it is told) and put the
+   * title in the row again.
+   */
+  private queueMark(
+    account: string,
+    id: string,
+    watched: boolean,
+    durationMs: number | null,
+    retry = false
+  ): void {
+    const durationSec = Math.round((durationMs ?? 0) / 1000)
+    // Both ends are a trap: a 0% and a near-end 98%+ report are accepted and
+    // then discarded. Stay far enough inside each end to be stored, and close
+    // enough to the end that the read still counts as finished.
+    this.progressQueue.dropContent(account, id)
+    this.progressQueue.add(
+      account,
+      {
+        content: id,
+        duration: durationSec,
+        videoProgress: watched ? WATCHED_PERCENT : 1,
+        videoProgressSeconds: watched ? Math.max(1, durationSec - 1) : 1,
+        removeFromContinueWatching: !watched,
+        explicitMark: true,
+        retryOfMark: retry
+      },
+      this.sessionId
+    )
+  }
+
+  /**
+   * Ask Beacon for the marks it never took.
+   *
+   * `trackView` reports success even when it drops a point, so a mark can end
+   * up living only on the machine that made it: the badge is right there and
+   * wrong everywhere else. The local copy is what remembers the member's
+   * choice, so the marks carried over from an earlier run are checked once, and
+   * any Beacon's own read does not agree with is sent again. A mark that agrees
+   * is dropped, exactly as a screen read would do it; a mark resolved while
+   * this is reading is left to the queue it is already in.
+   *
+   * A mark is only sent again while the point it was made against is still
+   * there. If the point moved, the mark is older than a watch somewhere else
+   * and is dropped instead, so a retry cannot roll progress back.
+   *
+   * The retry budget counts sends that reached Beacon. A launch that was
+   * offline or refused changes nothing, and a mark that has spent its budget
+   * is still read and cleared when the server agrees or has moved on; only
+   * the re-queue is skipped.
+   */
+  async reconcileMarks(ids?: string[]): Promise<void> {
+    const session = await this.currentSession()
+    const email = session?.email ?? null
+    if (!session || !email) return
+    const marks = this.watchmarks.marks(email)
+    const marked = (ids ?? Object.keys(marks)).filter((id) => marks[id])
+    if (!marked.length) return
+
+    // A read that failed says nothing about the mark; leave it for next launch
+    // rather than re-asserting a point over a network hiccup.
+    const progress = await this.fetchProgress(marked).catch(() => null)
+    if (!progress) return
+
+    const account = accountKey(email)
+    let queued = 0
+    for (const id of marked) {
+      const mark = marks[id]
+      if (!mark) continue
+      const info = progress[id]
+      const durationMs = this.catalog?.videoById(id)?.duration ?? null
+      const pct = info?.progress ?? 0
+      const position = info?.position
+      if (this.markAgrees(mark, durationMs, pct, position)) {
+        this.watchmarks.clear(email, id)
+        continue
+      }
+      // The point moved after the member's choice: a watch elsewhere is newer.
+      if (this.markMovedSince(mark, pct, position)) {
+        this.watchmarks.clear(email, id)
+        continue
+      }
+      // No recorded point to compare against: only an episode that was never
+      // started is safe to fill in; anything else may be a newer watch.
+      if (!mark.base && !this.markWithoutBaseIsSafe(mark, pct)) {
+        this.watchmarks.clear(email, id)
+        continue
+      }
+      // The budget is spent, but the mark above was still compared with the
+      // server's read, so a server that agrees or moved on can clear it.
+      if ((mark.sends ?? 0) >= MARK_RETRIES) continue
+      // Without a runtime the point cannot be placed; a rebuilt index will
+      // carry it, and nothing here should guess at one second.
+      if (!durationMs) continue
+      this.queueMark(account, id, mark.watched, durationMs, true)
+      queued += 1
+    }
+    if (!queued) return
+
+    this.startFlushTimer()
+    await this.settleReports()
+    this.invalidateProgress()
   }
 
   // ---------- favourites ----------
@@ -1378,7 +1247,11 @@ export class BeaconClient {
     const current = await this.isCollectionFavourited(id)
     if (current === favourite) return current
     const r = await this.gql<{
-      toggleCollectionFavourite?: { success?: boolean; reason?: string; isFavourite?: boolean | null }
+      toggleCollectionFavourite?: {
+        success?: boolean
+        reason?: string
+        isFavourite?: boolean | null
+      }
     }>(Q.TOGGLE_COLLECTION_FAVOURITE, { id })
     const result = r.toggleCollectionFavourite
     if (!result?.success) {
@@ -1400,15 +1273,25 @@ export class BeaconClient {
     }))
     const r = await this.gql<{ trackView?: { success?: boolean } }>(Q.TRACK, { events: payload })
     if (!r?.trackView?.success) return false
-    // A mark is not finished until its title leaves the row. Sending this only
-    // after the point landed means a retry cannot remove before it writes. A
-    // later event for the same title in this batch means playback resumed, so
-    // that newer point decides and the removal is skipped.
+    // An unwatched mark also leaves the row. Sending this only after the point
+    // landed means a retry cannot remove before it writes. A later event for
+    // the same title in this batch means playback resumed, so that newer point
+    // decides and the removal is skipped. A failed removal must keep the event
+    // queued: the 1% point alone still leaves the title in the row elsewhere.
     for (let index = 0; index < events.length; index++) {
       const event = events[index]!
       if (!event.removeFromContinueWatching) continue
       if (events.slice(index + 1).some((next) => next.content === event.content)) continue
-      await this.gql(Q.REMOVE_FROM_CONTINUE_WATCHING, { id: event.content }).catch(() => null)
+      const removed = await this.gql<{
+        removeContentFromContinueWatching?: { success?: boolean }
+      }>(Q.REMOVE_FROM_CONTINUE_WATCHING, { id: event.content }).catch(() => null)
+      if (!removed?.removeContentFromContinueWatching?.success) return false
+    }
+    // Count a mark retry only now that the whole event left the queue: a failed
+    // or offline launch must not spend the mark's budget.
+    const email = (await this.currentSession())?.email ?? null
+    for (const event of events) {
+      if (event.explicitMark && event.retryOfMark) this.watchmarks.retried(email, event.content)
     }
     return true
   }
@@ -1443,9 +1326,9 @@ export class BeaconClient {
       limit: 20
     }).catch(() => null)
 
-    const videos: Card[] = local.videos.map((v) => this.indexedVideoCard(v, level))
+    const videos: Card[] = local.videos.map((v) => indexedVideoCard(v, level))
     for (const d of remote?.search?.docs ?? []) {
-      if (!videos.some((v) => v.slug === d.slug)) videos.push(this.videoCard(d, level))
+      if (!videos.some((v) => v.slug === d.slug)) videos.push(videoCard(d, level))
     }
 
     return {

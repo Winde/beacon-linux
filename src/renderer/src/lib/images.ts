@@ -95,6 +95,12 @@ export function useBackdrop(url: string | null): string | null {
       return
     }
 
+    // Do not keep painting the previous card's full-size backdrop while this
+    // one decodes: the caller has a blurred stand-in for the *current* card,
+    // and mixing the two shows the wrong picture at full strength. The first
+    // URL is the current card's own art, so it can stay while it decodes.
+    setShown((current) => (current === url ? current : null))
+
     const timer = window.setTimeout(() => {
       void preload(url).then(commit)
     }, DEBOUNCE_MS)

@@ -8,7 +8,11 @@ import { Player, type PlayerHandle } from './Player'
 const hlsMock = vi.hoisted(() => ({
   instances: [] as Array<{
     levels: { height: number; bitrate: number }[]
-    emit: (event: string) => void
+    audioTracks: { name?: string; lang?: string }[]
+    audioTrack: number
+    currentLevel: number
+    destroy: ReturnType<typeof vi.fn>
+    emit: (event: string, ...args: unknown[]) => void
   }>
 }))
 
@@ -29,20 +33,20 @@ vi.mock('hls.js', () => {
     loadSource = vi.fn()
     attachMedia = vi.fn()
     destroy = vi.fn()
-    private listeners = new Map<string, Array<() => void>>()
+    private listeners = new Map<string, Array<(...args: any[]) => void>>()
 
     constructor() {
       hlsMock.instances.push(this)
     }
 
-    on(event: string, handler: () => void): void {
+    on(event: string, handler: (...args: any[]) => void): void {
       const handlers = this.listeners.get(event) ?? []
       handlers.push(handler)
       this.listeners.set(event, handlers)
     }
 
-    emit = (event: string): void => {
-      for (const handler of this.listeners.get(event) ?? []) handler()
+    emit = (event: string, ...args: unknown[]): void => {
+      for (const handler of this.listeners.get(event) ?? []) handler(event, ...args)
     }
   }
   return { default: FakeHls }
@@ -77,6 +81,39 @@ function stubBeacon(captions: CaptionTrack[] = playback.captions): ReturnType<ty
     app: { toggleFullscreen: vi.fn() }
   })
   return fetchCaptions
+}
+
+/** A stream with its own resume point, and optionally a caption fetch that fails. */
+function stubBeaconWith(
+  data: PlaybackData,
+  fetchCaptions: ReturnType<typeof vi.fn> = vi.fn(() => Promise.resolve('WEBVTT'))
+): void {
+  vi.stubGlobal('beacon', {
+    playback: {
+      open: vi.fn(() => Promise.resolve(data)),
+      next: vi.fn(() => Promise.resolve(null)),
+      start: vi.fn(() => Promise.resolve(true)),
+      progress: vi.fn(() => Promise.resolve(true)),
+      flush: vi.fn(() => Promise.resolve(true)),
+      captions: fetchCaptions
+    },
+    app: { toggleFullscreen: vi.fn() }
+  })
+}
+
+/** A player whose open request answers (or fails) however the test asks. */
+function stubOpen(open: () => Promise<PlaybackData | null>): void {
+  vi.stubGlobal('beacon', {
+    playback: {
+      open: vi.fn(open),
+      next: vi.fn(() => Promise.resolve(null)),
+      start: vi.fn(() => Promise.resolve(true)),
+      progress: vi.fn(() => Promise.resolve(true)),
+      flush: vi.fn(() => Promise.resolve(true)),
+      captions: vi.fn(() => Promise.resolve('WEBVTT'))
+    },
+    app: { toggleFullscreen: vi.fn() }
+  })
 }
 
 /** A series episode, so the player asks for what comes next. */
@@ -226,7 +263,9 @@ describe('Player', () => {
     stubBeacon()
     const onClose = vi.fn()
     const ref = createRef<PlayerHandle>()
-    const { container } = render(<Player ref={ref} slug="v1" onClose={onClose} onPlayNext={vi.fn()} />)
+    const { container } = render(
+      <Player ref={ref} slug="v1" onClose={onClose} onPlayNext={vi.fn()} />
+    )
     await screen.findByText('Test Episode')
 
     act(() => void ref.current?.handle('back'))
@@ -241,7 +280,9 @@ describe('Player', () => {
     stubBeacon()
     vi.useFakeTimers()
     const ref = createRef<PlayerHandle>()
-    const { container } = render(<Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+    const { container } = render(
+      <Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />
+    )
     await act(async () => {
       await Promise.resolve()
     })
@@ -271,7 +312,9 @@ describe('Player', () => {
   it('scrubs in deliberate taps, accelerates while held, and jumps on accept', async () => {
     stubBeacon()
     const ref = createRef<PlayerHandle>()
-    const { container } = render(<Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+    const { container } = render(
+      <Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />
+    )
     await screen.findByText('Test Episode')
 
     const video = container.querySelector('video') as HTMLVideoElement
@@ -315,7 +358,9 @@ describe('Player', () => {
   it('keeps the 10 second skip while the video is playing', async () => {
     stubBeacon()
     const ref = createRef<PlayerHandle>()
-    const { container } = render(<Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+    const { container } = render(
+      <Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />
+    )
     await screen.findByText('Test Episode')
 
     const video = container.querySelector('video') as HTMLVideoElement
@@ -416,9 +461,7 @@ describe('Player', () => {
 
   it('stays quiet before the ending window', async () => {
     const request = stubEpisode()
-    const { container } = render(
-      <Player slug="c3-e121" onClose={vi.fn()} onPlayNext={vi.fn()} />
-    )
+    const { container } = render(<Player slug="c3-e121" onClose={vi.fn()} onPlayNext={vi.fn()} />)
     await screen.findByText('C3 E121 | A New Age Begins | Part 1')
     await vi.waitFor(() => expect(request).toHaveBeenCalled())
 
@@ -514,14 +557,213 @@ describe('Player', () => {
 
   it('stays quiet when there is nothing next', async () => {
     const request = stubEpisode({}, null)
-    const { container } = render(
-      <Player slug="c3-e121" onClose={vi.fn()} onPlayNext={vi.fn()} />
-    )
+    const { container } = render(<Player slug="c3-e121" onClose={vi.fn()} onPlayNext={vi.fn()} />)
     await screen.findByText('C3 E121 | A New Age Begins | Part 1')
     await vi.waitFor(() => expect(request).toHaveBeenCalled())
 
     playTo(container, 595)
 
     expect(screen.queryByText('Up next')).toBeNull()
+  })
+
+  it('resumes from the stored point when the stream is ready', async () => {
+    stubBeaconWith({ ...playback, resumeAt: 120 })
+    const { container } = render(<Player slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+    await screen.findByText('Test Episode')
+
+    const video = container.querySelector('video') as HTMLVideoElement
+    const play = vi.spyOn(video, 'play').mockResolvedValue()
+    act(() => video.dispatchEvent(new Event('loadedmetadata')))
+
+    expect(video.currentTime).toBe(120)
+    expect(play).toHaveBeenCalled()
+  })
+
+  it('lets an explicit start point win over the stored one', async () => {
+    stubBeaconWith({ ...playback, resumeAt: 120 })
+    const { container } = render(
+      <Player slug="v1" startAt={0} onClose={vi.fn()} onPlayNext={vi.fn()} />
+    )
+    await screen.findByText('Test Episode')
+
+    const video = container.querySelector('video') as HTMLVideoElement
+    vi.spyOn(video, 'play').mockResolvedValue()
+    act(() => video.dispatchEvent(new Event('loadedmetadata')))
+
+    expect(video.currentTime).toBe(0)
+  })
+
+  it('seeks a full minute with LT/RT and applies it to the scrubber', async () => {
+    stubBeacon()
+    const ref = createRef<PlayerHandle>()
+    const { container } = render(
+      <Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />
+    )
+    await screen.findByText('Test Episode')
+
+    const video = container.querySelector('video') as HTMLVideoElement
+    Object.defineProperty(video, 'duration', { configurable: true, value: 600 })
+    video.currentTime = 100
+    act(() => {
+      video.dispatchEvent(new Event('durationchange'))
+      video.dispatchEvent(new Event('timeupdate'))
+    })
+
+    act(() => void ref.current?.handle('seekForward'))
+    expect(video.currentTime).toBe(160)
+
+    act(() => void ref.current?.handle('up'))
+    act(() => void ref.current?.handle('seekBack'))
+    expect(screen.getByText('1:40')).toBeDefined()
+  })
+
+  it('changes playback speed from the control bar', async () => {
+    stubBeacon()
+    const ref = createRef<PlayerHandle>()
+    const { container } = render(
+      <Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />
+    )
+    await screen.findByText('Test Episode')
+
+    act(() => void ref.current?.handle('menu'))
+    act(() => void ref.current?.handle('right')) // Play -> Subtitles
+    act(() => void ref.current?.handle('right')) // Subtitles -> Speed
+    act(() => void ref.current?.handle('accept'))
+    act(() => void ref.current?.handle('down'))
+    act(() => void ref.current?.handle('down'))
+    act(() => void ref.current?.handle('accept'))
+
+    const video = container.querySelector('video') as HTMLVideoElement
+    expect(video.playbackRate).toBe(1.5)
+    expect(screen.getByRole('button', { name: 'Playback speed: 1.5×' })).toBeDefined()
+  })
+
+  it('offers audio tracks only when there is more than one', async () => {
+    stubBeacon()
+    render(<Player slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+    await screen.findByText('Test Episode')
+    await vi.waitFor(() => expect(hlsMock.instances).toHaveLength(1))
+
+    const hls = hlsMock.instances[0]!
+    expect(screen.queryByRole('button', { name: /Audio:/ })).toBeNull()
+
+    hls.audioTracks = [{ name: 'English' }, { name: 'Deutsch' }]
+    act(() => hls.emit('audioTracksUpdated'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Audio: English' }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Deutsch' }))
+
+    expect(hls.audioTrack).toBe(1)
+    expect(screen.getByRole('button', { name: 'Audio: Deutsch' })).toBeDefined()
+  })
+
+  it('sets the chosen quality level on the player', async () => {
+    stubBeacon()
+    render(<Player slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+    await screen.findByText('Test Episode')
+    await vi.waitFor(() => expect(hlsMock.instances).toHaveLength(1))
+
+    const hls = hlsMock.instances[0]!
+    hls.levels = [
+      { height: 360, bitrate: 800_000 },
+      { height: 1080, bitrate: 5_000_000 }
+    ]
+    act(() => hls.emit('manifestParsed'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quality: Auto' }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: '360p' }))
+
+    expect(hls.currentLevel).toBe(0)
+    expect(screen.getByRole('button', { name: 'Quality: 360p' })).toBeDefined()
+  })
+
+  it('remembers the chosen subtitle language', async () => {
+    stubBeacon()
+    const ref = createRef<PlayerHandle>()
+    render(<Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+    await screen.findByText('Test Episode')
+
+    act(() => void ref.current?.handle('menu'))
+    act(() => void ref.current?.handle('right'))
+    act(() => void ref.current?.handle('accept'))
+    act(() => void ref.current?.handle('down'))
+    act(() => void ref.current?.handle('accept'))
+
+    expect(window.localStorage.getItem('beacon.player.subtitles')).toBe('English')
+  })
+
+  it('says when a subtitle file cannot be fetched', async () => {
+    stubBeaconWith(
+      playback,
+      vi.fn(() => Promise.reject(new Error('offline')))
+    )
+    const ref = createRef<PlayerHandle>()
+    render(<Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+    await screen.findByText('Test Episode')
+
+    act(() => void ref.current?.handle('menu'))
+    act(() => void ref.current?.handle('right'))
+    act(() => void ref.current?.handle('accept'))
+    act(() => void ref.current?.handle('down'))
+    act(() => void ref.current?.handle('accept'))
+
+    // The failed fetch is reported when the menu is next opened.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Subtitles: English' }))
+
+    expect(await screen.findByText('Subtitles could not be loaded.')).toBeDefined()
+  })
+
+  it('says when the video is not available instead of spinning forever', async () => {
+    stubOpen(() => Promise.resolve(null))
+    render(<Player slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+
+    expect(await screen.findByText('This video is not available for your account.')).toBeDefined()
+    expect(screen.queryByText('Starting stream')).toBeNull()
+  })
+
+  it('shows a clean message when the stream cannot be opened', async () => {
+    stubOpen(() =>
+      Promise.reject(new Error("Error invoking remote method 'playback:open': Error: Network down"))
+    )
+    render(<Player slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+
+    expect(await screen.findByText('Network down')).toBeDefined()
+  })
+
+  it('reports a fatal stream error', async () => {
+    stubBeacon()
+    render(<Player slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+    await screen.findByText('Test Episode')
+    await vi.waitFor(() => expect(hlsMock.instances).toHaveLength(1))
+
+    act(() => hlsMock.instances[0]!.emit('hlsError', { fatal: true, details: 'networkError' }))
+
+    expect(await screen.findByText('Playback failed (networkError).')).toBeDefined()
+  })
+
+  it('destroys the stream and revokes caption blobs when it closes', async () => {
+    stubBeacon()
+    const ref = createRef<PlayerHandle>()
+    const { unmount } = render(
+      <Player ref={ref} slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />
+    )
+    await screen.findByText('Test Episode')
+    await vi.waitFor(() => expect(hlsMock.instances).toHaveLength(1))
+    const hls = hlsMock.instances[0]!
+
+    act(() => void ref.current?.handle('menu'))
+    act(() => void ref.current?.handle('right'))
+    act(() => void ref.current?.handle('accept'))
+    act(() => void ref.current?.handle('down'))
+    act(() => void ref.current?.handle('accept'))
+    await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled())
+
+    unmount()
+
+    expect(hls.destroy).toHaveBeenCalledOnce()
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:captions')
   })
 })

@@ -28,6 +28,46 @@ interface SearchableCollection extends IndexedCollection {
   tokens: string[]
 }
 
+/** The CMS answers untyped JSON; these are the fields the catalog index reads. */
+type RawDoc = Record<string, unknown>
+
+interface RawThumb {
+  sizes?: {
+    landscape?: { url?: string } | null
+    landscape2x?: { url?: string } | null
+    portrait?: { url?: string } | null
+  } | null
+}
+
+interface RawVideoDoc {
+  id: string
+  slug: string
+  title: string
+  ottTitle?: string | null
+  duration?: number | null
+  contentType?: string | null
+  contentTier?: { name?: string | null; planLevel?: number | null } | null
+  thumbnail?: RawThumb | null
+  releaseDate?: string | null
+  episodeNumber?: number | null
+  primaryCollection?: {
+    id: string
+    name: string
+    slug: string
+    isSeries?: boolean | null
+  } | null
+}
+
+interface RawCollectionDoc {
+  id: string
+  slug: string
+  name: string
+  isSeries?: boolean | null
+  itemCount?: number | null
+  releaseDate?: string | null
+  thumbnail?: RawThumb | null
+}
+
 function indexPath(): string {
   return join(app.getPath('userData'), 'catalog.json')
 }
@@ -35,7 +75,20 @@ function indexPath(): string {
 function loadSnapshot(): CatalogSnapshot | null {
   try {
     const parsed = JSON.parse(readFileSync(indexPath(), 'utf8')) as CatalogSnapshot
-    if (parsed.version !== CATALOG_VERSION || !parsed.videos?.length) return null
+    if (parsed.version !== CATALOG_VERSION) return null
+    const usableVideos =
+      Array.isArray(parsed.videos) &&
+      parsed.videos.length > 0 &&
+      parsed.videos.every(
+        (video) => video && typeof video.id === 'string' && typeof video.slug === 'string'
+      )
+    const usableCollections =
+      Array.isArray(parsed.collections) &&
+      parsed.collections.every(
+        (collection) =>
+          collection && typeof collection.id === 'string' && typeof collection.slug === 'string'
+      )
+    if (!usableVideos || !usableCollections) return null
     return parsed
   } catch {
     return null
@@ -51,7 +104,8 @@ function saveSnapshot(snapshot: CatalogSnapshot): void {
   }
 }
 
-function rawVideo(c: Record<string, any>): IndexedVideo {
+function rawVideo(input: RawDoc): IndexedVideo {
+  const c = input as unknown as RawVideoDoc
   const series = c.primaryCollection ?? null
   return {
     id: c.id,
@@ -72,7 +126,8 @@ function rawVideo(c: Record<string, any>): IndexedVideo {
   }
 }
 
-function rawCollection(c: Record<string, any>): IndexedCollection {
+function rawCollection(input: RawDoc): IndexedCollection {
+  const c = input as unknown as RawCollectionDoc
   const sizes = c.thumbnail?.sizes
   return {
     id: c.id,
@@ -157,12 +212,13 @@ export class Catalog implements CatalogLike {
   private async fetchPage<T>(
     query: string,
     field: string,
-    map: (raw: Record<string, any>) => T,
+    map: (raw: RawDoc) => T,
     page: number
   ): Promise<{ docs: T[]; totalPages: number }> {
-    const r = await this.client.gql<
-      Record<string, { docs?: Record<string, any>[]; totalPages?: number }>
-    >(query, { types: PLAYABLE, sort: '-releaseDate', page, limit: PAGE_LIMIT })
+    const r = await this.client.gql<Record<string, { docs?: RawDoc[]; totalPages?: number }>>(
+      query,
+      { types: PLAYABLE, sort: '-releaseDate', page, limit: PAGE_LIMIT }
+    )
     const bucket = r[field]
     if (!bucket) return { docs: [], totalPages: 1 }
     return { docs: (bucket.docs ?? []).map(map), totalPages: bucket.totalPages ?? 1 }
@@ -175,7 +231,7 @@ export class Catalog implements CatalogLike {
   private async fetchPages<T>(
     query: string,
     field: string,
-    map: (raw: Record<string, any>) => T,
+    map: (raw: RawDoc) => T,
     maxPages: number
   ): Promise<T[]> {
     const first = await this.fetchPage(query, field, map, 1)
@@ -241,7 +297,8 @@ export class Catalog implements CatalogLike {
     saveSnapshot(snapshot)
   }
 
-  async ensure(): Promise<void> {    const stale = !this.snapshot || Date.now() - this.snapshot.builtAt > INDEX_HOURS * 3600 * 1000
+  async ensure(): Promise<void> {
+    const stale = !this.snapshot || Date.now() - this.snapshot.builtAt > INDEX_HOURS * 3600 * 1000
     if (stale && !this.building) {
       this.building = this.build()
         .catch((err: Error) => {

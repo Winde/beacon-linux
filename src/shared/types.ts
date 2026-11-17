@@ -221,7 +221,6 @@ export interface BeaconApi {
     content(slug: string): Promise<ContentData>
     search(query: string): Promise<SearchData>
     suggest(query: string): Promise<string[]>
-    indexStatus(): Promise<IndexStatus>
   }
   /**
    * Beacon's own favourites for this account: collections only, and empty when

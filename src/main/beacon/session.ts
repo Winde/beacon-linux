@@ -47,9 +47,7 @@ export async function credentialStorage(
   if (!(await encryptionAvailable())) return 'unavailable'
   if (platform !== 'linux') return 'keyring'
   try {
-    return backendCountsAsSecure(safeStorage.getSelectedStorageBackend())
-      ? 'keyring'
-      : 'plaintext'
+    return backendCountsAsSecure(safeStorage.getSelectedStorageBackend()) ? 'keyring' : 'plaintext'
   } catch {
     return 'unavailable'
   }
@@ -111,7 +109,10 @@ export async function saveSession(
   // `basic_text` still gives a file, and that is what keeps Game Mode signed
   // in between launches.
   if ((await credentialStorage(platform)) === 'unavailable') {
-    rmSync(path, { force: true })
+    // A file already on disk is not ours to throw away: it is either
+    // ciphertext this machine reads again once the keyring is back, or a
+    // plaintext one loadSession would never restore.
+    forgetPlaintext(path)
     return
   }
   try {

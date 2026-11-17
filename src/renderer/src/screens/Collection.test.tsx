@@ -53,7 +53,9 @@ describe('Collection', () => {
 
   it('shows a clean error from the main process', async () => {
     stubCollection(
-      Promise.reject(new Error("Error invoking remote method 'catalog:collection': Error: Series not found."))
+      Promise.reject(
+        new Error("Error invoking remote method 'catalog:collection': Error: Series not found.")
+      )
     )
     render(<Collection slug="campaign-1" onOpen={vi.fn()} />)
 
@@ -73,7 +75,13 @@ describe('Collection', () => {
   })
 
   it('calls a non-series entry a collection', async () => {
-    stubCollection(collectionData({ isSeries: false, title: 'One Shots', seasons: [{ title: 'Videos', items: [card('o1', 'One Shot')] }] }))
+    stubCollection(
+      collectionData({
+        isSeries: false,
+        title: 'One Shots',
+        seasons: [{ title: 'Videos', items: [card('o1', 'One Shot')] }]
+      })
+    )
     render(<Collection slug="one-shots" onOpen={vi.fn()} />)
 
     expect(await screen.findByText('Collection · 1 videos')).toBeDefined()
@@ -121,13 +129,7 @@ describe('Collection', () => {
   it('favourites the whole series', async () => {
     const onToggleFavourite = vi.fn()
     stubCollection(collectionData())
-    render(
-      <Collection
-        slug="campaign-1"
-        onOpen={vi.fn()}
-        onToggleFavourite={onToggleFavourite}
-      />
-    )
+    render(<Collection slug="campaign-1" onOpen={vi.fn()} onToggleFavourite={onToggleFavourite} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Add to favourites' }))
 
@@ -145,12 +147,7 @@ describe('Collection', () => {
   it('offers to remove a favourited series', async () => {
     stubCollection(collectionData())
     render(
-      <Collection
-        slug="campaign-1"
-        onOpen={vi.fn()}
-        onToggleFavourite={vi.fn()}
-        inFavourites
-      />
+      <Collection slug="campaign-1" onOpen={vi.fn()} onToggleFavourite={vi.fn()} inFavourites />
     )
 
     const toggle = await screen.findByRole('button', { name: 'Remove from favourites' })
@@ -165,14 +162,22 @@ describe('Collection', () => {
     expect(screen.queryByRole('button', { name: 'Add to favourites' })).toBeNull()
   })
 
-  it('reloads when a watch mark changes progress', async () => {
-    const collection = stubCollection(collectionData())
-    const { rerender } = render(
-      <Collection slug="campaign-1" onOpen={vi.fn()} refreshKey={0} />
-    )
+  it('reloads when a watch mark changes progress without dropping the page', async () => {
+    const collection = vi
+      .fn()
+      .mockResolvedValueOnce(collectionData())
+      // The refresh behind a closing player: the page must hold until it lands.
+      .mockReturnValueOnce(new Promise<CollectionData>(() => {}))
+    vi.stubGlobal('beacon', { catalog: { collection } })
+    const { rerender } = render(<Collection slug="campaign-1" onOpen={vi.fn()} refreshKey={0} />)
     await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })
 
     rerender(<Collection slug="campaign-1" onOpen={vi.fn()} refreshKey={1} />)
+
+    // The series the player uncovers stays up while the request runs.
+    expect(screen.getByRole('heading', { level: 1, name: 'Campaign 1' })).toBeDefined()
+    expect(screen.getByText('Episode 2')).toBeDefined()
+    expect(screen.queryByText('Loading series')).toBeNull()
 
     await vi.waitFor(() => expect(collection).toHaveBeenCalledTimes(2))
   })

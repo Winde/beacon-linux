@@ -189,6 +189,27 @@ describe('Content', () => {
     expect(onSignIn).toHaveBeenCalled()
   })
 
+  it('moves focus to Play when a locked page is unlocked', async () => {
+    const content = vi
+      .fn()
+      .mockResolvedValueOnce(contentData({ locked: true, signInNeeded: false }))
+      .mockResolvedValueOnce(contentData({ locked: false }))
+    vi.stubGlobal('beacon', { catalog: { content }, watch: { mark: vi.fn() } })
+    const { rerender } = render(
+      <Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} refreshKey={0} />
+    )
+    expect(
+      await screen.findByText('Your membership level does not include this video.')
+    ).toBeDefined()
+    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('[data-focus]'))
+
+    vi.mocked(focusFirst).mockClear()
+    rerender(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} refreshKey={1} />)
+
+    expect(await screen.findByTestId('play')).toBeDefined()
+    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('[data-testid="play"]'))
+  })
+
   it('explains that a locked video needs a higher tier', async () => {
     stubContent(contentData({ locked: true, signInNeeded: false }))
     render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
@@ -209,7 +230,9 @@ describe('Content', () => {
 
   it('shows a clean error from the main process', async () => {
     stubContent(
-      Promise.reject(new Error("Error invoking remote method 'catalog:content': Error: Video not found."))
+      Promise.reject(
+        new Error("Error invoking remote method 'catalog:content': Error: Video not found.")
+      )
     )
     render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
 

@@ -60,13 +60,45 @@ describe('saveSession and loadSession', () => {
     await expect(loadSession()).resolves.toEqual(session)
   })
 
-  it('writes nothing when encryption is unavailable', async () => {
+  it('restores an expired access token so it can be refreshed', async () => {
+    const expired = { ...session, expiresAt: Date.now() - 60_000 }
+    await saveSession(expired)
+
+    await expect(loadSession()).resolves.toEqual(expired)
+  })
+
+  it('writes nothing on a fresh install when encryption is unavailable', async () => {
     electron.encryption = false
 
     await saveSession(session)
 
     expect(existsSync(sessionFile())).toBe(false)
     await expect(loadSession()).resolves.toBeNull()
+  })
+
+  it('keeps the saved session when the keyring is momentarily unavailable', async () => {
+    await saveSession(session)
+
+    // A refresh while the keyring is down must not cost the member the
+    // session that is already on disk.
+    electron.encryption = false
+    await saveSession({ ...session, accessToken: 'access-2' })
+
+    expect(readFileSync(sessionFile(), 'utf8')).toBe(`enc:${JSON.stringify(session)}`)
+    await expect(loadSession()).resolves.toBeNull()
+
+    // Back once the keyring is.
+    electron.encryption = true
+    await expect(loadSession()).resolves.toEqual(session)
+  })
+
+  it('still removes a plaintext file when the keyring is unavailable', async () => {
+    electron.encryption = false
+    writeFileSync(sessionFile(), JSON.stringify(session))
+
+    await saveSession(session)
+
+    expect(existsSync(sessionFile())).toBe(false)
   })
 
   it('keeps the session with the basic_text backend', async () => {

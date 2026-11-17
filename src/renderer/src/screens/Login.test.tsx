@@ -153,4 +153,17 @@ describe('Login', () => {
 
     expect(await screen.findByText(/can't save your sign-in/)).toBeDefined()
   })
+
+  it('treats a failed storage check as no storage rather than leaving the form mute', async () => {
+    vi.stubGlobal('beacon', {
+      auth: {
+        signIn: vi.fn(() => Promise.resolve({ signedIn: true, user: null })),
+        storage: vi.fn(() => Promise.reject(new Error('ipc unavailable')))
+      }
+    })
+    render(<Login onSignedIn={vi.fn()} onSkip={vi.fn()} />)
+
+    expect(await screen.findByText(/can't save your sign-in/)).toBeDefined()
+    expect(screen.queryByText(/saved with Electron's fallback encryption/)).toBeNull()
+  })
 })

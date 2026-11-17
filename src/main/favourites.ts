@@ -33,6 +33,11 @@ function itemFromCollection(collection: IndexedCollection): FavouriteItem {
 export class FavouritesService {
   /** The last answer, so the row's arrows need no new round trip. */
   private readonly shown = new Map<string, FavouriteItem>()
+  /**
+   * Writes go out one at a time. Every answer is built from `shown`, so two
+   * finishing together would let the earlier one drop the later one's series.
+   */
+  private writes: Promise<unknown> = Promise.resolve()
 
   constructor(
     private readonly api: FavouritesApi,
@@ -40,10 +45,14 @@ export class FavouritesService {
     private readonly preferences: PreferencesStore
   ) {}
 
+  /**
+   * Beacon's list. A failed read rejects rather than looking like an empty
+   * account, so the caller can keep the row that is already on screen.
+   */
   async list(): Promise<FavouritesData> {
     const after = this.preferences.favouritesAfter()
     if (!(await this.api.accountEmail())) return this.snapshot([], after)
-    const ids = await this.api.favouriteCollectionIds().catch(() => [])
+    const ids = await this.api.favouriteCollectionIds()
     if (!ids.length) return this.snapshot([], after)
     // Cold boots have the catalog on disk; this only waits the first time.
     await this.catalog.ensure().catch(() => {})
@@ -60,11 +69,31 @@ export class FavouritesService {
 
   /** Favourites are collections only: an episode has no favourite of its own. */
   async add(card: Card): Promise<FavouritesData> {
+    return this.enqueue(() => this.writeAdd(card))
+  }
+
+  async remove(slug: string): Promise<FavouritesData> {
+    return this.enqueue(() => this.writeRemove(slug))
+  }
+
+  /** Run one write after the previous one has settled, successfully or not. */
+  private enqueue<T>(run: () => Promise<T>): Promise<T> {
+    const task = this.writes.catch(() => undefined).then(run)
+    this.writes = task.catch(() => undefined)
+    return task
+  }
+
+  private async writeAdd(card: Card): Promise<FavouritesData> {
     const after = this.preferences.favouritesAfter()
     if (!card || card.kind !== 'series') return this.snapshot([...this.shown.values()], after)
     const id = card.id ?? (await this.idForSlug(card.slug))
     if (!id) return this.snapshot([...this.shown.values()], after)
-    await this.api.setCollectionFavourite(id, true)
+    // Beacon can accept the mutation and still answer that the collection is
+    // not favourited. Trust that answer: adding the row anyway would show a
+    // favourite the account does not have.
+    if (!(await this.api.setCollectionFavourite(id, true))) {
+      return this.snapshot([...this.shown.values()], after)
+    }
     // No list read follows the write: the row was already read, and a second
     // read can trail the write and make the just-favourited series disappear.
     const collection = this.catalog.collectionById(id)
@@ -85,11 +114,15 @@ export class FavouritesService {
     return this.snapshot(items, after)
   }
 
-  async remove(slug: string): Promise<FavouritesData> {
+  private async writeRemove(slug: string): Promise<FavouritesData> {
     const id = await this.idForSlug(slug)
     const after = this.preferences.favouritesAfter()
     if (!id) return this.snapshot([...this.shown.values()], after)
-    await this.api.setCollectionFavourite(id, false)
+    // A write that leaves the collection favourited must keep the row, or the
+    // next read would bring back a series the row had already dropped.
+    if (await this.api.setCollectionFavourite(id, false)) {
+      return this.snapshot([...this.shown.values()], after)
+    }
     return this.snapshot(
       [...this.shown.values()].filter((item) => item.id !== id),
       after

@@ -53,10 +53,7 @@ export function episodeCode(text: string): string | null {
  * one, otherwise the full `title`. The full title stays in the model for
  * episode-code parsing and the content page header.
  */
-export function displayTitle(value: {
-  title?: string | null
-  ottTitle?: string | null
-}): string {
+export function displayTitle(value: { title?: string | null; ottTitle?: string | null }): string {
   const short = value.ottTitle?.trim()
   return short || value.title?.trim() || ''
 }

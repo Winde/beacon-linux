@@ -136,7 +136,13 @@ export function Content({
   return (
     <div className="screen screen--split">
       <header className="page-head page-head--tall">
-        {data.image ? <img className="page-head__bg" src={backdropUrl(data.image, data.image2x) ?? undefined} alt="" /> : null}
+        {data.image ? (
+          <img
+            className="page-head__bg"
+            src={backdropUrl(data.image, data.image2x) ?? undefined}
+            alt=""
+          />
+        ) : null}
         <div className="page-head__shade" />
         <div className="page-head__body">
           {data.series ? <p className="page-head__eyebrow">{data.series.title}</p> : null}

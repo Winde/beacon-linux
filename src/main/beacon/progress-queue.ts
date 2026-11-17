@@ -8,6 +8,15 @@ export const BATCH_SIZE = 10
 export const QUEUE_LIMIT = 500
 /** Positions inside the same ten seconds count as one report, as in the app. */
 const BUCKET_SECONDS = 10
+/** How many mutations one flush may make, including one-at-a-time attribution. */
+const FLUSH_MUTATIONS = 12
+/** Refusals in one flush before leaving the rest for the next timer tick. */
+const FLUSH_REFUSALS = 2
+/** Failed sends before the queue gives up on a single event. */
+export const MAX_TRIES = 24
+/** First retry delay, doubled per failure up to the cap below. */
+const RETRY_BASE_MS = 20_000
+const RETRY_MAX_MS = 10 * 60_000
 
 /** What the player hands the queue. */
 export interface ProgressUpdate {
@@ -20,10 +29,21 @@ export interface ProgressUpdate {
   videoProgressSeconds?: number
   /**
    * Client bookkeeping, stripped before the GraphQL call: once this event has
-   * landed, take the title out of Continue watching. Used by an explicit mark,
+   * landed, take the title out of Continue watching. Used by an unwatched mark,
    * which is a newer decision than the row's old point.
    */
   removeFromContinueWatching?: boolean
+  /**
+   * Client bookkeeping, stripped before the GraphQL call: this event is a
+   * hand-made mark rather than a playback position, so starting playback may
+   * discard it.
+   */
+  explicitMark?: boolean
+  /**
+   * Client bookkeeping, stripped before the GraphQL call: this event is a
+   * launch-time re-send of an explicit mark, so landing it spends one retry.
+   */
+  retryOfMark?: boolean
 }
 
 /** An update stamped for sending, as it sits in the queue. */
@@ -31,6 +51,10 @@ export interface QueuedEvent extends ProgressUpdate {
   /** ISO 8601, taken when the update happened, not when it is finally sent. */
   viewedAt: string
   sessionId: string
+  /** Failed sends so far, persisted so a restart does not retry forever. */
+  tries?: number
+  /** epoch ms before which this event is not worth sending again. */
+  retryAt?: number
 }
 
 export type SendEvents = (events: QueuedEvent[]) => Promise<boolean>
@@ -69,6 +93,12 @@ function normalizeEvent(value: unknown): QueuedEvent | null {
   if (progress != null) event.videoProgress = progress
   if (seconds != null) event.videoProgressSeconds = seconds
   if (raw.removeFromContinueWatching === true) event.removeFromContinueWatching = true
+  if (raw.explicitMark === true) event.explicitMark = true
+  if (raw.retryOfMark === true) event.retryOfMark = true
+  const tries = finite(raw.tries)
+  if (tries != null && tries > 0) event.tries = Math.floor(tries)
+  const retryAt = finite(raw.retryAt)
+  if (retryAt != null) event.retryAt = retryAt
   return event
 }
 
@@ -97,6 +127,10 @@ function bucket(seconds: number): number {
  * per-account queue, send in batches of ten, and keep whatever a failed send
  * still owes Beacon. Events are written to disk on every append so closing the
  * app does not cost a position.
+ *
+ * A refused batch is attributed one event at a time, retried with a backoff and
+ * eventually dropped, and its title moves behind the rest of the queue: one
+ * event the CMS will not take must not hold up every position behind it.
  *
  * One account's queue is never sent with another account's token, which is the
  * one place this deliberately differs from the app's single `unsentEvents` key.
@@ -151,12 +185,12 @@ export class ProgressQueue {
 
   /**
    * Forget an unsent mark for one title. Starting playback is a newer decision
-   * than a mark, so its 99%/1% point and row removal must not land afterwards.
+   * than a mark, so its 97%/1% point and row removal must not land afterwards.
    */
   dropMark(account: string, contentId: string): number {
     return this.dropWhere(
       account,
-      (event) => event.content === contentId && event.removeFromContinueWatching === true
+      (event) => event.content === contentId && event.explicitMark === true
     )
   }
 
@@ -186,25 +220,124 @@ export class ProgressQueue {
   }
 
   private async drain(events: QueuedEvent[], send: SendEvents): Promise<boolean> {
-    while (events.length) {
-      const batch = events.slice(0, BATCH_SIZE)
-      let sent = false
-      try {
-        sent = await send([...batch])
-      } catch {
-        // The caller keeps the events; the next flush tries again.
-        sent = false
+    let mutations = 0
+    let refusals = 0
+    while (events.length && mutations < FLUSH_MUTATIONS && refusals < FLUSH_REFUSALS) {
+      // An event the server has refused this often is not worth another twenty
+      // seconds of retries; drop it and let whatever is behind it through.
+      if (this.dropExhausted(events)) this.persist()
+      if (!events.length) break
+
+      const batch = this.dueBatch(events)
+      if (!batch.length) break // everything left is waiting out a retry
+
+      mutations += 1
+      if (await this.trySend(send, batch)) {
+        this.removeAll(events, batch)
+        this.persist()
+        continue
       }
-      if (!sent) return false
-      // Remove exactly what was sent, not "the first N": a mark may have
-      // dropped an event out of the queue while this batch was on the wire.
-      const done = new Set(batch)
-      for (let index = events.length - 1; index >= 0; index--) {
-        if (done.has(events[index]!)) events.splice(index, 1)
+      refusals += 1
+
+      // A batch refused as a whole is attributed one event at a time, so one
+      // bad event does not take the rest down with it. A single event is not
+      // re-sent at once: that is the same request again, and it gets a backoff.
+      if (batch.length === 1) {
+        this.penalize(batch[0]!)
+        if ((batch[0]!.tries ?? 0) >= MAX_TRIES) this.removeAll(events, [batch[0]!])
+        this.persist()
+        break
       }
-      this.persist()
+      for (const event of batch) {
+        if (mutations >= FLUSH_MUTATIONS || refusals >= FLUSH_REFUSALS) break
+        mutations += 1
+        if (await this.trySend(send, [event])) {
+          this.removeAll(events, [event])
+          this.persist()
+          continue
+        }
+        refusals += 1
+        this.penalize(event)
+        if ((event.tries ?? 0) >= MAX_TRIES) this.removeAll(events, [event])
+        else this.rotateTitle(events, event.content)
+        this.persist()
+        break
+      }
     }
-    return true
+    return events.length === 0
+  }
+
+  /** Remove events the server has refused often enough to give up on. */
+  private dropExhausted(events: QueuedEvent[]): boolean {
+    let dropped = false
+    for (let index = events.length - 1; index >= 0; index--) {
+      if ((events[index]!.tries ?? 0) >= MAX_TRIES) {
+        events.splice(index, 1)
+        dropped = true
+      }
+    }
+    return dropped
+  }
+
+  /**
+   * The next batch worth sending. A title whose oldest report is waiting out a
+   * retry holds back its own newer reports, so a retry can never overtake the
+   * point it belongs with.
+   */
+  private dueBatch(events: QueuedEvent[]): QueuedEvent[] {
+    const now = this.now().getTime()
+    const waiting = new Set<string>()
+    const batch: QueuedEvent[] = []
+    for (const event of events) {
+      if (batch.length >= BATCH_SIZE) break
+      if (waiting.has(event.content)) continue
+      if ((event.retryAt ?? 0) > now) {
+        waiting.add(event.content)
+        continue
+      }
+      batch.push(event)
+    }
+    return batch
+  }
+
+  private async trySend(send: SendEvents, batch: QueuedEvent[]): Promise<boolean> {
+    try {
+      return await send([...batch])
+    } catch {
+      // The caller keeps the events for the next attempt.
+      return false
+    }
+  }
+
+  /** Count a refusal and back off, so a rejected batch cannot hammer the CMS. */
+  private penalize(event: QueuedEvent): void {
+    const tries = (event.tries ?? 0) + 1
+    event.tries = tries
+    // The first refusal may be a blip, so the next flush may try again at once.
+    const delay =
+      tries <= 1 ? 0 : Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** Math.min(tries - 2, 10))
+    event.retryAt = this.now().getTime() + delay
+  }
+
+  /**
+   * Put a refused event, and everything else queued for its title, behind the
+   * rest of the queue. Whole-title moves keep a newer report from overtaking an
+   * older one for the same video.
+   */
+  private rotateTitle(events: QueuedEvent[], contentId: string): void {
+    const moving = events.filter((event) => event.content === contentId)
+    if (moving.length === events.length) return
+    const rest = events.filter((event) => event.content !== contentId)
+    events.splice(0, events.length, ...rest, ...moving)
+  }
+
+  private removeAll(events: QueuedEvent[], batch: QueuedEvent[]): void {
+    // Remove exactly what was sent, not "the first N": a mark may have dropped
+    // an event out of the queue while this batch was on the wire.
+    const done = new Set(batch)
+    for (let index = events.length - 1; index >= 0; index--) {
+      if (done.has(events[index]!)) events.splice(index, 1)
+    }
   }
 
   private eventsFor(account: string): QueuedEvent[] {

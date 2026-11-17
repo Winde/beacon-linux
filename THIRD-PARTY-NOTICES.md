@@ -41,5 +41,6 @@ minification.
 
 These are used to build the application and are not distributed with it:
 
-Vite, electron-vite, electron-builder, TypeScript, `@vitejs/plugin-react`, and the
-`@types/*` packages. All are MIT or Apache-2.0 licensed.
+Vite, electron-vite, electron-builder, TypeScript, ESLint, Prettier,
+typescript-eslint, Testing Library, `@vitejs/plugin-react`, and the `@types/*`
+packages. All are MIT or Apache-2.0 licensed.

@@ -20,11 +20,7 @@ interface ConfirmDialogProps {
  * A TV-sized confirmation. Directions are confined to it by the caller, which
  * also routes Back to the cancel action.
  */
-export function ConfirmDialog({
-  title,
-  message,
-  actions
-}: ConfirmDialogProps): React.JSX.Element {
+export function ConfirmDialog({ title, message, actions }: ConfirmDialogProps): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {

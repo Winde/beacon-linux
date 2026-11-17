@@ -55,9 +55,10 @@ distributions; FUSE 2 is its only system dependency (SteamOS has it, and
 6. Check the run and the assets on the release.
 
 The run checks out that tag, fails immediately if it disagrees with
-`package.json`, runs typecheck and tests, builds the AppImage, and uploads it and
-the checksums to the release you created. If the release does not exist, the
-publish job stops with a message telling you to create it.
+`package.json`, runs `npm run verify` (lint, format, typecheck and tests), builds
+the AppImage, and uploads it and the checksums to the release you created. If the
+release does not exist, the publish job stops with a message telling you to
+create it.
 
 The publish job only runs after the Linux build passes, so a failed build leaves
 the release untouched.
@@ -157,7 +158,7 @@ separate Flathub repository.
 ## Checklist
 
 - [ ] `package.json` version bumped and committed on `main`
-- [ ] `npm run typecheck` and `npm test` pass
+- [ ] `npm run verify` passes (lint, format, typecheck, tests)
 - [ ] `dry_run` workflow passed on the release tag or a prerelease of it
 - [ ] AppImage installs and plays a video on a Steam Machine
 - [ ] Tag matches `package.json` exactly (`v` prefix)

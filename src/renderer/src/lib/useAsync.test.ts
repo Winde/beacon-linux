@@ -42,12 +42,18 @@ async function settle(): Promise<void> {
   })
 }
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+function deferred<T>(): {
+  promise: Promise<T>
+  resolve: (value: T) => void
+  reject: (reason: unknown) => void
+} {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((done, fail) => {
     resolve = done
+    reject = fail
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 beforeEach(() => {
@@ -77,7 +83,9 @@ describe('useAsync', () => {
   it('turns a rejection into a message the UI can show', async () => {
     const load = vi
       .fn()
-      .mockRejectedValue(new Error("Error invoking remote method 'catalog:content': Error: Video not found."))
+      .mockRejectedValue(
+        new Error("Error invoking remote method 'catalog:content': Error: Video not found.")
+      )
     render(load)
 
     await settle()
@@ -86,7 +94,10 @@ describe('useAsync', () => {
   })
 
   it('clears the previous value while reloading', async () => {
-    const load = vi.fn().mockResolvedValueOnce('first').mockReturnValueOnce(new Promise(() => {}))
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce('first')
+      .mockReturnValueOnce(new Promise(() => {}))
     render(load, [1])
     await settle()
     expect(latest.data).toBe('first')
@@ -97,7 +108,10 @@ describe('useAsync', () => {
   })
 
   it('holds the previous value on screen when a reload keeps it', async () => {
-    const load = vi.fn().mockResolvedValueOnce('first').mockReturnValueOnce(new Promise(() => {}))
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce('first')
+      .mockReturnValueOnce(new Promise(() => {}))
     render(load, [1], true)
     await settle()
     expect(latest.data).toBe('first')
@@ -130,5 +144,25 @@ describe('useAsync', () => {
     await settle()
 
     expect(latest.data).toBe('second')
+  })
+
+  it('reports a failed refresh instead of pretending the held value is fresh', async () => {
+    const refresh = deferred<string>()
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce('first')
+      .mockImplementationOnce(() => refresh.promise)
+    render(load, [1], true)
+    await settle()
+    expect(latest.data).toBe('first')
+
+    render(load, [2], true)
+    expect(latest).toEqual({ data: 'first', error: null, loading: false })
+
+    refresh.reject(new Error('offline'))
+    await settle()
+
+    expect(latest.loading).toBe(false)
+    expect(latest.error).toContain('offline')
   })
 })

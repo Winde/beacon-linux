@@ -13,7 +13,7 @@ const CARD = `
 `
 
 const VIDEO = `
-  contentVideo { video { video videoData closedCaptions playlistUrl } }
+  contentVideo { video { video videoData closedCaptions } }
 `
 
 export const ME = `

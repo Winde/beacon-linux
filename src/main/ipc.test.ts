@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const glue = vi.hoisted(() => ({
@@ -29,12 +32,19 @@ const glue = vi.hoisted(() => ({
     search: vi.fn(),
     suggest: vi.fn(),
     play: vi.fn(),
+    nextEpisode: vi.fn(),
+    markWatched: vi.fn(),
     trackProgress: vi.fn(),
     trackStart: vi.fn(),
     flushProgress: vi.fn(),
     catalog: null as unknown
   },
-  catalog: { status: vi.fn() }
+  catalog: {
+    status: vi.fn(),
+    ensure: vi.fn(() => Promise.resolve()),
+    collectionById: vi.fn(() => null),
+    collectionBySlug: vi.fn(() => null)
+  }
 }))
 
 vi.mock('electron', () => ({
@@ -133,7 +143,12 @@ describe('registerIpc', () => {
     glue.client.content.mockResolvedValue({ slug: 'c1e1' })
     glue.client.search.mockResolvedValue({ series: [], videos: [] })
     glue.client.suggest.mockResolvedValue(['Campaign 1'])
-    glue.catalog.status.mockReturnValue({ videos: 3, collections: 1, builtAt: null, building: false })
+    glue.catalog.status.mockReturnValue({
+      videos: 3,
+      collections: 1,
+      builtAt: null,
+      building: false
+    })
 
     await expect(handler('auth:signIn')({}, 'member@example.com', 'hunter2')).resolves.toEqual({
       signedIn: true,
@@ -148,7 +163,6 @@ describe('registerIpc', () => {
     await handler('catalog:content')({}, 'c1e1')
     await handler('catalog:search')({}, 'vox')
     await expect(handler('catalog:suggest')({}, 'cam')).resolves.toEqual(['Campaign 1'])
-    await handler('catalog:indexStatus')()
 
     expect(glue.client.status).toHaveBeenCalled()
     expect(glue.client.signOut).toHaveBeenCalled()
@@ -157,7 +171,6 @@ describe('registerIpc', () => {
     expect(glue.client.content).toHaveBeenCalledWith('c1e1')
     expect(glue.client.search).toHaveBeenCalledWith('vox')
     expect(glue.client.suggest).toHaveBeenCalledWith('cam')
-    expect(glue.catalog.status).toHaveBeenCalled()
   })
 
   it('adds the reordered playlist to a play response', async () => {
@@ -184,7 +197,10 @@ describe('registerIpc', () => {
   })
 
   it('serves the original playlist when reordering fails', async () => {
-    glue.client.play.mockResolvedValue({ url: 'https://cdn.jwplayer.com/x.m3u8', playlist: 'original' })
+    glue.client.play.mockResolvedValue({
+      url: 'https://cdn.jwplayer.com/x.m3u8',
+      playlist: 'original'
+    })
     vi.mocked(fetchMasterPlaylist).mockRejectedValue(new Error('HTTP 500'))
 
     const data = await handler('playback:open')({}, 'c1e1')
@@ -206,6 +222,68 @@ describe('registerIpc', () => {
     expect(glue.client.trackStart).toHaveBeenCalledWith('e1')
     expect(glue.client.flushProgress).toHaveBeenCalled()
     expect(fetchCaptionFile).toHaveBeenCalledWith('https://cdn.example/en.vtt')
+  })
+
+  it('delegates favourites, watch marks and the next-episode request', async () => {
+    glue.client.nextEpisode.mockResolvedValue(null)
+    glue.client.markWatched.mockResolvedValue({ watched: true, progress: 1 })
+    const card = {
+      kind: 'series' as const,
+      id: 'c1',
+      slug: 'campaign-1',
+      title: 'Campaign 1',
+      image: null,
+      image2x: null,
+      count: 10
+    }
+
+    await expect(handler('favourites:list')()).resolves.toEqual({ items: [], after: null })
+    glue.client.setCollectionFavourite.mockResolvedValueOnce(true)
+    const added = await handler('favourites:add')({}, card)
+    expect(glue.client.setCollectionFavourite).toHaveBeenCalledWith('c1', true)
+    expect(added.items.map((item: { id: string }) => item.id)).toEqual(['c1'])
+
+    glue.client.setCollectionFavourite.mockResolvedValueOnce(false)
+    const removed = await handler('favourites:remove')({}, 'campaign-1')
+    expect(glue.client.setCollectionFavourite).toHaveBeenLastCalledWith('c1', false)
+    expect(removed.items).toEqual([])
+
+    const request = { contentId: 'c1e1', collectionId: 'c1' }
+    await handler('playback:next')({}, request)
+    expect(glue.client.nextEpisode).toHaveBeenCalledWith(request)
+
+    await expect(handler('watch:mark')({}, 'c1e1', true)).resolves.toEqual({
+      watched: true,
+      progress: 1
+    })
+    expect(glue.client.markWatched).toHaveBeenCalledWith('c1e1', true)
+  })
+
+  it('delegates the favourites row position without reading the account', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'beacon-ipc-'))
+    glue.app.getPath.mockReturnValue(directory)
+    try {
+      const data = await handler('favourites:setPosition')({}, 'featured')
+
+      expect(data.after).toBe('featured')
+      expect(glue.client.favouriteCollectionIds).not.toHaveBeenCalled()
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('reports the credential storage and delegates an update check', async () => {
+    await expect(handler('auth:storage')()).resolves.toBe('unavailable')
+
+    const info = { current: '0.1.4', latest: '0.2.0', available: true, canInstall: true }
+    glue.updater.check.mockResolvedValue(info)
+    await expect(handler('updates:check')()).resolves.toEqual(info)
+  })
+
+  it('does nothing when a fullscreen request has no window', () => {
+    glue.fromContents = null
+
+    expect(() => handler('app:toggleFullscreen')({ sender: {} })).not.toThrow()
   })
 
   it('closes every window on quit', () => {

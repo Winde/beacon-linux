@@ -107,7 +107,7 @@ four recent items — came back byte-identical under `x-platform: web` and
 Member-tier item is also identical: access is decided by the bearer token, not
 the platform header.
 
-The editorial home is the same too, signed in or not. All five live blocks
+The editorial home is the same too, signed in or not. All eight live blocks
 have `excludedPlatforms` false for every platform, and all 1,759 content docs
 have an empty `Content.excludedPlatforms`, so the server never varies these
 responses by `x-platform`; only the client's own filtering would, and that is
@@ -118,8 +118,8 @@ it is what keeps the stream plain HLS.
 
 ### 3.3 There is a real favourites system
 
-Our README says "Beacon has no watchlist", and we built a local one. The app
-has *server-side favourites* for both content and collections:
+An earlier README claimed "Beacon has no watchlist", which led us to build a
+local one. The app has *server-side favourites* for both content and collections:
 
 ```graphql
 query  { isContentFavourite: hasContentFavourited(id: "<id>") }
@@ -175,13 +175,35 @@ token signs in next. The player queues a started view and a position every
 10 s of playback; the client sends ten at a time on a 20 s timer, on window
 blur/hide, on suspend and lock, and on quit (with a short bounded wait), and a
 screen read flushes first. Failed or offline events stay on disk instead of
-being dropped.
+being dropped; a refused event is retried with backoff, and one Beacon keeps
+refusing is dropped after a bounded number of attempts so it cannot wedge the
+rest of the queue.
 
-Marks use the same queue. An explicit watched/unwatched mark first drops any
-older position still queued for that title, then queues its 99%/1% point with
-an internal flag; the Continue-watching removal is sent only after that point
-lands. Playback reports in the other direction drop an unsent mark for the
-title, because starting to watch is the newer decision.
+The app stops a flush at the first batch that fails and replays it forever,
+which means one event the CMS refuses blocks every position behind it. Ours
+instead attributes a refused batch by sending its events one at a time, moves
+the refused title behind the rest of the queue (whole-title moves keep its
+reports in order), backs it off from 20 s up to 10 min, and drops it after 24
+refusals so the queue always drains. Twenty seconds of offline is skipped
+before any of this, not counted as a refusal.
+
+Marks use the same queue. An explicit watched mark first drops any older
+position still queued for that title, then queues its 97% point at the last
+second; an unwatched mark queues a 1% point with an internal flag and the
+Continue-watching removal is sent only after that point lands. A watched mark
+carries no removal: the mutation zeroes the saved point, so asking for it undid
+the mark on every other device. Playback reports in the other direction drop an
+unsent mark for the title, because starting to watch is the newer decision.
+
+`trackView` success is not proof that the point was stored, so the local mark
+doubles as a retry record. It keeps the point the member was looking at; at
+launch the client reads progress for the marks carried over from the previous
+run and re-queues only the ones whose point has not moved. A mark whose point
+moved is stale (something was watched elsewhere since) and is dropped; a mark
+with no recorded point is only filled in over an episode that was never started.
+A mark Beacon will not take gets three launch-time retries, then the client
+leaves it on disk without sending it again. A mark that agrees is dropped, as a
+screen read would do.
 
 ### 3.5 The home page is block-driven, and we build it ourselves
 
@@ -206,11 +228,12 @@ Notable block details:
   content item or mixed `Content`/`Collection` items;
 - `LatestCarousel` has `carouselTitle`, `latestColor`, CTA and content.
 
-Our home is assembled from `search(-releaseDate)` + `collectionSearch` +
-`continueWatching`. That is stable and cheap, but it cannot show editorial
-rows (For You, Watch/Listen/Read carousels, categories) and its hero is our
-own pick. If we want the real home, `MemberHomePage.pageContent` is the
-query, and the block shapes are all in the appendix.
+Before the block home, ours was assembled from `search(-releaseDate)` +
+`collectionSearch` + `continueWatching`. That was stable and cheap, but it
+could not show editorial rows (For You, Watch/Listen/Read carousels, categories)
+and its hero was our own pick. If we want the real home,
+`MemberHomePage.pageContent` is the query, and the block shapes are all in the
+appendix.
 
 **Update (2026-11-17):** the client now renders the block home. The hero,
 Featured, Continue watching, Watch by Series and Latest Videos come from
@@ -219,9 +242,10 @@ Featured, Continue watching, Watch by Series and Latest Videos come from
 until those screens exist. The old search-based builder is gone, not kept as a
 fallback — a block failure shows an error instead of a different home.
 
-### 3.6 Content page fields we do not ask for
+### 3.6 Content page fields beyond the basics
 
-`GetContentPage` requests, besides what we already fetch:
+`GetContentPage` requests, beyond the id, title and artwork the client always
+needs:
 
 - `ottTitle` — a second, display-oriented title (see the table below);
 - `publishedAt`, `contentVisibleAt`, `msUntilVisible`, `secondsAfterAvailable`,
@@ -237,29 +261,31 @@ fallback — a block failure shows an error instead of a different home.
 
 `RefetchMedia` is the reduced version the app re-runs before playback: id,
 contentType, duration and the three media unions plus
-`currentProgress`. Worth copying as our media-only query — it is smaller
-than our `MEDIA` + `LOOKUP` pair and gives us livestream/podcast sources.
+`currentProgress`. Worth copying as our media-only query — it is smaller than
+our `MEDIA` query plus the separate `LOOKUP` a mark uses, and gives us
+livestream/podcast sources.
 
 **Live check (2026-11-17, Member account, all 1,759 content docs).** Which of
-these are worth asking for:
+these are worth asking for. `Our client` is what the code does today; the rest
+is the recommendation behind it.
 
-| Field | Reality | Use? |
+| Field | Reality | Our client |
 |---|---|---|
-| `ottTitle` | Non-null on all 1,759 docs; differs from `title` on 1,156. Strips series/episode prefixes (`C4 E043 \| The Water's Edge` → `The Water's Edge`) and sometimes adds the show (`Abubakar Salim \| Shirts off Sam's Back`). | **Yes** — card/hero/up-next title, `title` as fallback. Keep `title` for the catalog index and episode-code parsing; an editor's `ottTitle` is occasionally wrong (`Comics!` on an unrelated Weird Kids episode). |
-| `continuedSummary` | 142 of 300 recent docs; about 1,086 characters against a 125-character `description`. It is the rest of the page body (credits, sponsors, health note), not a one-line synopsis. | **Yes, with the app's toggle** — clamp `description` to three lines and show `...See More`; expanding removes the clamp and renders `continuedSummary` (then `tags`) beneath it, with `See Less` to close. |
-| `contentVisibleAt`, `msUntilVisible` | `contentVisibleAt` set on 43 docs, all past except the CMS test doc `coming-soon-test` (visible 2035). Search still returns not-yet-visible docs. | **Yes** — treat a future `contentVisibleAt` as "not playable yet". |
-| `comingSoonTagDate` | The card badge date, 15 minutes before `contentVisibleAt` (e.g. 01:45 for a 02:00 release); all in the past right now. | **Yes** — "Coming soon" badge / premiere label, paired with the guard above. |
-| `contentLivestream` | Present on every doc, but `currentStream`, `main` and `fallback` are null on everything sampled; `enableMonitoring: true` and a JW `player` URL are always set. No `livestream` docs exist today. | **Only for live.** Presence is not a signal; use `contentType: livestream` + `currentStream`. When live, read `main`/`fallback` `MuxAsset.playbackUrl`. |
-| `contentPodcast` | 990 `videoPodcast` docs also have `contentVideo`; 93 `podcast` docs are audio-only (`audio` HLS + podcast `player`). | **Later** — only needed for audio playback. |
-| `freeContent` | Empty `[]` on every sample, Free and Member tier alike. | **No, for now.** |
-| `tags` | 8 of 300 recent docs. | **No, for now.** |
-| `thumbnail.sizes.square` / `portrait`, `podcastThumbnail` | Square and portrait exist on all 1,759 docs. | Only for a square grid or audio row; TV stays on `landscape`/`landscape2x`. |
+| `ottTitle` | Non-null on all 1,759 docs; differs from `title` on 1,156. Strips series/episode prefixes (`C4 E043 \| The Water's Edge` → `The Water's Edge`) and sometimes adds the show (`Abubakar Salim \| Shirts off Sam's Back`). | **Used** — card/hero/up-next title, `title` as fallback. Keep `title` for the catalog index and episode-code parsing; an editor's `ottTitle` is occasionally wrong (`Comics!` on an unrelated Weird Kids episode). |
+| `continuedSummary` | 142 of 300 recent docs; about 1,086 characters against a 125-character `description`. It is the rest of the page body (credits, sponsors, health note), not a one-line synopsis. | **Used** — `description` clamps to three lines and `...See More` renders `continuedSummary` beneath it, with `See Less` to close. The toggle only appears when there is a summary. |
+| `contentVisibleAt`, `msUntilVisible` | `contentVisibleAt` set on 43 docs, all past except the CMS test doc `coming-soon-test` (visible 2035). Search still returns not-yet-visible docs. | **Not yet** — a future value is not treated as unplayable. |
+| `comingSoonTagDate` | The card badge date, 15 minutes before `contentVisibleAt` (e.g. 01:45 for a 02:00 release); all in the past right now. | **Not yet** — there is no "Coming soon" badge. |
+| `contentLivestream` | Present on every doc, but `currentStream`, `main` and `fallback` are null on everything sampled; `enableMonitoring: true` and a JW `player` URL are always set. No `livestream` docs exist today. | **Not yet** — live events are the remaining roadmap item. Presence is not a signal; use `contentType: livestream` + `currentStream`, then read `main`/`fallback` `MuxAsset.playbackUrl`. |
+| `contentPodcast` | 990 `videoPodcast` docs also have `contentVideo`; 93 `podcast` docs are audio-only (`audio` HLS + podcast `player`). | **Not yet** — only needed for audio playback. |
+| `freeContent` | Empty `[]` on every sample, Free and Member tier alike. | **No** |
+| `tags` | 8 of 300 recent docs. | **No** |
+| `thumbnail.sizes.square` / `portrait`, `podcastThumbnail` | Square and portrait exist on all 1,759 docs. | **Partly** — collections use portrait; the TV grid stays on `landscape`/`landscape2x`, and square is unused. |
 | `primaryCollection.podcastFeed` | Present (an external `members.beacon.tv` feed URL). | **No** — that is podcast-app plumbing, not playback. |
-| `video.player`, `video.playlistUrl` | `player` is the JW library URL, not a stream; `playlistUrl` is null on samples. | **No** — keep `video` + `videoData`. |
+| `video.player`, `video.playlistUrl` | `player` is the JW library URL, not a stream; `playlistUrl` is null on samples. | **No** — the documents ask for `video` + `videoData` only. |
 | `isTrailer`, `ottIsHero` | `false` on all 1,759 docs. | **No** — unused CMS fields. |
-| `rating`, `popularity` | Not star ratings: engagement counters (`rating` up to 2,027, `popularity` up to 46,474). | **As sort keys only** (`sort: "-popularity"`, `"-rating"`); never render them as a score. |
-| `secondsAfterAvailable` | `-1` on every doc. | Live sync only. |
-| `Content.excludedPlatforms` | Empty on all 1,759 docs (it also carries an `ott` flag). | Not yet. |
+| `rating`, `popularity` | Not star ratings: engagement counters (`rating` up to 2,027, `popularity` up to 46,474). | **Not exposed** — usable only as sort keys (`sort: "-popularity"`, `"-rating"`), never as a score. |
+| `secondsAfterAvailable` | `-1` on every doc. | **No** — live sync only. |
+| `Content.excludedPlatforms` | Empty on all 1,759 docs (it also carries an `ott` flag). | **No** — home blocks are filtered by platform; content flags are not read. |
 
 Pre-roll exists as a content flag, not a setting on the video:
 `Videos(where: { prerollVideo: { equals: true } })` returns the pre-roll
@@ -292,15 +318,15 @@ and `preview`. Those are editorial/plumbing except where noted below.
 filters take the **CMS id**, not the slug or the name — a slug returns zero
 results, an id returns the right set:
 
-| Filter | What it does | Use? |
+| Filter | What it does | Our client |
 |---|---|---|
-| `category: <id>` | Exact category, editorial included. Playable counts: Critical Role 526, Beacon Exclusives and Early Access 105, Midst 62, Candela Obscura 26 (Behind the Scenes 7, Darrington Press 3, Programming Schedule 2 are editorial-only). | **Yes** — the best new filter; a Browse/Search category selector. `Content.category` gives each item its label. |
-| `hideFromLatest: true` | 1,283 → 1,130 playable. 586 docs are flagged overall (372 editorial, 94 `videoPodcast`, 61 `podcast`, 59 `video`), including trailers and one-off panels. Default is `false`; cooldown episodes are **not** flagged. | **Yes, but only for "Latest" rows.** Never on the catalog index or a text search — it would hide real matches. |
-| `contentTier: <id>` | Free 209 / Member 1,550, an exact partition. | Optional — a "Free to watch" filter or row for free members; our lock handling already covers playback. |
-| `sort` | Any field works. `-popularity` and `-rating` produce genuinely different, sensible orders (recent C4 episodes / highest-rated C4 episodes), though main and Cooldown versions sit next to each other. | **Worth exposing** as a "Popular" / "Top rated" sort — with cooldown de-duplication. |
-| `featured: true` | 608 playable docs. | Fallback only if the Featured block is missing. |
-| `tag: <id>` | Works, but sparse and id-only (e.g. Ashley Johnson 257 docs). | Not yet. |
-| `collections`, `collectionMatch`, `season`, `idsToRemove`, `previewDate`, `preview` | Editorial/plumbing; `fetchSeries` already covers seasons. | No. |
+| `category: <id>` | Exact category, editorial included. Playable counts: Critical Role 526, Beacon Exclusives and Early Access 105, Midst 62, Candela Obscura 26 (Behind the Scenes 7, Darrington Press 3, Programming Schedule 2 are editorial-only). | **Not exposed** — the best new filter; a Browse/Search category selector would use it. `Content.category` gives each item its label. |
+| `hideFromLatest: true` | 1,283 → 1,130 playable. 586 docs are flagged overall (372 editorial, 94 `videoPodcast`, 61 `podcast`, 59 `video`), including trailers and one-off panels. Default is `false`; cooldown episodes are **not** flagged. | **Not used** — recommended only for "Latest" rows. Never on the catalog index or a text search, where it would hide real matches. |
+| `contentTier: <id>` | Free 209 / Member 1,550, an exact partition. | **Not exposed** — optional for a "Free to watch" filter or row; lock handling already covers playback. |
+| `sort` | Any field works. `-popularity` and `-rating` produce genuinely different, sensible orders (recent C4 episodes / highest-rated C4 episodes), though main and Cooldown versions sit next to each other. | **Partly** — `-releaseDate` is used for the catalog and feeds; "Popular" / "Top rated" are not exposed. |
+| `featured: true` | 608 playable docs. | **Not used** — a fallback only if the Featured block is missing. |
+| `tag: <id>` | Works, but sparse and id-only (e.g. Ashley Johnson 257 docs). | **Not exposed** |
+| `collections`, `collectionMatch`, `season`, `idsToRemove`, `previewDate`, `preview` | Editorial/plumbing; `fetchSeries` already covers seasons. | **No** |
 
 ### 3.9 Live events
 
@@ -318,14 +344,15 @@ list as unknown, and it is worth a follow-up with a live event.
 
 ### 3.10 Account features on the member API
 
-The app also uses `MeMember`-adjacent operations we do not touch:
+The app also uses `MeMember`-adjacent operations the client still does not touch:
 `GetUserProfile`, `UpdateProfile`, `PersonaliseProfile` (interests),
-`GetProfilePictures`, `GetInterestSuggestions`, `GetFavouritesPage`,
+`GetProfilePictures`, `GetInterestSuggestions`,
 `GetContentRating`/`RateContent` (a numeric rating per item),
 `GetMembershipPlans`, `GetAccessTiers`, `GetJoinPage`, `GetJoinBeaconContent`,
 `GetLockedContentPrompt` (with an `appOnly` variant), `GetContactPage` and
-`SubmitForm`. Ratings and favourites are the only two that would change how
-our screens behave.
+`SubmitForm`. `GetFavouritesPage` is the list the client already reads through
+`userCollectionFavourites`. Ratings are the only remaining one that would change
+how a screen behaves.
 
 ## 4. Smaller things worth knowing
 
@@ -351,8 +378,10 @@ our screens behave.
   library noise, not Beacon operations.
 - **Token storage**: `expo-secure-store` (Keystore-backed), with
   `ACCESS_TOKEN_EXPIRY` 15 min and `oneYearInMilliseconds` for the refresh
-  token's nominal life. Our keyring-only policy (nothing written without a
-  real keyring) is stricter than the app's, and fine.
+  token's nominal life. Our client uses the OS keyring when one is reachable
+  and falls back to safeStorage's `basic_text` on SteamOS Game Mode, which has
+  no keyring: the session is saved and survives a restart, but only obfuscated.
+  The sign-in screen says which case is in use.
 - **Bundle hygiene**: Sentry DSN, Firebase config and OneSignal app id are in
   the APK; no secrets were found beyond public client ids.
 
@@ -376,8 +405,10 @@ our screens behave.
 6. **PKCE sign-in** — the largest change, but it removes password handling
    entirely and matches the official client.
 7. **Small wins verified above, in order of cost:**
-   - display `ottTitle` (fall back to `title`) on tiles, the hero and up-next;
-   - append `continuedSummary` under `description` on the content page;
+   - ~~display `ottTitle` (fall back to `title`) on tiles, the hero and
+     up-next~~ — done;
+   - ~~append `continuedSummary` under `description` on the content page~~ —
+     done;
    - skip `contentVisibleAt > now` in cards and playback (the CMS test doc is
      searchable today and cannot play), and show `comingSoonTagDate` as the
      "Coming soon" badge;

@@ -28,9 +28,12 @@ export function Collection({
   inFavourites = false,
   favouritePending = false
 }: CollectionProps): React.JSX.Element | null {
+  // Keep the page on screen while it reloads: it is what the player uncovers,
+  // so blanking to the spinner would drop the grid and the focus inside it.
   const { data, error, loading } = useAsync(
     () => window.beacon.catalog.collection(slug),
-    [slug, refreshKey]
+    [slug, refreshKey],
+    { keepData: true }
   )
   const [seasonIndex, setSeasonIndex] = useState(0)
   const placed = useRef(false)
@@ -74,7 +77,13 @@ export function Collection({
   return (
     <div className="screen screen--split">
       <header className="page-head">
-        {data.image ? <img className="page-head__bg" src={backdropUrl(data.image, data.image2x) ?? undefined} alt="" /> : null}
+        {data.image ? (
+          <img
+            className="page-head__bg"
+            src={backdropUrl(data.image, data.image2x) ?? undefined}
+            alt=""
+          />
+        ) : null}
         <div className="page-head__shade" />
         <div className="page-head__body">
           <h1 className="page-head__title">{data.title}</h1>

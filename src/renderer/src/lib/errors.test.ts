@@ -3,7 +3,9 @@ import { cleanError } from './errors'
 
 describe('cleanError', () => {
   it('unwraps the Electron IPC wrapper', () => {
-    const error = new Error("Error invoking remote method 'beacon:signIn': Error: Invalid credentials")
+    const error = new Error(
+      "Error invoking remote method 'beacon:signIn': Error: Invalid credentials"
+    )
     expect(cleanError(error)).toBe('Invalid credentials')
   })
 

@@ -52,6 +52,8 @@ export function useAsync<T>(
     return () => {
       cancelled = true
     }
+    // `deps` is the caller's dependency list by design: `load` is a fresh
+    // closure on every render and would restart the request each time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)
 

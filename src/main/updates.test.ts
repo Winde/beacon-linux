@@ -129,7 +129,9 @@ describe('checksumFor', () => {
   const hash = 'a'.repeat(64)
 
   it('finds the hash for a file in a sha256sum listing', () => {
-    const sums = [`${'b'.repeat(64)}  other.tar`, `${hash}  Beacon-0.2.0-x86_64.AppImage`].join('\n')
+    const sums = [`${'b'.repeat(64)}  other.tar`, `${hash}  Beacon-0.2.0-x86_64.AppImage`].join(
+      '\n'
+    )
 
     expect(checksumFor(sums, 'Beacon-0.2.0-x86_64.AppImage')).toBe(hash)
     expect(checksumFor(sums, 'missing.AppImage')).toBeNull()
@@ -170,7 +172,10 @@ describe('relaunchArgs', () => {
 })
 
 describe('Updater', () => {
-  function updater(fetch: UpdateFetch, options: { version?: string; appImage?: string | null } = {}) {
+  function updater(
+    fetch: UpdateFetch,
+    options: { version?: string; appImage?: string | null } = {}
+  ) {
     return new Updater({
       currentVersion: () => options.version ?? '0.1.4',
       appImage: () => options.appImage ?? null,
@@ -187,17 +192,18 @@ describe('Updater', () => {
 
     expect(fetch).toHaveBeenCalledWith(
       'https://api.github.com/repos/Winde/beacon-linux/releases/latest',
-      expect.objectContaining({ headers: expect.objectContaining({ accept: 'application/vnd.github+json' }) })
+      expect.objectContaining({
+        headers: expect.objectContaining({ accept: 'application/vnd.github+json' })
+      })
     )
     expect(info).toEqual({ current: '0.1.4', latest: '0.2.0', available: true, canInstall: true })
   })
 
   it('does not call an older or equal release an update', async () => {
     for (const version of ['0.1.4', '0.1.3']) {
-      const info = await updater(
-        () => Promise.resolve(jsonResponse(releasePayload(version))),
-        { appImage: '/home/deck/Applications/Beacon.AppImage' }
-      ).check()
+      const info = await updater(() => Promise.resolve(jsonResponse(releasePayload(version))), {
+        appImage: '/home/deck/Applications/Beacon.AppImage'
+      }).check()
       expect(info.available).toBe(false)
       expect(info.canInstall).toBe(false)
     }
@@ -272,6 +278,147 @@ describe('Updater', () => {
 
     expect(readFileSync(target, 'utf8')).toBe('old build')
     expect(existsSync(`${target}.part`)).toBe(false)
+  })
+
+  it('refuses a release that is missing its AppImage or checksums', async () => {
+    const target = join(temporary(), 'Beacon.AppImage')
+    const fetch = () =>
+      Promise.resolve(
+        jsonResponse({
+          tag_name: 'v0.2.0',
+          assets: [
+            {
+              name: appImageName('0.2.0'),
+              browser_download_url: `https://github.com/Winde/beacon-linux/releases/download/v0.2.0/${appImageName('0.2.0')}`
+            }
+          ]
+        })
+      )
+    const service = updater(fetch, { appImage: target })
+
+    await service.check()
+    await expect(service.install()).rejects.toThrow(/missing its AppImage or checksums/)
+  })
+
+  it('explains a checksum download that failed', async () => {
+    const target = join(temporary(), 'Beacon.AppImage')
+    const fetch: UpdateFetch = (url) =>
+      url.startsWith('https://api.github.com/')
+        ? Promise.resolve(jsonResponse(releasePayload('0.2.0')))
+        : Promise.resolve({ ...textResponse(''), ok: false, status: 500 } as UpdateResponse)
+    const service = updater(fetch, { appImage: target })
+
+    await service.check()
+    await expect(service.install()).rejects.toThrow(/Could not download the release checksums/)
+  })
+
+  it('refuses a checksum list that does not name the AppImage', async () => {
+    const target = join(temporary(), 'Beacon.AppImage')
+    const fetch: UpdateFetch = (url) => {
+      if (url.startsWith('https://api.github.com/')) {
+        return Promise.resolve(jsonResponse(releasePayload('0.2.0')))
+      }
+      if (url.endsWith('SHA256SUMS.txt')) {
+        return Promise.resolve(textResponse(`${'0'.repeat(64)}  another-file.AppImage\n`))
+      }
+      return Promise.resolve(bodyResponse(Buffer.from('new build')))
+    }
+    const service = updater(fetch, { appImage: target })
+
+    await service.check()
+    await expect(service.install()).rejects.toThrow(/does not list/)
+  })
+
+  it('reports a failed or empty update download and leaves the old build alone', async () => {
+    const directory = temporary()
+    const target = join(directory, 'Beacon.AppImage')
+    writeFileSync(target, 'old build')
+    const name = appImageName('0.2.0')
+
+    const refused: UpdateFetch = (url) => {
+      if (url.startsWith('https://api.github.com/')) {
+        return Promise.resolve(jsonResponse(releasePayload('0.2.0')))
+      }
+      if (url.endsWith('SHA256SUMS.txt')) {
+        return Promise.resolve(textResponse(`${'0'.repeat(64)}  ${name}\n`))
+      }
+      return Promise.resolve({ ...bodyResponse(new Uint8Array()), ok: false, status: 500 })
+    }
+    const refusedService = updater(refused, { appImage: target })
+    await refusedService.check()
+    await expect(refusedService.install()).rejects.toThrow(/download failed \(500\)/)
+
+    const empty: UpdateFetch = (url) => {
+      if (url.startsWith('https://api.github.com/')) {
+        return Promise.resolve(jsonResponse(releasePayload('0.2.0')))
+      }
+      if (url.endsWith('SHA256SUMS.txt')) {
+        return Promise.resolve(textResponse(`${'0'.repeat(64)}  ${name}\n`))
+      }
+      return Promise.resolve({ ...jsonResponse(null), body: null })
+    }
+    const emptyService = updater(empty, { appImage: target })
+    await emptyService.check()
+    await expect(emptyService.install()).rejects.toThrow(/download was empty/)
+
+    expect(readFileSync(target, 'utf8')).toBe('old build')
+    expect(existsSync(`${target}.part`)).toBe(false)
+  })
+
+  it('cleans up an interrupted download instead of replacing the app', async () => {
+    const directory = temporary()
+    const target = join(directory, 'Beacon.AppImage')
+    writeFileSync(target, 'old build')
+    const name = appImageName('0.2.0')
+    const interrupted = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(Buffer.from('partial'))
+        controller.error(new Error('connection dropped'))
+      }
+    })
+    const fetch: UpdateFetch = (url) => {
+      if (url.startsWith('https://api.github.com/')) {
+        return Promise.resolve(jsonResponse(releasePayload('0.2.0')))
+      }
+      if (url.endsWith('SHA256SUMS.txt')) {
+        return Promise.resolve(textResponse(`${'0'.repeat(64)}  ${name}\n`))
+      }
+      return Promise.resolve({ ...jsonResponse(null), body: interrupted })
+    }
+    const service = updater(fetch, { appImage: target })
+
+    await service.check()
+    await expect(service.install()).rejects.toThrow(/download was interrupted/)
+
+    expect(readFileSync(target, 'utf8')).toBe('old build')
+    expect(existsSync(`${target}.part`)).toBe(false)
+  })
+
+  it('can try the same checked release again after a failed install', async () => {
+    const directory = temporary()
+    const target = join(directory, 'Beacon.AppImage')
+    writeFileSync(target, 'old build')
+    const bytes = Buffer.from('new build')
+    const hash = createHash('sha256').update(bytes).digest('hex')
+    const name = appImageName('0.2.0')
+    let healthy = false
+    const fetch: UpdateFetch = (url) => {
+      if (url.startsWith('https://api.github.com/')) {
+        return Promise.resolve(jsonResponse(releasePayload('0.2.0')))
+      }
+      if (url.endsWith('SHA256SUMS.txt')) {
+        return Promise.resolve(textResponse(`${healthy ? hash : '0'.repeat(64)}  ${name}\n`))
+      }
+      return Promise.resolve(bodyResponse(bytes))
+    }
+    const service = updater(fetch, { appImage: target })
+
+    await service.check()
+    await expect(service.install()).rejects.toThrow(/checksum/)
+
+    healthy = true
+    await expect(service.install()).resolves.toBe(target)
+    expect(readFileSync(target, 'utf8')).toBe('new build')
   })
 
   it('refuses to install before a check, or without an AppImage', async () => {

@@ -40,8 +40,10 @@ function candidates(scope?: ParentNode): HTMLElement[] {
   const root = scope ?? document
   return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
     // `inert` subtrees stay mounted for their exit animation (the closed rail
-    // slides out), but must never take focus.
-    (element) => !element.closest('[inert]') && isVisible(element)
+    // slides out), but must never take focus. A disabled control has the same
+    // problem: it cannot receive real focus, so the highlight would park there
+    // and `accept` would do nothing.
+    (element) => !element.closest('[inert]') && !element.matches(':disabled') && isVisible(element)
   )
 }
 

@@ -21,7 +21,9 @@ describe('atWidth', () => {
   })
 
   it('keeps the segments after the width', () => {
-    expect(atWidth(`${RESIZABLE},width=960,fit=cover`, 480)).toBe(`${RESIZABLE},width=480,fit=cover`)
+    expect(atWidth(`${RESIZABLE},width=960,fit=cover`, 480)).toBe(
+      `${RESIZABLE},width=480,fit=cover`
+    )
   })
 
   it('leaves URLs that cannot be resized alone', () => {

@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BeaconApi, Card, FavouritesAnchor, NextEpisodeRequest, ProgressReport } from '@shared/types'
+import type {
+  BeaconApi,
+  Card,
+  FavouritesAnchor,
+  NextEpisodeRequest,
+  ProgressReport
+} from '@shared/types'
 
 const api: BeaconApi = {
   auth: {
@@ -13,8 +19,7 @@ const api: BeaconApi = {
     collection: (slug: string) => ipcRenderer.invoke('catalog:collection', slug),
     content: (slug: string) => ipcRenderer.invoke('catalog:content', slug),
     search: (query: string) => ipcRenderer.invoke('catalog:search', query),
-    suggest: (query: string) => ipcRenderer.invoke('catalog:suggest', query),
-    indexStatus: () => ipcRenderer.invoke('catalog:indexStatus')
+    suggest: (query: string) => ipcRenderer.invoke('catalog:suggest', query)
   },
   favourites: {
     list: () => ipcRenderer.invoke('favourites:list'),

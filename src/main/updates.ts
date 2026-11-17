@@ -281,7 +281,8 @@ export class Updater {
     const name = appImageName(release.version)
     const asset = release.assets.find((entry) => entry.name === name)
     const checksums = release.assets.find((entry) => entry.name === CHECKSUMS_NAME)
-    if (!asset || !checksums) throw new Error('The latest release is missing its AppImage or checksums')
+    if (!asset || !checksums)
+      throw new Error('The latest release is missing its AppImage or checksums')
 
     let sums: string
     try {

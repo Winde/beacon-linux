@@ -6,6 +6,8 @@ const MEDIA_HOSTS = /(^|\.)(jwplayer\.com|jwpsrv\.com|jwpcdn\.com|jwplatform\.co
 
 /** Master playlists change only when a stream is re-encoded. */
 const playlists = new TtlCache<string, string>(5 * 60_000, 20)
+/** A CDN that stops answering must not leave the player on its spinner. */
+const MEDIA_TIMEOUT = 30_000
 
 /** Test seam: the cache is module-level and outlives a single test. */
 export function clearPlaylistCache(): void {
@@ -64,7 +66,11 @@ export function reorderMasterPlaylist(text: string, base: string): string | null
     block.push(absolute(lines[i]))
 
     const bandwidth = /(?:^|[:,])BANDWIDTH=(\d+)/.exec(line)
-    variants.push({ lines: block, bandwidth: bandwidth ? Number(bandwidth[1]) : 0, order: variants.length })
+    variants.push({
+      lines: block,
+      bandwidth: bandwidth ? Number(bandwidth[1]) : 0,
+      order: variants.length
+    })
   }
 
   if (!variants.length) return null
@@ -78,7 +84,7 @@ export async function fetchMasterPlaylist(url: string): Promise<string> {
   if (!isMediaUrl(url)) throw new Error('Stream host not allowed')
   // Replaying an episode should not wait on this request again.
   return playlists.load(url, async () => {
-    const res = await net.fetch(url)
+    const res = await net.fetch(url, { signal: AbortSignal.timeout(MEDIA_TIMEOUT) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const text = await res.text()
     return reorderMasterPlaylist(text, url) ?? text
@@ -88,7 +94,7 @@ export async function fetchMasterPlaylist(url: string): Promise<string> {
 /** Caption files come from JW Player without CORS headers, so the renderer can't fetch them. */
 export async function fetchCaptionFile(url: string): Promise<string> {
   if (!isMediaUrl(url)) throw new Error('Caption host not allowed')
-  const res = await net.fetch(url)
+  const res = await net.fetch(url, { signal: AbortSignal.timeout(MEDIA_TIMEOUT) })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.text()
 }

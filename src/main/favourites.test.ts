@@ -19,23 +19,35 @@ function collection(id: string, slug: string, name: string) {
   }
 }
 
-function harness(options: { email?: string | null; ids?: string[] } = {}) {
+function harness(
+  options: {
+    email?: string | null
+    ids?: string[]
+    set?: FavouritesApi['setCollectionFavourite']
+    collections?: { id: string; slug: string; name: string }[]
+  } = {}
+) {
   const email = options.email === undefined ? 'member@example.com' : options.email
+  const collections = options.collections ?? [{ id: 'c1', slug: 'campaign-1', name: 'Campaign 1' }]
+  const byId = new Map(
+    collections.map((entry) => [entry.id, collection(entry.id, entry.slug, entry.name)])
+  )
+  const bySlug = new Map(
+    collections.map((entry) => [entry.slug, collection(entry.id, entry.slug, entry.name)])
+  )
   const api: FavouritesApi = {
     accountEmail: vi.fn(() => Promise.resolve(email)),
     favouriteCollectionIds: vi.fn(() => Promise.resolve(options.ids ?? ['c1'])),
-    setCollectionFavourite: vi.fn(() => Promise.resolve(true))
+    // By default the account takes the write and answers with the new state.
+    setCollectionFavourite:
+      options.set ?? vi.fn((_id: string, favourite: boolean) => Promise.resolve(favourite))
   }
   const catalog = {
     ensure: vi.fn(() => Promise.resolve()),
     videoBySlug: vi.fn(() => null),
-    collectionBySlug: vi.fn((slug: string) =>
-      slug === 'campaign-1' ? collection('c1', 'campaign-1', 'Campaign 1') : null
-    ),
+    collectionBySlug: vi.fn((slug: string) => bySlug.get(slug) ?? null),
     videoById: vi.fn(() => null),
-    collectionById: vi.fn((id: string) =>
-      id === 'c1' ? collection('c1', 'campaign-1', 'Campaign 1') : null
-    ),
+    collectionById: vi.fn((id: string) => byId.get(id) ?? null),
     seriesVideos: vi.fn(() => []),
     localSearch: vi.fn(() => ({ collections: [], videos: [] })),
     suggest: vi.fn(() => [])
@@ -110,6 +122,16 @@ describe('FavouritesService', () => {
     expect(data.items.map((item) => item.id)).toEqual(['c1'])
   })
 
+  it('leaves the row alone when the account refuses the add', async () => {
+    const set = vi.fn<FavouritesApi['setCollectionFavourite']>().mockResolvedValue(false)
+    const { service, api } = harness({ ids: [], set })
+
+    const data = await service.add(series)
+
+    expect(api.setCollectionFavourite).toHaveBeenCalledWith('c1', true)
+    expect(data.items).toEqual([])
+  })
+
   it('does not favourite an episode', async () => {
     const { service, api } = harness()
 
@@ -128,6 +150,17 @@ describe('FavouritesService', () => {
     expect(data.items).toEqual([])
   })
 
+  it('keeps the row when the account refuses the remove', async () => {
+    const set = vi.fn<FavouritesApi['setCollectionFavourite']>().mockResolvedValue(true)
+    const { service, api } = harness({ ids: ['c1'], set })
+    await service.list()
+
+    const data = await service.remove('campaign-1')
+
+    expect(api.setCollectionFavourite).toHaveBeenCalledWith('c1', false)
+    expect(data.items.map((item) => item.id)).toEqual(['c1'])
+  })
+
   it('moves the row without asking the account again', () => {
     const { service, api, preferences } = harness()
 
@@ -136,5 +169,76 @@ describe('FavouritesService', () => {
     expect(preferences.setFavouritesAfter).toHaveBeenCalledWith('featured')
     expect(api.favouriteCollectionIds).not.toHaveBeenCalled()
     expect(data.after).toBe('featured')
+  })
+
+  it('rejects a failed account read instead of reporting an empty account', async () => {
+    const { service, api } = harness()
+    vi.mocked(api.favouriteCollectionIds).mockRejectedValue(new Error('offline'))
+
+    await expect(service.list()).rejects.toThrow('offline')
+  })
+
+  it('runs writes in order, so the later answer still lists the earlier series', async () => {
+    const pending: ((value: boolean) => void)[] = []
+    const set = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          pending.push(resolve)
+        })
+    )
+    const { service } = harness({
+      ids: [],
+      set,
+      collections: [
+        { id: 'c1', slug: 'campaign-1', name: 'Campaign 1' },
+        { id: 'c2', slug: 'campaign-2', name: 'Campaign 2' }
+      ]
+    })
+    const second: Card = {
+      ...series,
+      id: 'c2',
+      slug: 'campaign-2',
+      title: 'Campaign 2'
+    }
+
+    const firstWrite = service.add(series)
+    const secondWrite = service.add(second)
+
+    // The second write waits for the first, rather than racing it.
+    await vi.waitFor(() => expect(set).toHaveBeenCalledTimes(1))
+    pending[0]!(true)
+    await firstWrite
+
+    await vi.waitFor(() => expect(set).toHaveBeenCalledTimes(2))
+    pending[1]!(true)
+    const data = await secondWrite
+
+    expect(data.items.map((item) => item.id)).toEqual(['c2', 'c1'])
+  })
+
+  it('keeps accepting writes after one fails', async () => {
+    const set = vi
+      .fn<FavouritesApi['setCollectionFavourite']>()
+      .mockRejectedValueOnce(new Error('refused'))
+      .mockResolvedValueOnce(true)
+    const { service } = harness({
+      ids: [],
+      set,
+      collections: [
+        { id: 'c1', slug: 'campaign-1', name: 'Campaign 1' },
+        { id: 'c2', slug: 'campaign-2', name: 'Campaign 2' }
+      ]
+    })
+    const second: Card = {
+      ...series,
+      id: 'c2',
+      slug: 'campaign-2',
+      title: 'Campaign 2'
+    }
+
+    await expect(service.add(series)).rejects.toThrow('refused')
+    const data = await service.add(second)
+
+    expect(data.items.map((item) => item.id)).toEqual(['c2'])
   })
 })

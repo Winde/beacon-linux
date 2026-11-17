@@ -48,6 +48,7 @@ interface StubOptions {
   version?: string
   check?: () => Promise<UpdateInfo>
   install?: () => Promise<void>
+  initialSlug?: string | null
 }
 
 function stubApp({
@@ -59,11 +60,13 @@ function stubApp({
   remove: removeImpl,
   version = '0.1.4',
   check,
-  install
+  install,
+  initialSlug = null
 }: StubOptions = {}): {
   signOut: ReturnType<typeof vi.fn>
   list: ReturnType<typeof vi.fn>
   home: ReturnType<typeof vi.fn>
+  content: ReturnType<typeof vi.fn>
   add: ReturnType<typeof vi.fn>
   remove: ReturnType<typeof vi.fn>
   quit: ReturnType<typeof vi.fn>
@@ -75,6 +78,7 @@ function stubApp({
   const homeFn = vi.fn(homeImpl ?? (() => Promise.resolve(home)))
   const addFn = vi.fn(add ?? (() => Promise.resolve({ items, after: null })))
   const remove = vi.fn(removeImpl ?? (() => Promise.resolve({ items: [], after: null })))
+  const content = vi.fn(() => Promise.resolve(null))
   const quit = vi.fn()
   const checkFn = vi.fn(
     check ??
@@ -103,10 +107,9 @@ function stubApp({
     catalog: {
       home: homeFn,
       collection: vi.fn(),
-      content: vi.fn(),
+      content,
       search: vi.fn(),
-      suggest: vi.fn(),
-      indexStatus: vi.fn()
+      suggest: vi.fn()
     },
     favourites: {
       list,
@@ -120,13 +123,23 @@ function stubApp({
       quit,
       toggleFullscreen: vi.fn(),
       platform: vi.fn(() => Promise.resolve('linux')),
-      initialSlug: vi.fn(() => Promise.resolve(null)),
+      initialSlug: vi.fn(() => Promise.resolve(initialSlug)),
       version: vi.fn(() => Promise.resolve(version))
     },
     updates: { check: checkFn, install: installFn }
   })
 
-  return { signOut, list, home: homeFn, add: addFn, remove, quit, check: checkFn, install: installFn }
+  return {
+    signOut,
+    list,
+    home: homeFn,
+    content,
+    add: addFn,
+    remove,
+    quit,
+    check: checkFn,
+    install: installFn
+  }
 }
 
 describe('App sign out', () => {
@@ -176,6 +189,13 @@ describe('App sign out', () => {
     render(<App />)
 
     await waitFor(() => expect(list).toHaveBeenCalledOnce())
+  })
+
+  it('opens a deep-linked episode over Home', async () => {
+    const { content } = stubApp({ initialSlug: 'c1e1' })
+    render(<App />)
+
+    await waitFor(() => expect(content).toHaveBeenCalledWith('c1e1'))
   })
 
   it('shows sign-in when there is no session', async () => {
@@ -382,7 +402,9 @@ describe('App favourites', () => {
     fireEvent.click(button)
     expect(screen.getByTestId('hero-favourite').textContent).toBe('Remove from favourites')
 
-    await waitFor(() => expect(screen.getByTestId('hero-favourite').textContent).toBe('Add to favourites'))
+    await waitFor(() =>
+      expect(screen.getByTestId('hero-favourite').textContent).toBe('Add to favourites')
+    )
     expect(add).toHaveBeenCalledOnce()
     expect(screen.getByTestId('hero-favourite').getAttribute('aria-busy')).toBe('false')
   })

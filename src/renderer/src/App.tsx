@@ -207,7 +207,10 @@ export default function App(): React.JSX.Element {
   // Read once: the rail shows it, and it never changes while the app is open.
   // A failure costs only the version line, not the boot.
   useEffect(() => {
-    void window.beacon.app.version().then(setVersion).catch(() => {})
+    void window.beacon.app
+      .version()
+      .then(setVersion)
+      .catch(() => {})
   }, [])
 
   const checkForUpdates = useCallback(async () => {
@@ -313,7 +316,10 @@ export default function App(): React.JSX.Element {
   )
 
   const moveFavourites = useCallback((after: FavouritesAnchor) => {
-    window.beacon.favourites.setPosition(after).then(setFavourites).catch(() => {})
+    window.beacon.favourites
+      .setPosition(after)
+      .then(setFavourites)
+      .catch(() => {})
   }, [])
   // The rail is only focusable while open, so focus it once it is on screen.
   // Queried directly rather than through focusFirst(): that helper skips

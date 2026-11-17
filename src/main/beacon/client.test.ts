@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as Q from './queries'
 import type { IndexedCollection, IndexedVideo } from './catalog-types'
 import type { CatalogLike } from './client'
-import { BeaconClient, BeaconError } from './client'
+import { BeaconClient, BeaconError, MARK_RETRIES } from './client'
 
 const net = vi.hoisted(() => ({ fetch: vi.fn() }))
 vi.mock('electron', () => ({ net: { fetch: net.fetch } }))
@@ -126,11 +126,13 @@ function indexedCollection(overrides: Partial<IndexedCollection> = {}): IndexedC
   }
 }
 
-function fakeCatalog(options: {
-  videos?: IndexedVideo[]
-  collections?: IndexedCollection[]
-  suggestions?: string[]
-} = {}): CatalogLike {
+function fakeCatalog(
+  options: {
+    videos?: IndexedVideo[]
+    collections?: IndexedCollection[]
+    suggestions?: string[]
+  } = {}
+): CatalogLike {
   const videos = options.videos ?? []
   const collections = options.collections ?? []
   return {
@@ -190,11 +192,12 @@ describe('auth', () => {
 
     const [authUrl, authInit] = net.fetch.mock.calls[0] as [
       string,
-      { body?: string; headers?: Record<string, string> }
+      { body?: string; headers?: Record<string, string>; signal?: AbortSignal }
     ]
     expect(authUrl).toBe('https://pocketbeacon.memberful.com/oauth/token')
     expect(authUrl).not.toContain('hunter2')
     expect(authInit.headers?.['content-type']).toBe('application/x-www-form-urlencoded')
+    expect(authInit.signal).toBeInstanceOf(AbortSignal)
     const form = new URLSearchParams(authInit.body)
     expect(form.get('grant_type')).toBe('password')
     expect(form.get('username')).toBe('member@example.com')
@@ -210,6 +213,20 @@ describe('auth', () => {
       signedIn: true,
       user: { name: 'Jane', tier: 'Exandria', active: true }
     })
+  })
+
+  it('reports a refused password grant without touching the saved session', async () => {
+    net.fetch.mockImplementation(async (url: string) =>
+      String(url).includes('oauth/token')
+        ? response({ error: 'invalid_grant', error_description: 'Wrong password.' }, 400)
+        : response({ data: MEMBER })
+    )
+    const client = new BeaconClient()
+
+    await expect(client.signIn('member@example.com', 'wrong')).rejects.toThrow('Wrong password.')
+
+    expect(saveSession).not.toHaveBeenCalled()
+    await expect(client.isSignedIn()).resolves.toBe(true)
   })
 
   it('clears the session on sign out', async () => {
@@ -395,10 +412,7 @@ describe('home', () => {
 
     const home = await client.home()
 
-    expect(home.rows[0].items.map((item) => item.title)).toEqual([
-      'The Water’s Edge',
-      'Only Title'
-    ])
+    expect(home.rows[0].items.map((item) => item.title)).toEqual(['The Water’s Edge', 'Only Title'])
   })
 
   it('drops a block excluded for the platform we identify as', async () => {
@@ -454,6 +468,31 @@ describe('home', () => {
     const home = await client.home()
 
     expect(home.rows[0].items).toHaveLength(3)
+  })
+
+  it('fills the Continue watching limit with unfinished entries, not finished ones', async () => {
+    const docs = [
+      { videoProgress: 99, content: cmsCard({ id: 'done1', slug: 'done1' }) },
+      { videoProgress: 95, content: cmsCard({ id: 'done2', slug: 'done2' }) },
+      { videoProgress: 40, content: cmsCard({ id: 'cw1', slug: 'cw1' }) },
+      { videoProgress: 30, content: cmsCard({ id: 'cw2', slug: 'cw2' }) },
+      { videoProgress: 20, content: cmsCard({ id: 'cw3', slug: 'cw3' }) }
+    ]
+    routeCms(
+      homeRoutes({
+        [Q.CONTINUE_WATCHING]: () => ({ continueWatching: { docs } }),
+        [Q.HOME_BLOCKS]: () => ({
+          MemberHomePage: {
+            pageContent: [{ __typename: 'ContinueWatchingV2', id: 'cw-block', limit: 3 }]
+          }
+        })
+      })
+    )
+    const client = new BeaconClient()
+
+    const home = await client.home()
+
+    expect(home.rows[0].items.map((item) => item.slug)).toEqual(['cw1', 'cw2', 'cw3'])
   })
 
   it('omits finished rows and empty sections', async () => {
@@ -911,7 +950,11 @@ describe('play', () => {
                     playlist: [
                       {
                         tracks: [
-                          { kind: 'captions', label: 'English', file: 'https://cdn.example/en.vtt' },
+                          {
+                            kind: 'captions',
+                            label: 'English',
+                            file: 'https://cdn.example/en.vtt'
+                          },
                           { kind: 'subtitles', file: 'https://cdn.example/fr.vtt' },
                           { kind: 'thumbnails', file: 'https://cdn.example/thumbs.vtt' },
                           { kind: 'captions' }
@@ -1077,9 +1120,7 @@ describe('nextEpisode', () => {
     routeCms({})
     const client = new BeaconClient()
 
-    await expect(
-      client.nextEpisode({ ...request, isSeries: false })
-    ).resolves.toBeNull()
+    await expect(client.nextEpisode({ ...request, isSeries: false })).resolves.toBeNull()
     expect(net.fetch).not.toHaveBeenCalled()
   })
 
@@ -1301,7 +1342,7 @@ describe('trackProgress', () => {
     expect(batches).toEqual([2])
   })
 
-  it('keeps events a failed send did not deliver', async () => {
+  it('recovers a failed batch one event at a time', async () => {
     const batches: number[] = []
     let attempts = 0
     routeCms({
@@ -1317,9 +1358,10 @@ describe('trackProgress', () => {
     await client.trackProgress('e1', 10, 600)
     await client.trackProgress('e1', 20, 600)
 
-    await expect(client.flushProgress()).resolves.toBe(false)
+    // The batch is refused once, then its events go on their own, so a blip
+    // costs no positions and nothing stays blocked behind them.
     await expect(client.flushProgress()).resolves.toBe(true)
-    expect(batches).toEqual([2])
+    expect(batches).toEqual([1, 1])
   })
 
   it('sends a started view on its own, before any position', async () => {
@@ -1433,42 +1475,10 @@ describe('watch state', () => {
 
   it('marks an episode watched at its full runtime', async () => {
     let event: Record<string, any> | null = null
-    let removed: string | null = null
-    routeCms({
-      [Q.TRACK]: (variables) => {
-        event = variables.events[0]
-        return { trackView: { success: true } }
-      },
-      [Q.REMOVE_FROM_CONTINUE_WATCHING]: (variables) => {
-        removed = variables.id
-        return { removeContentFromContinueWatching: { success: true } }
-      }
-    })
-    const client = new BeaconClient()
-    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
-
-    await expect(client.markWatched('c1e1', true)).resolves.toEqual({
-      watched: true,
-      progress: 1
-    })
-
-    // One second inside the end, so the CMS cannot discard the extreme value.
-    expect(event).toMatchObject({
-      content: 'e1',
-      videoProgress: 99,
-      videoProgressSeconds: 3299
-    })
-    // The queue's removal bookkeeping is ours, not an EventInput field.
-    expect(event).not.toHaveProperty('removeFromContinueWatching')
-    expect(removed).toBe('e1')
-  })
-
-  it('drops a queued position for a title when it is marked', async () => {
-    const batches: Record<string, any>[][] = []
     let removed = 0
     routeCms({
       [Q.TRACK]: (variables) => {
-        batches.push(variables.events)
+        event = variables.events[0]
         return { trackView: { success: true } }
       },
       [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => {
@@ -1479,24 +1489,149 @@ describe('watch state', () => {
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
 
+    await expect(client.markWatched('c1e1', true)).resolves.toEqual({
+      watched: true,
+      progress: 1
+    })
+
+    // The last second, reported below the CMS's 98% cutoff: 99 is accepted and
+    // then discarded, which left the mark on this machine only.
+    expect(event).toMatchObject({
+      content: 'e1',
+      videoProgress: 97,
+      videoProgressSeconds: 3299
+    })
+    // The queue's bookkeeping is ours, not an EventInput field.
+    expect(event).not.toHaveProperty('removeFromContinueWatching')
+    expect(event).not.toHaveProperty('explicitMark')
+    // Removing the row zeroes the point it was told about, so a watched mark
+    // must not ask for it.
+    expect(removed).toBe(0)
+  })
+
+  it('drops a queued position instead of sending it to read a baseline', async () => {
+    const batches: Record<string, any>[][] = []
+    routeCms({
+      [Q.TRACK]: (variables) => {
+        batches.push(variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
     await client.trackProgress('e1', 120, 3300)
     await client.markWatched('c1e1', true)
 
-    // The pre-mark position never reaches Beacon: replaying it after the mark
-    // would move the saved point back.
+    // The baseline read must not flush the queued position just to learn what
+    // it is: the mark is newer, so its own point replaces that report.
+    expect(cmsCallsTo(Q.PROGRESS_FOR)).toBeGreaterThanOrEqual(1)
     expect(batches).toHaveLength(1)
     expect(batches[0]).toHaveLength(1)
     expect(batches[0]![0]).toMatchObject({
       content: 'e1',
-      videoProgress: 99,
+      videoProgress: 97,
       videoProgressSeconds: 3299
     })
-    expect(removed).toBe(1)
   })
 
-  it('keeps a mark queued when Beacon cannot take it, then sends it with the removal', async () => {
+  it('records a mark baseline from the server, not a stale cached point', async () => {
     const events: Record<string, any>[] = []
-    let removed: string | null = null
+    let stored = { videoProgress: 10, videoProgressSeconds: 300 }
+    routeCms({
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: { timeMap: [{ contentId: 'e1', ...stored }] }
+      }),
+      [Q.TRACK]: (variables) => {
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    // Prime the cache while the account is at 10%.
+    await client.progressFor(['e1'])
+    // Someone watched elsewhere; the cached point is now stale.
+    stored = { videoProgress: 50, videoProgressSeconds: 1650 }
+    await client.markWatched('c1e1', true)
+    expect(events).toHaveLength(1)
+
+    // The server later reports the point the cache held. A stale baseline would
+    // look unchanged and re-send the mark; the fresh 50% marks it as moved.
+    stored = { videoProgress: 10, videoProgressSeconds: 300 }
+    await client.reconcileMarks()
+
+    expect(events).toHaveLength(1)
+  })
+
+  it('records the baseline while an older position report is still in flight', async () => {
+    const batches: Record<string, any>[][] = []
+    let stored = { videoProgress: 10, videoProgressSeconds: 300 }
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let reportInFlight = false
+    let baselineReadWhileInFlight = false
+    routeCms({
+      [Q.PROGRESS_FOR]: () => {
+        if (reportInFlight) baselineReadWhileInFlight = true
+        return { getProgressForContent: { timeMap: [{ contentId: 'e1', ...stored }] } }
+      },
+      [Q.TRACK]: async (variables) => {
+        if (!reportInFlight) {
+          reportInFlight = true
+          await gate
+        }
+        batches.push(variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    // A cached point from before the watch elsewhere.
+    await client.progressFor(['e1'])
+    stored = { videoProgress: 50, videoProgressSeconds: 1650 }
+
+    await client.trackProgress('e1', 120, 3300)
+    const flushing = client.flushProgress()
+    await vi.waitFor(() => expect(reportInFlight).toBe(true))
+
+    // The baseline read must not settle the queue first: that would wait out
+    // the report (or time out) before the mark could even be recorded.
+    const marking = client.markWatched('c1e1', true)
+    await vi.waitFor(() => expect(baselineReadWhileInFlight).toBe(true))
+
+    release()
+    await flushing
+    await marking
+
+    // The report was already on the wire, so it lands first; the mark follows
+    // it and must not be overtaken by an older point.
+    expect(batches.map((batch) => batch[0]!.videoProgress)).toEqual([4, 97])
+
+    // The fresh 50% baseline makes the server's later 10% look like a watch
+    // elsewhere, so the mark is dropped rather than re-sent.
+    stored = { videoProgress: 10, videoProgressSeconds: 300 }
+    const sent = batches.length
+    await client.reconcileMarks()
+    expect(batches).toHaveLength(sent)
+  })
+
+  it('keeps a mark queued when Beacon cannot take it, then sends it later', async () => {
+    const events: Record<string, any>[] = []
+    let removed = 0
     let attempts = 0
     routeCms({
       [Q.TRACK]: (variables) => {
@@ -1505,8 +1640,8 @@ describe('watch state', () => {
         events.push(...variables.events)
         return { trackView: { success: true } }
       },
-      [Q.REMOVE_FROM_CONTINUE_WATCHING]: (variables) => {
-        removed = variables.id
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => {
+        removed += 1
         return { removeContentFromContinueWatching: { success: true } }
       }
     })
@@ -1517,17 +1652,524 @@ describe('watch state', () => {
       watched: true,
       progress: 1
     })
-    expect(removed).toBeNull()
+    expect(removed).toBe(0)
 
     await expect(client.flushProgress()).resolves.toBe(true)
 
     expect(events).toHaveLength(1)
     expect(events[0]).toMatchObject({
       content: 'e1',
-      videoProgress: 99,
+      videoProgress: 97,
       videoProgressSeconds: 3299
     })
-    expect(removed).toBe('e1')
+    expect(removed).toBe(0)
+  })
+
+  it('sends a mark again when Beacon never confirmed it', async () => {
+    const events: Record<string, any>[] = []
+    routeCms({
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: {
+          timeMap: [{ contentId: 'e1', videoProgress: 10, videoProgressSeconds: 300 }]
+        }
+      }),
+      [Q.TRACK]: (variables) => {
+        // Accepted, then dropped, as the CMS does with a point it dislikes.
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.markWatched('c1e1', true)
+    await client.reconcileMarks()
+
+    // Both attempts carry the same point: this is one lost write tried again,
+    // not a second, different decision.
+    expect(
+      events.map((event) => [event.content, event.videoProgress, event.videoProgressSeconds])
+    ).toEqual([
+      ['e1', 97, 3299],
+      ['e1', 97, 3299]
+    ])
+  })
+
+  it('drops a mark Beacon already agrees with instead of sending it again', async () => {
+    const events: Record<string, any>[] = []
+    routeCms({
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: {
+          timeMap: [{ contentId: 'e1', videoProgress: 97, videoProgressSeconds: 3299 }]
+        }
+      }),
+      [Q.TRACK]: (variables) => {
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.markWatched('c1e1', true)
+    await client.reconcileMarks()
+
+    // "No second send" would also pass if reconcile never ran, so pin that it
+    // read the account: the mark's own read, then the reconcile's.
+    expect(cmsCallsTo(Q.PROGRESS_FOR)).toBeGreaterThanOrEqual(2)
+    expect(events).toHaveLength(1)
+  })
+
+  it('does not re-send a mark when the progress read fails', async () => {
+    const events: Record<string, any>[] = []
+    let readFails = false
+    routeCms({
+      [Q.PROGRESS_FOR]: () => {
+        if (readFails) throw new Error('offline')
+        return {
+          getProgressForContent: {
+            timeMap: [{ contentId: 'e1', videoProgress: 10, videoProgressSeconds: 300 }]
+          }
+        }
+      },
+      [Q.TRACK]: (variables) => {
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    // The mark does get a recorded point, so only the failed read stands
+    // between it and a retry.
+    await client.markWatched('c1e1', true)
+    readFails = true
+    await client.reconcileMarks()
+
+    expect(cmsCallsTo(Q.PROGRESS_FOR)).toBe(2)
+    expect(events).toHaveLength(1)
+  })
+
+  it('stops re-sending a mark Beacon will not take', async () => {
+    const events: Record<string, any>[] = []
+    routeCms({
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: {
+          timeMap: [{ contentId: 'e1', videoProgress: 10, videoProgressSeconds: 300 }]
+        }
+      }),
+      [Q.TRACK]: (variables) => {
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.markWatched('c1e1', true)
+    const sendsPerLaunch: number[] = []
+    for (let launch = 0; launch < MARK_RETRIES + 2; launch++) {
+      await client.reconcileMarks()
+      sendsPerLaunch.push(events.length)
+    }
+
+    expect(sendsPerLaunch.at(-2)).toBe(1 + MARK_RETRIES)
+    // The important part is that it stops growing, not the exact number.
+    expect(sendsPerLaunch.at(-1)).toBe(sendsPerLaunch.at(-2))
+  })
+
+  it('does not spend mark retries on launches that never reached Beacon', async () => {
+    let online = false
+    let attempts = 0
+    const landed: Record<string, any>[] = []
+    routeCms({
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: {
+          timeMap: [{ contentId: 'e1', videoProgress: 10, videoProgressSeconds: 300 }]
+        }
+      }),
+      [Q.TRACK]: (variables) => {
+        attempts += 1
+        if (!online) throw new Error('offline')
+        landed.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    // The first mark and four launches all fail before Beacon sees them.
+    await client.markWatched('c1e1', true)
+    for (let launch = 0; launch < MARK_RETRIES + 1; launch++) await client.reconcileMarks()
+    expect(landed).toHaveLength(0)
+
+    // The budget is untouched, so every retry still goes out.
+    online = true
+    for (let retry = 0; retry < MARK_RETRIES; retry++) await client.reconcileMarks()
+    expect(landed).toHaveLength(MARK_RETRIES)
+
+    const attemptsAtCap = attempts
+    await client.reconcileMarks()
+    expect(attempts).toBe(attemptsAtCap)
+  })
+
+  it('still checks a capped mark for a server that agrees or moved', async () => {
+    const events: Record<string, any>[] = []
+    let stored = { videoProgress: 10, videoProgressSeconds: 300 }
+    routeCms({
+      [Q.ME]: () => MEMBER,
+      [Q.SERIES]: () => ({ fetchSeries: { docs: [{ content: cmsCard() }] } }),
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: { timeMap: [{ contentId: 'e1', ...stored }] }
+      }),
+      [Q.TRACK]: (variables) => {
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({
+      videos: [indexedVideo(1)],
+      collections: [indexedCollection()]
+    })
+
+    await client.markWatched('c1e1', true)
+    for (let launch = 0; launch < MARK_RETRIES; launch++) await client.reconcileMarks()
+    const capped = events.length
+
+    // The server moved on, but the mark has no retries left. It still has to be
+    // read and dropped, or it would keep masking the newer point forever.
+    stored = { videoProgress: 40, videoProgressSeconds: 1320 }
+    await client.reconcileMarks()
+    expect(events).toHaveLength(capped)
+
+    const data = await client.collection('campaign-1')
+    expect(data.seasons[0].items[0]).toMatchObject({ progress: 0.4, watched: false })
+  })
+
+  it('lets a fresh mark start its retries over', async () => {
+    const events: Record<string, any>[] = []
+    routeCms({
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: {
+          timeMap: [{ contentId: 'e1', videoProgress: 10, videoProgressSeconds: 300 }]
+        }
+      }),
+      [Q.TRACK]: (variables) => {
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.markWatched('c1e1', true)
+    for (let launch = 0; launch < MARK_RETRIES + 2; launch++) await client.reconcileMarks()
+    const exhausted = events.length
+    await client.reconcileMarks()
+    expect(events.length).toBe(exhausted) // capped
+
+    // The member decides again, so the cap no longer applies to the new choice.
+    await client.markWatched('c1e1', true)
+    const afterMark = events.length
+    expect(afterMark).toBe(exhausted + 1)
+
+    await client.reconcileMarks()
+    expect(events.length).toBe(afterMark + 1)
+  })
+
+  it('treats a mark as stale when the point moved on another device', async () => {
+    const events: Record<string, any>[] = []
+    let stored = { videoProgress: 10, videoProgressSeconds: 300 }
+    routeCms({
+      [Q.ME]: () => MEMBER,
+      [Q.SERIES]: () => ({ fetchSeries: { docs: [{ content: cmsCard() }] } }),
+      [Q.CONTENT]: () => ({
+        Contents: {
+          docs: [
+            cmsCard({
+              contentVideo: { video: { video: 'https://cdn.example/e1.m3u8' } }
+            })
+          ]
+        },
+        currentProgress: stored
+      }),
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: { timeMap: [{ contentId: 'e1', ...stored }] }
+      }),
+      [Q.TRACK]: (variables) => {
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({
+      videos: [indexedVideo(1)],
+      collections: [indexedCollection()]
+    })
+
+    await client.markWatched('c1e1', true)
+
+    // The same routes now serve the point another machine left behind.
+    stored = { videoProgress: 40, videoProgressSeconds: 1320 }
+    await client.reconcileMarks()
+
+    // The older choice must not roll that back, and must stop masking it.
+    expect(events).toHaveLength(1)
+    const data = await client.collection('campaign-1')
+    expect(data.seasons[0].items[0]).toMatchObject({ progress: 0.4, watched: false })
+  })
+
+  it('resumes a stale-marked episode where the account actually is', async () => {
+    let stored = { videoProgress: 10, videoProgressSeconds: 300 }
+    routeCms({
+      [Q.ME]: () => MEMBER,
+      [Q.CONTENT]: () => ({
+        Contents: {
+          docs: [
+            cmsCard({
+              contentVideo: { video: { video: 'https://cdn.example/e1.m3u8' } }
+            })
+          ]
+        },
+        currentProgress: stored
+      }),
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: { timeMap: [{ contentId: 'e1', ...stored }] }
+      }),
+      [Q.TRACK]: () => ({ trackView: { success: true } }),
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.markWatched('c1e1', true)
+    stored = { videoProgress: 40, videoProgressSeconds: 1320 }
+
+    // No reconcile and no prior read: the mark is still in the store when the
+    // page resolves it, which is the case where reading `marked` too early
+    // used to start the episode over.
+    const page = await client.content('c1e1')
+    expect(page).toMatchObject({ watched: false, resumeAt: 1320 })
+
+    // The player gets the same point through the cache the page handed it.
+    await expect(client.play('c1e1')).resolves.toMatchObject({ resumeAt: 1320 })
+  })
+
+  it('starts a stale-marked episode where the account is, even from the player', async () => {
+    let stored = { videoProgress: 10, videoProgressSeconds: 300 }
+    routeCms({
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: { timeMap: [{ contentId: 'e1', ...stored }] }
+      }),
+      [Q.MEDIA]: () => ({
+        Contents: {
+          docs: [
+            cmsCard({
+              contentVideo: { video: { video: 'https://cdn.example/e1.m3u8' } }
+            })
+          ]
+        },
+        currentProgress: stored
+      }),
+      [Q.TRACK]: () => ({ trackView: { success: true } }),
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.markWatched('c1e1', true)
+    stored = { videoProgress: 40, videoProgressSeconds: 1320 }
+
+    // The content page was never opened, so `play` is the only reader.
+    await expect(client.play('c1e1')).resolves.toMatchObject({ resumeAt: 1320 })
+  })
+
+  it('starts a marked-watched episode from the beginning while the server lags', async () => {
+    const stored = { videoProgress: 50, videoProgressSeconds: 1650 }
+    routeCms({
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: { timeMap: [{ contentId: 'e1', ...stored }] }
+      }),
+      [Q.MEDIA]: () => ({
+        Contents: {
+          docs: [
+            cmsCard({
+              contentVideo: { video: { video: 'https://cdn.example/e1.m3u8' } }
+            })
+          ]
+        },
+        currentProgress: stored
+      }),
+      [Q.TRACK]: () => ({ trackView: { success: true } }),
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.markWatched('c1e1', true)
+
+    await expect(client.play('c1e1')).resolves.toMatchObject({ resumeAt: 0 })
+  })
+
+  it('still retries when the point barely changed', async () => {
+    const events: Record<string, any>[] = []
+    let stored = { videoProgress: 10, videoProgressSeconds: 300 }
+    routeCms({
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: { timeMap: [{ contentId: 'e1', ...stored }] }
+      }),
+      [Q.TRACK]: (variables) => {
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.markWatched('c1e1', true)
+
+    // Five seconds is reporting jitter, not someone watching the episode.
+    stored = { videoProgress: 10, videoProgressSeconds: 305 }
+    await client.reconcileMarks()
+
+    expect(events).toHaveLength(2)
+    expect(events[1]).toMatchObject({ content: 'e1', videoProgress: 97 })
+  })
+
+  it('fills in a watched mark carried over without a point', async () => {
+    const events: Record<string, any>[] = []
+    const removed: string[] = []
+    routeCms({
+      // An empty read leaves the mark with no recorded point, the way a mark
+      // written by an older build looks.
+      [Q.PROGRESS_FOR]: () => ({ getProgressForContent: { timeMap: [] } }),
+      [Q.TRACK]: (variables) => {
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: (variables) => {
+        removed.push(variables.id)
+        return { removeContentFromContinueWatching: { success: true } }
+      }
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.markWatched('c1e1', true)
+    await client.reconcileMarks()
+
+    // Nothing to protect on an episode nobody started, so the point is filled
+    // in at the last second and the row is left alone.
+    expect(events.map((event) => [event.videoProgress, event.videoProgressSeconds])).toEqual([
+      [97, 3299],
+      [97, 3299]
+    ])
+    expect(removed).toEqual([])
+  })
+
+  it('does not wipe a point another device started when the mark has no point', async () => {
+    const events: Record<string, any>[] = []
+    let stored: { videoProgress: number; videoProgressSeconds: number } | null = null
+    routeCms({
+      [Q.ME]: () => MEMBER,
+      [Q.SERIES]: () => ({ fetchSeries: { docs: [{ content: cmsCard() }] } }),
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: { timeMap: stored ? [{ contentId: 'e1', ...stored }] : [] }
+      }),
+      [Q.TRACK]: (variables) => {
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
+        removeContentFromContinueWatching: { success: true }
+      })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({
+      videos: [indexedVideo(1)],
+      collections: [indexedCollection()]
+    })
+
+    await client.markWatched('c1e1', false)
+
+    // Someone started the episode elsewhere; the older "unwatched" must not
+    // wipe that point, and must stop masking it.
+    stored = { videoProgress: 50, videoProgressSeconds: 1650 }
+    await client.reconcileMarks()
+
+    expect(events).toHaveLength(1)
+    const data = await client.collection('campaign-1')
+    expect(data.seasons[0].items[0]).toMatchObject({ progress: 0.5, watched: false })
+  })
+
+  it('sends an unwatched mark again, with its row removal', async () => {
+    const events: Record<string, any>[] = []
+    const removed: string[] = []
+    const stored = { videoProgress: 97, videoProgressSeconds: 3299 }
+    routeCms({
+      [Q.PROGRESS_FOR]: () => ({
+        getProgressForContent: { timeMap: [{ contentId: 'e1', ...stored }] }
+      }),
+      [Q.TRACK]: (variables) => {
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: (variables) => {
+        removed.push(variables.id)
+        return { removeContentFromContinueWatching: { success: true } }
+      }
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.markWatched('c1e1', false)
+    expect(events.map((event) => [event.videoProgress, event.videoProgressSeconds])).toEqual([
+      [1, 1]
+    ])
+    expect(removed).toEqual(['e1'])
+
+    // The server still has the finished point, so the write was lost.
+    await client.reconcileMarks()
+
+    expect(events.map((event) => [event.videoProgress, event.videoProgressSeconds])).toEqual([
+      [1, 1],
+      [1, 1]
+    ])
+    expect(removed).toEqual(['e1', 'e1'])
   })
 
   it('lets playback supersede a mark that has not been sent', async () => {
@@ -1564,14 +2206,16 @@ describe('watch state', () => {
 
   it('takes an episode back to the start when marked unwatched', async () => {
     let event: Record<string, any> | null = null
+    let removed: string | null = null
     routeCms({
       [Q.TRACK]: (variables) => {
         event = variables.events[0]
         return { trackView: { success: true } }
       },
-      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
-        removeContentFromContinueWatching: { success: true }
-      })
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: (variables) => {
+        removed = variables.id
+        return { removeContentFromContinueWatching: { success: true } }
+      }
     })
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
@@ -1588,22 +2232,44 @@ describe('watch state', () => {
       videoProgress: 1,
       videoProgressSeconds: 1
     })
+    // The removal zeroes the point, which is exactly where this mark wants it.
+    expect(removed).toBe('e1')
   })
 
-  it('still marks an episode when it cannot leave Continue watching', async () => {
+  it('retries a failed removal from Continue watching instead of dropping it', async () => {
+    const events: Record<string, any>[] = []
+    const removals: string[] = []
+    let refuses = true
     routeCms({
-      [Q.TRACK]: () => ({ trackView: { success: true } }),
-      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => {
-        throw new Error('not in the row')
+      [Q.TRACK]: (variables) => {
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: (variables) => {
+        if (refuses) throw new Error('not in the row')
+        removals.push(variables.id)
+        return { removeContentFromContinueWatching: { success: true } }
       }
     })
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
 
+    // The mark itself still takes effect locally even when the row removal
+    // fails; only the removal is left owed to Beacon.
     await expect(client.markWatched('c1e1', false)).resolves.toEqual({
       watched: false,
       progress: 0
     })
+    expect(events).toHaveLength(1)
+    expect(removals).toEqual([])
+
+    refuses = false
+    await expect(client.flushProgress()).resolves.toBe(true)
+
+    // The event stayed queued, so its point was re-sent and the removal
+    // finally landed instead of being swallowed.
+    expect(events).toHaveLength(2)
+    expect(removals).toEqual(['e1'])
   })
 
   it('finds a slug the catalog index does not know yet', async () => {
@@ -1624,7 +2290,7 @@ describe('watch state', () => {
 
     expect(event).toMatchObject({
       content: 'e7',
-      videoProgress: 99,
+      videoProgress: 97,
       videoProgressSeconds: 1799
     })
   })
@@ -1633,9 +2299,7 @@ describe('watch state', () => {
     vi.mocked(loadSession).mockResolvedValue(null)
     const client = new BeaconClient()
 
-    await expect(client.markWatched('c1e1', true)).rejects.toThrow(
-      'Sign in with a Beacon account'
-    )
+    await expect(client.markWatched('c1e1', true)).rejects.toThrow('Sign in with a Beacon account')
     expect(net.fetch).not.toHaveBeenCalled()
   })
 
@@ -1724,7 +2388,7 @@ describe('watch state', () => {
     })
   })
 
-  it('drops a marked title from Continue watching', async () => {
+  it('keeps a marked title out of Continue watching', async () => {
     routeCms(
       homeRoutes({
         [Q.CONTINUE_WATCHING]: () => ({
@@ -1749,6 +2413,8 @@ describe('watch state', () => {
 
     await client.markWatched('c1e1', true)
 
+    // The row is hidden by the finished rule, not by the removal mutation: a
+    // watched mark leaves its 97% point on the server so other devices see it.
     const home = await client.home()
     expect(home.rows.find((row) => row.title === 'Continue watching')).toBeUndefined()
   })
@@ -1809,6 +2475,42 @@ describe('search', () => {
 
     client.catalog = null
     expect(client.suggest('cam')).toEqual([])
+  })
+
+  it('keeps local results when the remote search fails', async () => {
+    routeCms({
+      [Q.ME]: () => MEMBER,
+      [Q.SEARCH]: () => {
+        throw new Error('search down')
+      }
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({
+      videos: [indexedVideo(1, { slug: 'local', title: 'Local Result' })]
+    })
+
+    const results = await client.search('local')
+
+    expect(results.series).toEqual([])
+    expect(results.videos.map((card) => card.slug)).toEqual(['local'])
+  })
+
+  it('asks again after a search that found nothing', async () => {
+    let searches = 0
+    routeCms({
+      [Q.ME]: () => MEMBER,
+      [Q.SEARCH]: () => {
+        searches += 1
+        return { search: { docs: [] } }
+      }
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog()
+
+    await client.search('nothing')
+    await client.search('nothing')
+
+    expect(searches).toBe(2)
   })
 })
 
@@ -2044,15 +2746,21 @@ describe('caching', () => {
 describe('gql', () => {
   it('refreshes the token once after a 401', async () => {
     let cmsCalls = 0
-    net.fetch.mockImplementation(async (url: string, init?: { headers?: Record<string, string> }) => {
-      if (String(url).includes('oauth/token')) {
-        return response({ access_token: 'access-2', refresh_token: 'refresh-2', expires_in: 3600 })
+    net.fetch.mockImplementation(
+      async (url: string, init?: { headers?: Record<string, string> }) => {
+        if (String(url).includes('oauth/token')) {
+          return response({
+            access_token: 'access-2',
+            refresh_token: 'refresh-2',
+            expires_in: 3600
+          })
+        }
+        cmsCalls++
+        if (cmsCalls === 1) return response({}, 401)
+        expect(init?.headers?.authorization).toBe('Bearer access-2')
+        return response({ data: { ok: true } })
       }
-      cmsCalls++
-      if (cmsCalls === 1) return response({}, 401)
-      expect(init?.headers?.authorization).toBe('Bearer access-2')
-      return response({ data: { ok: true } })
-    })
+    )
     const client = new BeaconClient()
 
     await expect(client.gql<{ ok: boolean }>(Q.ME)).resolves.toEqual({ ok: true })
@@ -2138,7 +2846,9 @@ describe('favourites', () => {
     const client = new BeaconClient()
     const toggles = (): number =>
       net.fetch.mock.calls.filter(([, init]) =>
-        String((init as { body?: string } | undefined)?.body).includes('toggleCollectionFavouriteEndpoint')
+        String((init as { body?: string } | undefined)?.body).includes(
+          'toggleCollectionFavouriteEndpoint'
+        )
       ).length
 
     await expect(client.setCollectionFavourite('c1', true)).resolves.toBe(true)

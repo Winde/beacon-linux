@@ -22,10 +22,13 @@ bash install.sh
 
 The script downloads and verifies the AppImage, installs it to
 `~/Applications/Beacon.AppImage`, adds a Steam shortcut, and applies the
-library artwork. Re-run it to update. `--no-steam` installs without the
-shortcut; `--version vX.Y.Z` pins a release; `--force-art` replaces artwork you
-changed in Steam with the packaged set; `--uninstall` removes the local files.
-It does not write outside `$HOME`.
+library artwork. After that the app keeps itself current (see
+[Updates](#updates)); re-run the installer to repair an install or to make the
+one-time jump from a build that predates the updater. `--no-steam` installs
+without the shortcut; `--version vX.Y.Z` pins a release; `--force-art` replaces
+artwork you changed in Steam with the packaged set; `--uninstall` removes the
+local files. It installs nothing outside `$HOME`; the only files elsewhere are
+temporary ones it cleans up.
 
 It cannot choose the controller layout (Steam owns that per-shortcut setting),
 so do this once: **Beacon → Properties → Controller → Gamepad** (or **Gamepad
@@ -64,10 +67,16 @@ password field.
 
 ## Updates
 
-Re-run the installer; it replaces `~/Applications/Beacon.AppImage` in place, so
-the Steam entry and its appid stay valid. Manually, download the new AppImage
-over the old file at the same path. Check the release notes for anything that
-needs doing first.
+Beacon updates itself: **Check for updates** at the foot of the left menu
+compares this build with the latest stable release, downloads the new AppImage
+beside the running one, verifies it against the release's `SHA256SUMS.txt`,
+swaps it in and restarts. It is a manual check; nothing installs silently.
+Builds before 0.2.0 have no updater, so they need the installer once.
+
+Re-running the installer also replaces `~/Applications/Beacon.AppImage` in
+place, so the Steam entry and its appid stay valid; so does downloading the new
+AppImage over the old file at the same path. Use either when the app cannot
+replace itself, for example if the AppImage lives somewhere read-only.
 
 The installer detects the existing Steam shortcut instead of adding a second
 one, and does not touch what Steam stores for it: a renamed entry, a chosen

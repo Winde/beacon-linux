@@ -1,5 +1,11 @@
 import { app, BrowserWindow, ipcMain, net } from 'electron'
-import type { Card, FavouritesAnchor, NextEpisodeRequest, PlaybackData, ProgressReport } from '@shared/types'
+import type {
+  Card,
+  FavouritesAnchor,
+  NextEpisodeRequest,
+  PlaybackData,
+  ProgressReport
+} from '@shared/types'
 import { BeaconClient } from './beacon/client'
 import { Catalog } from './beacon/catalog'
 import { credentialStorage } from './beacon/session'
@@ -37,7 +43,6 @@ export function registerIpc(): void {
   ipcMain.handle('catalog:content', (_event, slug: string) => client.content(slug))
   ipcMain.handle('catalog:search', (_event, query: string) => client.search(query))
   ipcMain.handle('catalog:suggest', (_event, query: string) => client.suggest(query))
-  ipcMain.handle('catalog:indexStatus', () => catalog.status())
 
   ipcMain.handle('favourites:list', () => favourites.list())
   ipcMain.handle('favourites:add', (_event, card: Card) => favourites.add(card))

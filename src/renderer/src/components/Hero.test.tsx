@@ -83,12 +83,7 @@ describe('Hero', () => {
     const data = card({ kind: 'series', subtitle: undefined, minutes: null, count: 12 })
     const onToggleFavourite = vi.fn()
     render(
-      <Hero
-        card={data}
-        onOpen={vi.fn()}
-        onPlay={vi.fn()}
-        onToggleFavourite={onToggleFavourite}
-      />
+      <Hero card={data} onOpen={vi.fn()} onPlay={vi.fn()} onToggleFavourite={onToggleFavourite} />
     )
 
     fireEvent.click(screen.getByTestId('hero-favourite'))
@@ -113,14 +108,7 @@ describe('Hero', () => {
   })
 
   it('never offers a favourite on an episode', () => {
-    render(
-      <Hero
-        card={card()}
-        onOpen={vi.fn()}
-        onPlay={vi.fn()}
-        onToggleFavourite={vi.fn()}
-      />
-    )
+    render(<Hero card={card()} onOpen={vi.fn()} onPlay={vi.fn()} onToggleFavourite={vi.fn()} />)
 
     expect(screen.queryByTestId('hero-favourite')).toBeNull()
   })
@@ -139,7 +127,11 @@ describe('Hero', () => {
 
   it('omits the subtitle parts a category does not have', () => {
     const { container } = render(
-      <Hero card={card({ kind: 'series', subtitle: undefined, minutes: null })} onOpen={vi.fn()} onPlay={vi.fn()} />
+      <Hero
+        card={card({ kind: 'series', subtitle: undefined, minutes: null })}
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+      />
     )
 
     expect(container.querySelector('.hero__sub')?.textContent).toBe('')

@@ -4,11 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { app } from 'electron'
 import { Catalog } from './catalog'
 import type { BeaconClient } from './client'
-import {
-  CATALOG_VERSION,
-  type CatalogSnapshot,
-  type IndexedVideo
-} from './catalog-types'
+import { CATALOG_VERSION, type CatalogSnapshot, type IndexedVideo } from './catalog-types'
 
 // The index lives under app.getPath('userData'); give each run its own directory.
 vi.mock('electron', async () => {
@@ -110,7 +106,10 @@ function fakeClient(input: FakeInput = {}): { client: BeaconClient; calls: Call[
   const pageSize = input.pageSize ?? 100
   const calls: Call[] = []
 
-  const paginate = <T>(items: T[], variables: Record<string, unknown>): {
+  const paginate = <T>(
+    items: T[],
+    variables: Record<string, unknown>
+  ): {
     docs: T[]
     totalPages: number
   } => {
@@ -169,7 +168,9 @@ describe('Catalog', () => {
   it('indexes videos and collections on first use', async () => {
     const { client } = fakeClient({
       videos: [rawVideo(1), rawVideo(2)],
-      collections: [rawCollection({ id: 's1', name: 'Campaign 1', slug: 's1', isSeries: true, itemCount: 2 })]
+      collections: [
+        rawCollection({ id: 's1', name: 'Campaign 1', slug: 's1', isSeries: true, itemCount: 2 })
+      ]
     })
     const catalog = new Catalog(client)
 
@@ -261,7 +262,9 @@ describe('Catalog', () => {
     await catalog.ensure()
 
     expect(catalog.status().videos).toBe(5)
-    const pages = calls.filter((call) => call.query.includes('search(')).map((call) => call.variables.page)
+    const pages = calls
+      .filter((call) => call.query.includes('search('))
+      .map((call) => call.variables.page)
     expect(pages).toEqual([1, 2, 3])
   })
 
@@ -304,7 +307,13 @@ describe('Catalog', () => {
     const { client } = fakeClient({
       videos,
       collections: [
-        rawCollection({ id: 's1', name: 'Campaign 1', slug: 'campaign-1', isSeries: true, itemCount: 2 })
+        rawCollection({
+          id: 's1',
+          name: 'Campaign 1',
+          slug: 'campaign-1',
+          isSeries: true,
+          itemCount: 2
+        })
       ],
       series: [
         series,
@@ -356,8 +365,20 @@ describe('Catalog', () => {
     it('ranks collections by name match, then by size', async () => {
       const { client } = fakeClient({
         collections: [
-          rawCollection({ id: 'campaign-4', name: 'Campaign 4', slug: 'campaign-4', isSeries: true, itemCount: 2 }),
-          rawCollection({ id: 'campaign-1', name: 'Campaign 1', slug: 'campaign-1', isSeries: true, itemCount: 10 })
+          rawCollection({
+            id: 'campaign-4',
+            name: 'Campaign 4',
+            slug: 'campaign-4',
+            isSeries: true,
+            itemCount: 2
+          }),
+          rawCollection({
+            id: 'campaign-1',
+            name: 'Campaign 1',
+            slug: 'campaign-1',
+            isSeries: true,
+            itemCount: 10
+          })
         ]
       })
       const catalog = new Catalog(client)
@@ -408,7 +429,13 @@ describe('Catalog', () => {
           rawVideo(2, { title: 'The Legend of Vox Machina | Campaign 1 Preview' })
         ],
         collections: [
-          rawCollection({ id: 'campaign-1', name: 'Campaign 1', slug: 'campaign-1', isSeries: true, itemCount: 2 })
+          rawCollection({
+            id: 'campaign-1',
+            name: 'Campaign 1',
+            slug: 'campaign-1',
+            isSeries: true,
+            itemCount: 2
+          })
         ]
       })
       const catalog = new Catalog(client)
@@ -510,6 +537,21 @@ describe('Catalog', () => {
       const { client } = fakeClient({ videos: [rawVideo(1)] })
       const catalog = new Catalog(client)
 
+      await catalog.ensure()
+
+      expect(catalog.status().videos).toBe(1)
+    })
+
+    it('is ignored when its entries are malformed, rather than crashing at startup', async () => {
+      writeSnapshot({
+        builtAt: Date.now(),
+        videos: [null as unknown as IndexedVideo],
+        collections: []
+      })
+      const { client } = fakeClient({ videos: [rawVideo(1)] })
+      const catalog = new Catalog(client)
+
+      expect(catalog.status().videos).toBe(0)
       await catalog.ensure()
 
       expect(catalog.status().videos).toBe(1)

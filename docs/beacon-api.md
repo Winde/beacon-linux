@@ -276,28 +276,48 @@ This is what keeps "Continue watching" in sync across beacon.tv and the apps.
 
 Beacon keeps the **latest** report, not the furthest: reporting an earlier
 position moves the saved point back (backtracking an episode saves). There is no
-separate watched flag and no mutation that deletes progress, so a finished state
-is written with the same event:
+separate watched flag, so a finished state is written with the same event. Both
+ends are a trap, measured against the live CMS (2026-11-17, Campaign 4
+episodes):
 
-- watched: `videoProgress: 99`, `videoProgressSeconds: <runtime - 1>`
-- unwatched: `videoProgress: 1`, `videoProgressSeconds: 1`
+- a 0% report and a **98% or higher near-end report** are accepted
+  (`success: true`, "All events have been tracked successfully") but the saved
+  point is left alone, or only its seconds are updated with `videoProgress`
+  coming back `null`;
+- `removeContentFromContinueWatching` **zeroes** the point it is called for
+  (`97%`/`<runtime - 1>` became `0`/`null`), so it undoes a watched mark. It is
+  only safe for an unwatched mark, where zero is the wanted state.
 
-Both extremes are a trap: an all-zero event and a 100% event are accepted
-(`success: true`) but the next read still reports the old point. Staying one
-step inside each end behaves like a real rewatch. Even then the read can lag, so
-the client keeps the member's choice locally (`watch-state.json`, per sign-in
-address) and drops it once `getProgressForContent` agrees. That leaves an
-unwatched title at "started", so call the member mutation the web client uses to
-keep it out of the row:
+So the working pair is:
 
-```graphql
-mutation { removeContentFromContinueWatching(id: "<content id>") { success } }
-```
+- watched: `videoProgress: 97`, `videoProgressSeconds: <runtime - 1>` and
+  **no** Continue-watching removal (`97` at the last second is stored and reads
+  back as finished);
+- unwatched: `videoProgress: 1`, `videoProgressSeconds: 1`, then
+  `removeContentFromContinueWatching` to keep the zeroed title out of the row.
 
-Because the write is shared, a mark changes "Continue watching" and the progress
-bars on every device signed in to the account. The client marks an episode only
-when the member asks; finishing one by playback is detected from the progress
+Even then the read can lag, so the client keeps the member's choice locally
+(`watch-state.json`, per sign-in address) and drops it once
+`getProgressForContent` agrees.
+
+Because the write is shared, a mark changes the progress bars and Continue
+watching on every device signed in to the account. The row already ignores a
+finished point: measured on 2026-11-17, `continueWatching` listed a 93% title
+(13860 s of 14840 s) but none of the 97-100% points, so a watched mark needs no
+removal to stay out of it. Calling `removeContentFromContinueWatching` anyway
+only zeroes the point; then re-sending the 97% point restores the state, which
+is the same as never calling it. The client marks an episode only when the
+member asks; finishing one by playback is detected from the progress
 (`videoProgress` plus `videoProgressSeconds` against the runtime).
+
+`trackView` success does not prove the point was stored, so the local mark is
+also a retry record: each mark keeps the point the member was looking at, and on
+launch the client re-sends a carried-over mark only when that point is unchanged.
+A point that moved means a watch on another device is newer, so the mark is
+dropped instead of rolling progress back. A mark with no recorded point is only
+filled in over an episode that was never started. A mark Beacon will not take is
+re-sent at most three times, once per launch, and then left alone; a screen read
+can still confirm it, and marking again starts the count over.
 
 ### Favourites and ratings
 
@@ -343,8 +363,8 @@ ReadCarousel, LatestCarousel, HeroCarousel, ListenCarousel
 - `FeaturedCarousel` can mix `video`, `videoPodcast` and `editorial` items;
   `LatestCarousel` is video; `SeriesCarousel` is Collections.
 - `ReadCarousel` is `editorial` (articles) and `ListenCarousel` is `podcast`
-  (audio). A TV client that cannot show those should drop the items, not the
-  whole row.
+  (audio). A TV client that cannot show those should skip a block whose items
+  are all unshowable, and drop just the unshowable items from a mixed block.
 
 Blocks whose type is not described in the query still arrive with a
 `__typename` and no fields, so an unknown block is skipped rather than breaking

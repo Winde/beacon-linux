@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   BATCH_SIZE,
+  MAX_TRIES,
   ProgressQueue,
   QUEUE_LIMIT,
   progressQueuePath,
@@ -81,24 +82,160 @@ describe('ProgressQueue', () => {
     expect(queue.size('member@example.com')).toBe(0)
   })
 
-  it('keeps events when a batch fails and retries them later', async () => {
-    const { queue } = newQueue()
+  it('keeps a refused batch until a later flush can deliver it', async () => {
+    let now = new Date('2026-11-17T12:00:00.000Z')
+    const { queue } = newQueue({ now: () => now })
     add(queue, 'e1', 10)
     add(queue, 'e1', 20)
 
-    const attempts: number[] = []
+    const delivered: number[] = []
     let healthy = false
     const send = async (events: QueuedEvent[]): Promise<boolean> => {
-      attempts.push(events.length)
-      return healthy
+      if (!healthy) return false
+      delivered.push(...events.map((event) => event.videoProgressSeconds!))
+      return true
     }
 
     await expect(queue.flush('member@example.com', send)).resolves.toBe(false)
     expect(queue.size('member@example.com')).toBe(2)
 
+    now = new Date(now.getTime() + 60_000)
     healthy = true
     await expect(queue.flush('member@example.com', send)).resolves.toBe(true)
-    expect(attempts).toEqual([2, 2])
+
+    // Both positions arrive, oldest first: a retry never overtakes the point
+    // it belongs with.
+    expect(delivered).toEqual([10, 20])
+  })
+
+  it('attributes a refused batch by sending its events one at a time', async () => {
+    const { queue } = newQueue()
+    add(queue, 'a', 10)
+    add(queue, 'b', 10)
+
+    const sizes: number[] = []
+    await queue.flush('member@example.com', async (events) => {
+      sizes.push(events.length)
+      return sizes.length > 1 // the batch is refused, the single events are not
+    })
+
+    // One refused batch, then each event on its own; nothing is lost and the
+    // second event is not blamed for the first.
+    expect(sizes).toEqual([2, 1, 1])
+    expect(queue.size('member@example.com')).toBe(0)
+  })
+
+  it('does not let a refused title hold up the queue', async () => {
+    let now = new Date('2026-11-17T12:00:00.000Z')
+    const { queue } = newQueue({ now: () => now })
+    add(queue, 'poison', 10)
+    add(queue, 'good', 10)
+
+    const delivered: string[] = []
+    const send = async (events: QueuedEvent[]): Promise<boolean> => {
+      if (events.some((event) => event.content === 'poison')) return false
+      delivered.push(...events.map((event) => event.content))
+      return true
+    }
+
+    await expect(queue.flush('member@example.com', send)).resolves.toBe(false)
+    expect(delivered).toEqual([])
+
+    // The refused title now sits behind the rest and waits out its backoff.
+    now = new Date(now.getTime() + 60_000)
+    await expect(queue.flush('member@example.com', send)).resolves.toBe(false)
+
+    expect(delivered).toEqual(['good'])
+    expect(queue.events('member@example.com').map((event) => event.content)).toEqual(['poison'])
+  })
+
+  it('waits out the backoff before retrying a refused event', async () => {
+    let now = new Date('2026-11-17T12:00:00.000Z')
+    const { queue } = newQueue({ now: () => now })
+    add(queue, 'e1', 10)
+
+    const send = vi.fn(async () => false)
+
+    await queue.flush('member@example.com', send)
+    // The first refusal may be a blip, so one more attempt is allowed at once.
+    await queue.flush('member@example.com', send)
+    // The second starts the backoff: this flush must not touch the network.
+    await queue.flush('member@example.com', send)
+    expect(send).toHaveBeenCalledTimes(2)
+
+    now = new Date(now.getTime() + 60_000)
+    await queue.flush('member@example.com', send)
+    expect(send).toHaveBeenCalledTimes(3)
+  })
+
+  it('holds a newer report back while its older one is retried', async () => {
+    const now = new Date('2026-11-17T12:00:00.000Z')
+    const { queue } = newQueue({ now: () => now })
+    add(queue, 'e1', 10)
+    add(queue, 'e1', 20)
+
+    const send = vi.fn(async () => false)
+    await queue.flush('member@example.com', send)
+    await queue.flush('member@example.com', send)
+    const attempts = send.mock.calls.length
+
+    // The 10 s report is backing off, so the 20 s one waits for it rather than
+    // overtaking it and moving the saved point backwards.
+    await queue.flush('member@example.com', send)
+    expect(send).toHaveBeenCalledTimes(attempts)
+    expect(queue.size('member@example.com')).toBe(2)
+  })
+
+  it('keeps the retry countdown across a restart', async () => {
+    let now = new Date('2026-11-17T12:00:00.000Z')
+    const { queue, path } = newQueue({ now: () => now })
+    add(queue, 'e1', 10)
+
+    const send = vi.fn(async () => false)
+    await queue.flush('member@example.com', send)
+    await queue.flush('member@example.com', send) // now backing off
+
+    const reopened = new ProgressQueue(
+      () => path,
+      () => true,
+      () => now
+    )
+    const again = vi.fn(async () => false)
+    await reopened.flush('member@example.com', again)
+    expect(again).not.toHaveBeenCalled()
+
+    now = new Date(now.getTime() + 60_000)
+    await reopened.flush('member@example.com', again)
+    expect(again).toHaveBeenCalledTimes(1)
+  })
+
+  it('gives up on an event the server keeps refusing', async () => {
+    let now = new Date('2026-11-17T12:00:00.000Z')
+    const { queue } = newQueue({ now: () => now })
+    add(queue, 'e1', 10)
+    add(queue, 'e1', 20)
+
+    const delivered: number[] = []
+    let refusals = 0
+    const send = async (events: QueuedEvent[]): Promise<boolean> => {
+      if (events.some((event) => event.videoProgressSeconds === 10)) {
+        // Count only the single-event attribution attempts, one per flush.
+        if (events.length === 1) refusals += 1
+        return false
+      }
+      delivered.push(...events.map((event) => event.videoProgressSeconds!))
+      return true
+    }
+
+    for (let attempt = 0; attempt <= MAX_TRIES; attempt++) {
+      await queue.flush('member@example.com', send)
+      now = new Date(now.getTime() + 60 * 60_000)
+    }
+
+    // Dropped exactly at the cap, and the newer report for the same title is
+    // not lost with it.
+    expect(refusals).toBe(MAX_TRIES)
+    expect(delivered).toEqual([20])
     expect(queue.size('member@example.com')).toBe(0)
   })
 
@@ -139,9 +276,9 @@ describe('ProgressQueue', () => {
       'member@example.com',
       {
         content: 'e1',
-        videoProgress: 99,
+        videoProgress: 97,
         videoProgressSeconds: 599,
-        removeFromContinueWatching: true
+        explicitMark: true
       },
       'linux-test'
     )
@@ -196,6 +333,29 @@ describe('ProgressQueue', () => {
 
     expect(reopened.events('one@example.com').map((event) => event.content)).toEqual(['e1'])
     expect(reopened.events('two@example.com').map((event) => event.content)).toEqual(['e2'])
+  })
+
+  it('keeps the mark retry flag across a restart', () => {
+    const { queue, path } = newQueue()
+    queue.add(
+      'member@example.com',
+      {
+        content: 'e1',
+        videoProgress: 97,
+        videoProgressSeconds: 599,
+        explicitMark: true,
+        retryOfMark: true
+      },
+      'linux-test'
+    )
+
+    const reopened = new ProgressQueue(() => path)
+
+    expect(reopened.events('member@example.com')[0]).toMatchObject({
+      content: 'e1',
+      explicitMark: true,
+      retryOfMark: true
+    })
   })
 
   it('does not send one account with another account queue', async () => {

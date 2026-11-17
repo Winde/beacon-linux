@@ -61,15 +61,15 @@ export function Login({ onSignedIn, onSkip }: LoginProps): React.JSX.Element {
 
         {storage === 'unavailable' ? (
           <p className="login__warning" role="status">
-            Beacon can't save your sign-in on this system. You'll need to enter your
-            password again after closing the app.
+            Beacon can't save your sign-in on this system. You'll need to enter your password again
+            after closing the app.
           </p>
         ) : null}
         {storage === 'plaintext' ? (
           <p className="login__warning" role="status">
-            No keyring is available on this system. Your sign-in is saved with Electron's
-            fallback encryption, which is obfuscation rather than real protection: anything
-            that can read your user files can recover it.
+            No keyring is available on this system. Your sign-in is saved with Electron's fallback
+            encryption, which is obfuscation rather than real protection: anything that can read
+            your user files can recover it.
           </p>
         ) : null}
 
@@ -137,8 +137,8 @@ export function Login({ onSignedIn, onSkip }: LoginProps): React.JSX.Element {
         </button>
 
         <p className="login__hint">
-          On a Steam Deck, press <kbd>STEAM</kbd> + <kbd>X</kbd> to bring up the on-screen
-          keyboard. {storageNote}
+          On a Steam Deck, press <kbd>STEAM</kbd> + <kbd>X</kbd> to bring up the on-screen keyboard.{' '}
+          {storageNote}
         </p>
       </div>
     </div>

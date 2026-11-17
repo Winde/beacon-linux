@@ -3,11 +3,27 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { accountKey } from './account'
 
+/** The point Beacon reported when the member made the choice. */
+export interface WatchMarkBase {
+  /** 0..1 */
+  progress: number
+  /** seconds, or null when Beacon had no position for the title */
+  position: number | null
+}
+
 /** An explicit watched/unwatched choice for one video. */
 export interface WatchMark {
   watched: boolean
   /** epoch ms, used only to keep the newest write when two land together */
   at: number
+  /**
+   * What the server said when the mark was made. A mark is only safe to send
+   * again while the point has not moved: if it has, someone watched the title
+   * elsewhere and the older choice must not overwrite that.
+   */
+  base?: WatchMarkBase
+  /** How many re-sends reached Beacon without it taking the mark. */
+  sends?: number
 }
 
 /** account key → content id → mark */
@@ -30,12 +46,25 @@ function normalize(value: unknown): WatchFile {
     const kept: Record<string, WatchMark> = {}
     for (const [content, mark] of Object.entries(marks as Record<string, unknown>)) {
       if (!content || !mark || typeof mark !== 'object') continue
-      const { watched, at } = mark as Partial<WatchMark>
+      const { watched, at, base, sends } = mark as Partial<WatchMark>
       if (typeof watched !== 'boolean') continue
-      kept[content] = {
+      const keptMark: WatchMark = {
         watched,
         at: typeof at === 'number' && Number.isFinite(at) ? at : 0
       }
+      if (typeof sends === 'number' && Number.isFinite(sends) && sends > 0) {
+        keptMark.sends = Math.floor(sends)
+      }
+      if (base && typeof base === 'object') {
+        const { progress, position } = base as Partial<WatchMarkBase>
+        if (typeof progress === 'number' && Number.isFinite(progress)) {
+          keptMark.base = {
+            progress: Math.min(1, Math.max(0, progress)),
+            position: typeof position === 'number' && Number.isFinite(position) ? position : null
+          }
+        }
+      }
+      kept[content] = keptMark
     }
     if (Object.keys(kept).length) out[account] = kept
   }
@@ -58,11 +87,22 @@ export class WatchMarkStore {
     return this.load()[accountKey(email)] ?? {}
   }
 
-  set(email: string | null, contentId: string, watched: boolean): void {
+  set(email: string | null, contentId: string, watched: boolean, base?: WatchMarkBase): void {
     const state = this.load()
     const key = accountKey(email)
-    state[key] = { ...(state[key] ?? {}), [contentId]: { watched, at: Date.now() } }
+    const mark: WatchMark = { watched, at: Date.now() }
+    if (base) mark.base = base
+    state[key] = { ...(state[key] ?? {}), [contentId]: mark }
     this.persist()
+  }
+
+  /** Count one more launch-time retry. Returns the new count. */
+  retried(email: string | null, contentId: string): number {
+    const mark = this.load()[accountKey(email)]?.[contentId]
+    if (!mark) return 0
+    mark.sends = (mark.sends ?? 0) + 1
+    this.persist()
+    return mark.sends
   }
 
   clear(email: string | null, contentId: string): void {

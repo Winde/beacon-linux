@@ -38,23 +38,26 @@ function captureIfRequested(window: BrowserWindow): void {
   const target = process.env['BEACON_SHOT']
   if (!target) return
   window.webContents.once('did-finish-load', () => {
-    setTimeout(async () => {
-      const script = process.env['BEACON_SHOT_SCRIPT']
-      if (script) {
-        try {
-          const result = await window.webContents.executeJavaScript(script)
-          console.log('[shot] script result:', result)
-        } catch (err) {
-          console.error('[shot] script failed', err)
+    setTimeout(
+      async () => {
+        const script = process.env['BEACON_SHOT_SCRIPT']
+        if (script) {
+          try {
+            const result = await window.webContents.executeJavaScript(script)
+            console.log('[shot] script result:', result)
+          } catch (err) {
+            console.error('[shot] script failed', err)
+          }
+          await new Promise((resolve) =>
+            setTimeout(resolve, Number(process.env['BEACON_SHOT_SETTLE'] ?? 4500))
+          )
         }
-        await new Promise((resolve) =>
-          setTimeout(resolve, Number(process.env['BEACON_SHOT_SETTLE'] ?? 4500))
-        )
-      }
-      const image = await window.webContents.capturePage()
-      writeFileSync(target, image.toPNG())
-      app.quit()
-    }, Number(process.env['BEACON_SHOT_DELAY'] ?? 3500))
+        const image = await window.webContents.capturePage()
+        writeFileSync(target, image.toPNG())
+        app.quit()
+      },
+      Number(process.env['BEACON_SHOT_DELAY'] ?? 3500)
+    )
   })
 }
 
@@ -206,11 +209,10 @@ if (!app.requestSingleInstanceLock()) {
       const deadline = new Promise<void>((resolve) => {
         timer = setTimeout(resolve, QUIT_FLUSH_WAIT)
       })
-      void Promise.race([client.flushProgress().catch(() => false), deadline])
-        .finally(() => {
-          clearTimeout(timer)
-          app.quit()
-        })
+      void Promise.race([client.flushProgress().catch(() => false), deadline]).finally(() => {
+        clearTimeout(timer)
+        app.quit()
+      })
     })
     powerMonitor.on('suspend', flushProgress)
     powerMonitor.on('lock-screen', flushProgress)

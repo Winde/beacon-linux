@@ -1,0 +1,10 @@
+node_modules
+out
+release
+dist
+package-lock.json
+docs
+*.md
+reference
+packaging/steam-art
+licenses

@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import type HlsPlayer from 'hls.js'
 import {
-  Check,
   ClosedCaptionsTagSolid,
   DashboardSpeed,
   HdDisplay,
@@ -11,10 +9,29 @@ import {
   Pause,
   Play
 } from 'iconoir-react'
-import type { NextEpisode, PlaybackData } from '@shared/types'
+import type { NextEpisode } from '@shared/types'
 import type { Action } from '../input/useInput'
-import { cleanError } from '../lib/errors'
 import { ErrorNote, Spinner } from '../components/ui'
+import {
+  CONTROLS_TIMEOUT,
+  SEEK_JUMP,
+  SEEK_STEP,
+  SPEEDS,
+  UPNEXT_WINDOW,
+  SCRUB_ACCELERATION,
+  SCRUB_HOLD_GAP,
+  SCRUB_MAX_CEILING,
+  SCRUB_MIN_CEILING,
+  formatTime,
+  levelLabel,
+  speedLabel,
+  type BarId,
+  type MenuOption,
+  type Panel
+} from '../player/model'
+import { PlayerPanel } from '../player/PlayerPanel'
+import { UpNextCard } from '../player/UpNextCard'
+import { useMediaSession } from '../player/useMediaSession'
 
 export interface PlayerHandle {
   handle(action: Action): boolean
@@ -29,98 +46,44 @@ interface PlayerProps {
   ref?: React.Ref<PlayerHandle>
 }
 
-type Panel = 'subtitles' | 'audio' | 'quality' | 'speed'
-type BarId =
-  | 'exit'
-  | 'play'
-  | 'subtitles'
-  | 'audio'
-  | 'quality'
-  | 'speed'
-  | 'fullscreen'
+export function Player({
+  slug,
+  startAt,
+  onClose,
+  onPlayNext,
+  ref
+}: PlayerProps): React.JSX.Element {
+  const {
+    videoRef,
+    data,
+    error,
+    playing,
+    current,
+    duration,
+    levels,
+    quality,
+    activeLevel,
+    audioTracks,
+    audioTrack,
+    speed,
+    captionIndex,
+    captionUrl,
+    captionError,
+    caption,
+    chooseCaptions,
+    chooseQuality,
+    chooseAudio,
+    chooseSpeed,
+    seekTo
+  } = useMediaSession({ slug, startAt })
 
-interface QualityLevel {
-  /** Index into hls.levels. */
-  index: number
-  height: number | null
-  bitrate: number
-}
-
-interface MenuOption {
-  key: string
-  label: string
-  selected: boolean
-  run: () => void
-}
-
-const CONTROLS_TIMEOUT = 4000
-const SEEK_STEP = 10
-const SEEK_JUMP = 60
-const SCRUB_HOLD_GAP = 350
-const SCRUB_ACCELERATION = 1.5
-const SCRUB_MIN_CEILING = 30
-const SCRUB_MAX_CEILING = 120
-/** The app queues a position after this much playback has moved, not on a timer. */
-const REPORT_STEP = 10
-const SUBTITLE_KEY = 'beacon.player.subtitles'
-const SPEEDS = [0.75, 1, 1.25, 1.5, 2]
-/**
- * How long the "up next" card sits over the ending. Fifteen seconds is the
- * television default Plex landed on; Netflix's five is the aggressive end of
- * the range and reads as a grab. Long credits are the reason there is a window
- * at all, and B is this player's "watch the credits".
- */
-const UPNEXT_WINDOW = 15
-
-const PANEL_TITLES: Record<Panel, string> = {
-  subtitles: 'Subtitles',
-  audio: 'Audio',
-  quality: 'Quality',
-  speed: 'Playback speed'
-}
-
-function formatTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
-  const total = Math.floor(seconds)
-  const hours = Math.floor(total / 3600)
-  const minutes = Math.floor((total % 3600) / 60)
-  const secs = total % 60
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return hours ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${minutes}:${pad(secs)}`
-}
-
-function levelLabel(level: QualityLevel | undefined): string {
-  if (!level) return 'Auto'
-  if (level.height) return `${level.height}p`
-  if (level.bitrate) return `${Math.round(level.bitrate / 1000)} kbps`
-  return 'Level'
-}
-
-function speedLabel(speed: number): string {
-  return `${speed}×`
-}
-
-export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps): React.JSX.Element {
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const hlsRef = useRef<HlsPlayer | null>(null)
-  const blobRef = useRef<string | null>(null)
-  const captionCache = useRef(new Map<string, string>())
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([])
   const anchorRefs = useRef<Partial<Record<Panel, HTMLButtonElement | null>>>({})
-  const lastRef = useRef({ position: 0, duration: 0 })
-  const lastQueued = useRef(-1)
-  const contentRef = useRef<string | null>(null)
-  const startedRef = useRef<string | null>(null)
   const hideTimer = useRef<number | undefined>(undefined)
   const panelRef = useRef(false)
   const scrubMotion = useRef({ direction: 0, at: 0, step: 0 })
   const scrubJumped = useRef(false)
 
-  const [data, setData] = useState<PlaybackData | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [playing, setPlaying] = useState(false)
-  const [current, setCurrent] = useState(0)
-  const [duration, setDuration] = useState(0)
   const [showControls, setShowControls] = useState(true)
   const [focusBar, setFocusBar] = useState(false)
   const [barFocus, setBarFocus] = useState<BarId>('play')
@@ -130,55 +93,8 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
   const [panelPosition, setPanelPosition] = useState<{ left: number; bottom: number } | null>(null)
   const [optionFocus, setOptionFocus] = useState(0)
 
-  const [captionIndex, setCaptionIndex] = useState<number | null>(null)
-  const [captionUrl, setCaptionUrl] = useState<string | null>(null)
-  const [captionError, setCaptionError] = useState<string | null>(null)
-
-  const [levels, setLevels] = useState<QualityLevel[]>([])
-  const [quality, setQuality] = useState(-1)
-  const [activeLevel, setActiveLevel] = useState(-1)
-  const [audioTracks, setAudioTracks] = useState<string[]>([])
-  const [audioTrack, setAudioTrack] = useState(0)
-  const [speed, setSpeed] = useState(1)
-
   const [upNext, setUpNext] = useState<NextEpisode | null>(null)
   const [upNextDismissed, setUpNextDismissed] = useState(false)
-
-  /**
-   * Hand the main process a position worth sending. The queue there does the
-   * deduplicating and batching; this only decides when playback has moved far
-   * enough to be worth a new event. The first report after a new episode goes
-   * out at once, as the app's tracker does.
-   */
-  const queueProgress = useCallback((force = false): void => {
-    const contentId = contentRef.current
-    const { position, duration: total } = lastRef.current
-    if (!contentId || !total || position < 1) return
-    if (!force && lastQueued.current >= 0 && Math.abs(position - lastQueued.current) < REPORT_STEP) {
-      return
-    }
-    lastQueued.current = position
-    void window.beacon.playback.progress({ contentId, position, duration: total })
-  }, [])
-
-  // Tell Beacon a view has started, reset the position gate for a new episode,
-  // and hand over the last position when this one closes.
-  useEffect(() => {
-    contentRef.current = data?.id ?? null
-    lastQueued.current = -1
-    lastRef.current = { position: 0, duration: 0 }
-    if (!data) return
-    // StrictMode runs effects twice in development; a view is started once.
-    if (startedRef.current !== data.id) {
-      startedRef.current = data.id
-      void window.beacon.playback.start(data.id).catch(() => false)
-    }
-    return () => {
-      queueProgress(true)
-      void window.beacon.playback.flush().catch(() => false)
-      contentRef.current = null
-    }
-  }, [data, queueProgress])
 
   // A menu stays open until it is dismissed; the bar itself may fade.
   useEffect(() => {
@@ -201,118 +117,6 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
       setScrubFocus(false)
     }, CONTROLS_TIMEOUT)
   }, [])
-
-  // Load the stream and attach it to the video element.
-  useEffect(() => {
-    let cancelled = false
-    setData(null)
-    setError(null)
-
-    window.beacon.playback
-      .open(slug)
-      .then(async (playback) => {
-        if (cancelled) return
-        if (!playback) {
-          setError('This video is not available for your account.')
-          return
-        }
-        setData(playback)
-
-        const video = videoRef.current
-        if (!video) return
-
-        let source = playback.url
-        if (playback.playlist) {
-          blobRef.current = URL.createObjectURL(
-            new Blob([playback.playlist], { type: 'application/vnd.apple.mpegurl' })
-          )
-          source = blobRef.current
-        }
-
-        // hls.js is most of the renderer bundle. Loading it here keeps the
-        // browse screens' startup chunk small; a stream is the only thing that
-        // needs it.
-        let Hls: typeof import('hls.js').default | null = null
-        try {
-          Hls = (await import('hls.js')).default
-        } catch {
-          // Fall through to the engine's own player, or the error below.
-        }
-        if (cancelled) return
-
-        if (Hls?.isSupported()) {
-          const hls = new Hls({ enableWorker: true })
-          // Beacon's captions are fetched as a separate VTT file and drawn by
-          // the renderer. Left on, hls.js also renders the stream's own
-          // subtitle track, which paints every cue twice.
-          hls.subtitleDisplay = false
-
-          const syncTracks = (): void => {
-            setLevels(
-              hls.levels.map((level, index) => ({
-                index,
-                height: level.height || null,
-                bitrate: level.bitrate || 0
-              }))
-            )
-            setAudioTracks(
-              hls.audioTracks.map((track, index) => track.name || track.lang || `Track ${index + 1}`)
-            )
-            setAudioTrack(hls.audioTrack >= 0 ? hls.audioTrack : 0)
-          }
-
-          hls.loadSource(source)
-          hls.attachMedia(video)
-          hls.on(Hls.Events.MANIFEST_PARSED, syncTracks)
-          hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, syncTracks)
-          hls.on(Hls.Events.LEVEL_SWITCHED, (_event, payload) => setActiveLevel(payload.level))
-          hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_event, payload) => setAudioTrack(payload.id))
-          hls.on(Hls.Events.ERROR, (_event, payload) => {
-            if (payload.fatal) setError(`Playback failed (${payload.details}).`)
-          })
-          hlsRef.current = hls
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.src = source
-        } else {
-          setError('This system cannot play HLS video.')
-        }
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(cleanError(err))
-      })
-
-    return () => {
-      cancelled = true
-      hlsRef.current?.destroy()
-      hlsRef.current = null
-      if (blobRef.current) {
-        URL.revokeObjectURL(blobRef.current)
-        blobRef.current = null
-      }
-    }
-  }, [slug])
-
-  // Resume where the account left off, then start playing.
-  useEffect(() => {
-    const video = videoRef.current
-    if (!video || !data) return
-
-    const start = (): void => {
-      const target = startAt ?? data.resumeAt
-      if (target > 5) video.currentTime = target
-      setDuration(video.duration || data.duration || 0)
-      void video.play().catch(() => {
-        // Autoplay can still be refused; the player stays paused and usable.
-      })
-    }
-
-    if (video.readyState >= 1) {
-      start()
-      return
-    }
-    video.addEventListener('loadedmetadata', start, { once: true })
-    return () => video.removeEventListener('loadedmetadata', start)
-  }, [data, startAt])
 
   // Ask for the next episode once the stream is known. One small query runs
   // alongside playback, so the card is ready long before the ending and a
@@ -349,110 +153,7 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
     }
     video.addEventListener('ended', onEnded)
     return () => video.removeEventListener('ended', onEnded)
-  }, [upNext, upNextDismissed, onPlayNext])
-
-  // Mirror the element's state into React for the overlay.
-  useEffect(() => {
-    const video = videoRef.current
-    if (!video) return
-
-    const onTime = (): void => {
-      setCurrent(video.currentTime)
-      lastRef.current.position = video.currentTime
-      queueProgress()
-    }
-    const onDuration = (): void => {
-      const value = Number.isFinite(video.duration) ? video.duration : 0
-      setDuration(value)
-      lastRef.current.duration = value
-    }
-    const onPlay = (): void => setPlaying(true)
-    const onPause = (): void => setPlaying(false)
-    const onRate = (): void => setSpeed(video.playbackRate)
-
-    video.addEventListener('timeupdate', onTime)
-    video.addEventListener('durationchange', onDuration)
-    video.addEventListener('play', onPlay)
-    video.addEventListener('pause', onPause)
-    video.addEventListener('ratechange', onRate)
-    return () => {
-      video.removeEventListener('timeupdate', onTime)
-      video.removeEventListener('durationchange', onDuration)
-      video.removeEventListener('play', onPlay)
-      video.removeEventListener('pause', onPause)
-      video.removeEventListener('ratechange', onRate)
-    }
-  }, [queueProgress])
-
-  // Remember the chosen subtitle language and pick it again on the next video.
-  useEffect(() => {
-    if (!data?.captions.length) return
-    let saved: string | null = null
-    try {
-      saved = window.localStorage.getItem(SUBTITLE_KEY)
-    } catch {
-      // Storage can be unavailable; captions still work for this session.
-    }
-    if (!saved) return
-    const index = data.captions.findIndex((track) => track.label === saved)
-    if (index >= 0) setCaptionIndex(index)
-  }, [data])
-
-  // Subtitles: JW Player's caption host sends no CORS headers, so the main
-  // process fetches the file and we hand the player a local blob.
-  useEffect(() => {
-    const track = captionIndex == null ? null : data?.captions[captionIndex]
-    if (!track) {
-      setCaptionUrl(null)
-      setCaptionError(null)
-      return
-    }
-
-    const cached = captionCache.current.get(track.url)
-    if (cached) {
-      setCaptionUrl(cached)
-      setCaptionError(null)
-      return
-    }
-
-    let cancelled = false
-    setCaptionUrl(null)
-    setCaptionError(null)
-    window.beacon.playback
-      .captions(track.url)
-      .then((text) => {
-        if (cancelled) return
-        const url = URL.createObjectURL(new Blob([text], { type: 'text/vtt' }))
-        captionCache.current.set(track.url, url)
-        setCaptionUrl(url)
-      })
-      .catch(() => {
-        if (!cancelled) setCaptionError('Subtitles could not be loaded.')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [captionIndex, data])
-
-  useEffect(() => {
-    return () => {
-      for (const url of captionCache.current.values()) URL.revokeObjectURL(url)
-      captionCache.current.clear()
-    }
-  }, [])
-
-  const caption = captionIndex == null ? undefined : data?.captions[captionIndex]
-
-  useEffect(() => {
-    const video = videoRef.current
-    if (!video?.textTracks) return
-    // Show only the externally fetched track. hls.js may have added its own
-    // subtitle tracks for the same stream, and two visible tracks double-render.
-    const own = video.querySelector<HTMLTrackElement>('track[data-own="captions"]')?.track ?? null
-    for (const track of Array.from(video.textTracks)) {
-      track.mode = captionUrl && track === own ? 'showing' : 'disabled'
-    }
-  }, [captionUrl, caption])
+  }, [upNext, upNextDismissed, onPlayNext, videoRef])
 
   // Hide the overlay after a few idle seconds, playing or paused. Only an open
   // menu holds it: otherwise a focused control would stay on screen forever.
@@ -536,12 +237,8 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
   }
 
   const commitScrub = (): void => {
-    const video = videoRef.current
-    if (!video) return
     scrubMotion.current = { direction: 0, at: 0, step: 0 }
-    video.currentTime = scrubAt
-    setCurrent(scrubAt)
-    lastRef.current.position = scrubAt
+    seekTo(scrubAt)
     // A second accept without moving the marker starts playback.
     scrubJumped.current = true
     poke()
@@ -567,37 +264,6 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
 
   const playUpNext = (): void => {
     if (upNext) onPlayNext(upNext.slug)
-  }
-
-  const chooseCaptions = (index: number | null): void => {
-    setCaptionIndex(index)
-    try {
-      if (index == null) window.localStorage.removeItem(SUBTITLE_KEY)
-      else window.localStorage.setItem(SUBTITLE_KEY, data?.captions[index]?.label ?? '')
-    } catch {
-      // Preference is a convenience; playback does not depend on it.
-    }
-  }
-
-  const chooseQuality = (index: number): void => {
-    const hls = hlsRef.current
-    if (!hls) return
-    hls.currentLevel = index
-    setQuality(index)
-  }
-
-  const chooseAudio = (index: number): void => {
-    const hls = hlsRef.current
-    if (!hls) return
-    hls.audioTrack = index
-    setAudioTrack(index)
-  }
-
-  const chooseSpeed = (value: number): void => {
-    const video = videoRef.current
-    if (!video) return
-    video.playbackRate = value
-    setSpeed(value)
   }
 
   const subtitleOptions: MenuOption[] = (data?.captions ?? []).map((track, index) => ({
@@ -882,14 +548,12 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
   const captionsOn = captionIndex != null
 
   const remaining = duration > 0 ? Math.max(0, duration - current) : 0
-  const upNextSeconds = Math.ceil(remaining)
   // A menu owns the screen while it is open, and a dismissed card stays gone
   // for the rest of this video (seeking back into the window does not revive it).
   const offer =
     upNext && !upNextDismissed && panel === null && duration > 0 && remaining <= UPNEXT_WINDOW
       ? upNext
       : null
-  const upNextCounting = offer !== null && !offer.autoplayDisabled
 
   const focused = (id: BarId): string => (focusBar && barFocus === id ? ' is-focused' : '')
 
@@ -905,6 +569,7 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
 
   return (
     <div className="player" onPointerMove={poke}>
+      {/* The caption track below is added only when the member picks one. */}
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <video ref={videoRef} className="player__video" playsInline onClick={togglePlay}>
         {captionUrl ? (
@@ -938,34 +603,15 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
 
         <div className="player__bottom">
           {panel ? (
-            <div
-              className="player__panel"
-              role="menu"
-              aria-label={PANEL_TITLES[panel]}
-              style={panelPosition ?? undefined}
-            >
-              <p className="player__panel-title">{PANEL_TITLES[panel]}</p>
-              {options.map((option, index) => (
-                <button
-                  key={option.key}
-                  ref={(element) => {
-                    optionRefs.current[index] = element
-                  }}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={option.selected}
-                  className={`player__option${optionFocus === index ? ' is-focused' : ''}`}
-                  tabIndex={-1}
-                  onClick={() => chooseOption(index)}
-                >
-                  <span>{option.label}</span>
-                  {option.selected ? (
-                    <Check width={20} height={20} strokeWidth={2} aria-hidden />
-                  ) : null}
-                </button>
-              ))}
-              {panelNote ? <p className="player__panel-note">{panelNote}</p> : null}
-            </div>
+            <PlayerPanel
+              panel={panel}
+              position={panelPosition}
+              options={options}
+              optionFocus={optionFocus}
+              optionRefs={optionRefs}
+              note={panelNote}
+              onChoose={chooseOption}
+            />
           ) : null}
 
           <div className={`player__progress${scrubbing ? ' is-scrubbing' : ''}`}>
@@ -985,9 +631,7 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
                 aria-hidden
               />
             ) : null}
-            <span
-              className={`player__time player__time--current${scrubbing ? ' is-target' : ''}`}
-            >
+            <span className={`player__time player__time--current${scrubbing ? ' is-target' : ''}`}>
               {formatTime(scrubbing ? scrubAt : current)}
             </span>
             <span className="player__time player__time--total">{formatTime(duration)}</span>
@@ -1046,12 +690,7 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
                   openPanel('subtitles')
                 }}
               >
-                <ClosedCaptionsTagSolid
-                  width={24}
-                  height={24}
-                  strokeWidth={1.8}
-                  aria-hidden
-                />
+                <ClosedCaptionsTagSolid width={24} height={24} strokeWidth={1.8} aria-hidden />
                 <span className="player__control-value">
                   {captionsOn ? (caption?.label ?? 'On') : 'Subtitles'}
                 </span>
@@ -1142,45 +781,12 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
       </div>
 
       {offer ? (
-        <div className="player__upnext">
-          <button
-            type="button"
-            className="player__upnext-card"
-            tabIndex={-1}
-            aria-label={`Play next: ${offer.title}`}
-            onClick={playUpNext}
-          >
-            {offer.image ? <img className="player__upnext-image" src={offer.image} alt="" /> : null}
-            <span className="player__upnext-text">
-              <span className="player__upnext-label">Up next</span>
-              <span className="player__upnext-title">{offer.title}</span>
-              <span className="player__upnext-meta">
-                {offer.minutes ? `${offer.minutes} min · ` : ''}
-                {offer.autoplayDisabled
-                  ? 'Play next'
-                  : upNextSeconds > 0
-                    ? `Playing in ${upNextSeconds}s`
-                    : 'Playing now'}
-              </span>
-            </span>
-          </button>
-          {upNextCounting ? (
-            <div className="player__upnext-timer" aria-hidden>
-              <div
-                className="player__upnext-fill"
-                style={{ width: `${(remaining / UPNEXT_WINDOW) * 100}%` }}
-              />
-            </div>
-          ) : null}
-          <button
-            type="button"
-            className="player__upnext-cancel"
-            tabIndex={-1}
-            onClick={() => setUpNextDismissed(true)}
-          >
-            {offer.autoplayDisabled ? 'Dismiss' : 'Keep watching'}
-          </button>
-        </div>
+        <UpNextCard
+          offer={offer}
+          remaining={remaining}
+          onPlay={playUpNext}
+          onDismiss={() => setUpNextDismissed(true)}
+        />
       ) : null}
     </div>
   )

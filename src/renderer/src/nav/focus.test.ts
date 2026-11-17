@@ -169,6 +169,24 @@ describe('move', () => {
     expect(getFocused()).toBe(c)
   })
 
+  it('skips a disabled control, which cannot take real focus', () => {
+    const [a, b, c] = grid() as HTMLButtonElement[]
+    b.disabled = true
+    setFocused(a)
+
+    expect(move('right')).toBe(true)
+    expect(getFocused()).toBe(c)
+  })
+
+  it('does not park the first focus on a disabled control', () => {
+    const [a, b] = grid() as HTMLButtonElement[]
+    a.disabled = true
+
+    focusFirst()
+
+    expect(getFocused()).toBe(b)
+  })
+
   it('skips elements with no box', () => {
     const [a] = grid()
     const collapsed = tile(220, 0, { width: 0, height: 0 })
