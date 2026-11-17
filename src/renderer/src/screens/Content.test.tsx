@@ -82,6 +82,18 @@ describe('Content', () => {
     })
   })
 
+  it('uses the app’s up navigation when it is available', async () => {
+    const onOpen = vi.fn()
+    const onOpenSeries = vi.fn()
+    stubContent(contentData())
+    render(<Content slug="c1e5" onOpen={onOpen} onOpenSeries={onOpenSeries} onPlay={vi.fn()} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'View series' }))
+
+    expect(onOpenSeries).toHaveBeenCalledWith('campaign-1')
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
   it('offers an explicit View series action as well as the header link', async () => {
     const onOpen = vi.fn()
     stubContent(contentData())

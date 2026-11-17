@@ -16,7 +16,7 @@ import { UpdateDialog, type UpdatePrompt } from './components/UpdateDialog'
 import { Spinner } from './components/ui'
 import { cleanError } from './lib/errors'
 
-type Route =
+export type Route =
   | { name: 'login' }
   /** `feed` carries a home feed fetched while the sign-in panel was up. */
   | { name: 'home'; feed?: HomeData }
@@ -25,9 +25,35 @@ type Route =
   | { name: 'browse' }
   | { name: 'search' }
 
-interface Entry {
+export interface Entry {
   id: number
   route: Route
+}
+
+/**
+ * Move up from an episode to the collection it belongs to.
+ *
+ * If that collection is already in the stack, truncate back to it instead of
+ * pushing a second copy: opening the show from one of its episodes should not
+ * leave the episode sandwiched between two identical show pages, where Back
+ * just walks into the same loop again.
+ *
+ * When it is not in the stack (an episode reached from search, or a deep link),
+ * replace the episode with the collection. Going "up" should leave the viewer
+ * at the parent with Back going to where the episode itself came from, rather
+ * than keeping an episode underneath that only offers the same jump again.
+ */
+export function upToCollection(stack: Entry[], slug: string, nextId: () => number): Entry[] {
+  for (let index = stack.length - 1; index >= 0; index--) {
+    const route = stack[index]?.route
+    if (route?.name === 'collection' && route.slug === slug) {
+      return stack.slice(0, index + 1)
+    }
+  }
+
+  const entry: Entry = { id: nextId(), route: { name: 'collection', slug } }
+  if (!stack.length) return [entry]
+  return [...stack.slice(0, -1), entry]
 }
 
 /**
@@ -90,6 +116,11 @@ export default function App(): React.JSX.Element {
     },
     [push]
   )
+
+  /** The episode page's series link is an "up" move, not a new stack level. */
+  const openSeriesUp = useCallback((slug: string) => {
+    setStack((current) => upToCollection(current, slug, () => nextId.current++))
+  }, [])
 
   const play = useCallback((slug: string, startAt?: number) => {
     lastFocus.current = getFocused()
@@ -554,6 +585,7 @@ export default function App(): React.JSX.Element {
           <Content
             slug={route.slug}
             onOpen={openCard}
+            onOpenSeries={openSeriesUp}
             onPlay={play}
             onSignIn={openLogin}
             refreshKey={progressVersion}

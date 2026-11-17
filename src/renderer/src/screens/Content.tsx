@@ -11,6 +11,8 @@ import { ErrorNote, Spinner } from '../components/ui'
 interface ContentProps {
   slug: string
   onOpen: (card: Card) => void
+  /** Go up to the collection this episode is filed under, when the app can. */
+  onOpenSeries?: (slug: string) => void
   onPlay: (slug: string, startAt?: number) => void
   /** Open the sign-in screen; used when the video is locked to guests. */
   onSignIn?: () => void
@@ -35,6 +37,7 @@ const cleanText = (value: string): string =>
 export function Content({
   slug,
   onOpen,
+  onOpenSeries,
   onPlay,
   onSignIn,
   refreshKey = 0,
@@ -111,6 +114,10 @@ export function Content({
   const series = data.series
   const openSeries = (): void => {
     if (!series) return
+    if (onOpenSeries) {
+      onOpenSeries(series.slug)
+      return
+    }
     onOpen({
       kind: 'series',
       slug: series.slug,

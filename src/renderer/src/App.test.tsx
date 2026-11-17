@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Card, FavouriteItem, FavouritesData, HomeData, UpdateInfo } from '@shared/types'
-import App from './App'
+import App, { upToCollection, type Entry } from './App'
 
 beforeEach(() => {
   // Focus navigation scrolls what it focuses; jsdom has no layout engine.
@@ -299,6 +299,30 @@ describe('App updates', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Beacon v0.2.0 is available' })
     expect(dialog.textContent).toContain("can't replace itself")
     expect(screen.queryByTestId('update-install')).toBeNull()
+  })
+})
+
+describe('App up navigation', () => {
+  it('pops back to a collection already in the stack', () => {
+    const stack: Entry[] = [
+      { id: 0, route: { name: 'home' } },
+      { id: 1, route: { name: 'collection', slug: 'campaign-1' } },
+      { id: 2, route: { name: 'content', slug: 'c1e1' } }
+    ]
+
+    expect(upToCollection(stack, 'campaign-1', () => 99)).toEqual(stack.slice(0, 2))
+  })
+
+  it('replaces an episode when its collection is not in history', () => {
+    const stack: Entry[] = [
+      { id: 0, route: { name: 'search' } },
+      { id: 1, route: { name: 'content', slug: 'c1e1' } }
+    ]
+
+    expect(upToCollection(stack, 'previously-on', () => 99)).toEqual([
+      { id: 0, route: { name: 'search' } },
+      { id: 99, route: { name: 'collection', slug: 'previously-on' } }
+    ])
   })
 })
 
