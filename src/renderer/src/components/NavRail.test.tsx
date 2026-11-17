@@ -13,6 +13,10 @@ function rail(overrides: Partial<React.ComponentProps<typeof NavRail>> = {}): Re
       onHome={vi.fn()}
       onSearch={vi.fn()}
       onSignOut={vi.fn()}
+      version="0.1.4"
+      availableVersion={null}
+      checking={false}
+      onCheckForUpdates={vi.fn()}
       {...overrides}
     />
   )
@@ -69,5 +73,41 @@ describe('NavRail', () => {
     render(rail())
 
     expect(screen.getByTestId('rail-search').closest('nav')?.hasAttribute('inert')).toBe(false)
+  })
+
+  it('always shows the version at the foot of the rail', () => {
+    render(rail({ version: '0.1.4' }))
+
+    expect(screen.getByTestId('rail-version').textContent).toBe('v0.1.4')
+  })
+
+  it('keeps the version even when there is no account action', () => {
+    render(rail({ onSignOut: undefined }))
+
+    expect(screen.queryByTestId('rail-signout')).toBeNull()
+    expect(screen.getByTestId('rail-version').textContent).toBe('v0.1.4')
+  })
+
+  it('checks for updates from the rail', () => {
+    const onCheckForUpdates = vi.fn()
+    render(rail({ onCheckForUpdates }))
+
+    expect(screen.getByTestId('rail-update').textContent).toContain('Check for updates')
+    fireEvent.click(screen.getByTestId('rail-update'))
+
+    expect(onCheckForUpdates).toHaveBeenCalledOnce()
+  })
+
+  it('names the release a check found', () => {
+    render(rail({ availableVersion: '0.2.0' }))
+
+    expect(screen.getByTestId('rail-update').textContent).toContain('Update to v0.2.0')
+  })
+
+  it('says when a check is in flight', () => {
+    render(rail({ checking: true }))
+
+    expect(screen.getByTestId('rail-update').textContent).toContain('Checking…')
+    expect(screen.getByTestId('rail-update')).toHaveProperty('disabled', true)
   })
 })

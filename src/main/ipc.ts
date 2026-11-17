@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, net } from 'electron'
 import type { Card, FavouritesAnchor, NextEpisodeRequest, PlaybackData, ProgressReport } from '@shared/types'
 import { BeaconClient } from './beacon/client'
 import { Catalog } from './beacon/catalog'
@@ -6,6 +6,7 @@ import { credentialStorage } from './beacon/session'
 import { FavouritesService } from './favourites'
 import { fetchCaptionFile, fetchMasterPlaylist } from './hls'
 import { PreferencesStore, preferencesPath } from './preferences'
+import { currentAppImage, relaunchArgs, Updater } from './updates'
 
 export const client = new BeaconClient()
 export const catalog = new Catalog(client)
@@ -15,6 +16,13 @@ export const favourites = new FavouritesService(
   catalog,
   new PreferencesStore(() => preferencesPath(app.getPath('userData')))
 )
+const updater = new Updater({
+  currentVersion: () => app.getVersion(),
+  appImage: () => currentAppImage(process.env),
+  // Electron's net stack, like the rest of the app: it follows the system's
+  // proxy settings where Node's own fetch would not.
+  fetch: (url, init) => net.fetch(url, init)
+})
 
 export function registerIpc(): void {
   ipcMain.handle('auth:status', () => client.status())
@@ -80,4 +88,18 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle('app:platform', () => process.platform)
+
+  ipcMain.handle('app:version', () => app.getVersion())
+
+  ipcMain.handle('updates:check', () => updater.check())
+
+  ipcMain.handle('updates:install', async () => {
+    const appImage = await updater.install()
+    // An AppImage runs an inner binary from its own read-only mount, so
+    // process.execPath would be gone by the time the relaunch happens. Start
+    // the file that was just replaced instead; Electron does that once this
+    // instance has exited, which keeps the single-instance lock uncontended.
+    app.relaunch({ execPath: appImage, args: relaunchArgs(process.argv.slice(1)) })
+    app.quit()
+  })
 }

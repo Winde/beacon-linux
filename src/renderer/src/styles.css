@@ -141,9 +141,41 @@ kbd {
   font-size: 1rem;
 }
 
-/* The account action sits apart from browsing, at the foot of the rail. */
-.rail__item--bottom {
+/* App and account actions sit apart from browsing, at the foot of the rail.
+   The version line stays under them: it is read, never pressed. */
+.rail__footer {
   margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+/* Same box as the 20px icon, so the label does not shift while checking. */
+.rail__spinner {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--accent);
+  animation: spin 800ms linear infinite;
+}
+
+.rail__item:disabled {
+  cursor: progress;
+}
+
+.rail__version {
+  margin: 2px 0 0;
+  padding: 0 16px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  user-select: none;
 }
 
 .screen {

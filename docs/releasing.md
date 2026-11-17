@@ -117,8 +117,21 @@ repository, and no CI job that publishes anywhere else.
 
 **SteamOS** needs one Desktop Mode trip: download the AppImage, make it
 executable, add it to Steam, then launch it from Game Mode. The AppImage lives
-in `/home`, so it survives system updates. Updates are manual for now: download
-the new AppImage over the old one; the Steam entry keeps working.
+in `/home`, so it survives system updates.
+
+After the first install, **Check for updates** at the foot of the app's left
+menu keeps it current: it asks GitHub for the latest stable release
+(`releases/latest`, so pre-releases are never offered), downloads the
+`Beacon-<version>-x86_64.AppImage` asset beside the running file, verifies it
+against that release's `SHA256SUMS.txt`, atomically replaces the AppImage and
+relaunches. Renaming the verified download over the AppImage path does not
+disturb the running process: it keeps the file it already opened, the next
+launch starts the new one, and progress is flushed on the quit that happens
+first. A build that is not a writable AppImage (a dev checkout, or an AppImage
+on a read-only mount) says so instead of offering the install.
+
+The installer remains the path for a fresh install, and for anything the app
+cannot replace itself.
 
 **Other glibc distributions** run the same AppImage. FUSE 2 is the only system
 dependency; where it is missing (some Ubuntu installs), `--appimage-extract-and-run`

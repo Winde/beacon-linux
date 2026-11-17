@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Card, FavouritesAnchor, FavouritesData, HomeData } from '@shared/types'
+import type { Card, FavouritesAnchor, FavouritesData, HomeData, UpdateInfo } from '@shared/types'
 import { isFavourite, optimisticItem } from '@shared/favourites'
 import { useInput } from './input/useInput'
 import { focusFirst, getFocused, move, setFocused } from './nav/focus'
@@ -11,7 +11,9 @@ import { Search } from './screens/Search'
 import { Player, type PlayerHandle } from './screens/Player'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { NavRail } from './components/NavRail'
+import { UpdateDialog, type UpdatePrompt } from './components/UpdateDialog'
 import { Spinner } from './components/ui'
+import { cleanError } from './lib/errors'
 
 type Route =
   | { name: 'login' }
@@ -59,6 +61,13 @@ export default function App(): React.JSX.Element {
   // progress it did not have when its data was built, and screens stay mounted
   // while the player is open, so nothing else would refresh them.
   const [progressVersion, setProgressVersion] = useState(0)
+  /** The running version, read once: it cannot change while the app is open. */
+  const [version, setVersion] = useState<string | null>(null)
+  /** `checking` is shown in the rail; the rest open the dialog. */
+  const [update, setUpdate] = useState<UpdatePrompt | { name: 'checking' } | null>(null)
+  /** The last check that found a newer release, so the rail can offer it again. */
+  const [knownUpdate, setKnownUpdate] = useState<UpdateInfo | null>(null)
+  const updateReturn = useRef<HTMLElement | null>(null)
 
   const push = useCallback((route: Route) => {
     setStack((current) => [...current, { id: nextId.current++, route }])
@@ -195,6 +204,83 @@ export default function App(): React.JSX.Element {
     else focusFirst()
   }, [])
 
+  // Read once: the rail shows it, and it never changes while the app is open.
+  // A failure costs only the version line, not the boot.
+  useEffect(() => {
+    void window.beacon.app.version().then(setVersion).catch(() => {})
+  }, [])
+
+  const checkForUpdates = useCallback(async () => {
+    // The rail already names a release; show it again rather than spend
+    // another round trip on the same answer.
+    if (knownUpdate) {
+      setUpdate({
+        name: 'available',
+        current: knownUpdate.current,
+        latest: knownUpdate.latest,
+        canInstall: knownUpdate.canInstall
+      })
+      return
+    }
+    setUpdate({ name: 'checking' })
+    try {
+      const info = await window.beacon.updates.check()
+      if (!info.available) {
+        setKnownUpdate(null)
+        setUpdate({ name: 'current', version: info.current })
+        return
+      }
+      setKnownUpdate(info)
+      setUpdate({
+        name: 'available',
+        current: info.current,
+        latest: info.latest,
+        canInstall: info.canInstall
+      })
+    } catch (error) {
+      setUpdate({ name: 'failed', stage: 'check', reason: cleanError(error) })
+    }
+  }, [knownUpdate])
+
+  const requestUpdateCheck = useCallback(() => {
+    if (
+      update?.name === 'checking' ||
+      update?.name === 'installing' ||
+      update?.name === 'restarting'
+    ) {
+      return
+    }
+    updateReturn.current = getFocused()
+    void checkForUpdates()
+  }, [checkForUpdates, update?.name])
+
+  const installUpdate = useCallback(async () => {
+    if (!knownUpdate) return
+    setUpdate({ name: 'installing', latest: knownUpdate.latest })
+    try {
+      // The main process downloads, verifies and swaps the AppImage in, then
+      // schedules a relaunch. This window goes away on its own from here.
+      await window.beacon.updates.install()
+      setUpdate({ name: 'restarting', latest: knownUpdate.latest })
+    } catch (error) {
+      setUpdate({ name: 'failed', stage: 'install', reason: cleanError(error) })
+    }
+  }, [knownUpdate])
+
+  const retryUpdate = useCallback(() => {
+    if (update?.name === 'failed' && update.stage === 'install') void installUpdate()
+    else void checkForUpdates()
+  }, [update, installUpdate, checkForUpdates])
+
+  const closeUpdate = useCallback(() => {
+    setUpdate(null)
+    const previous = updateReturn.current
+    // The rail may have been dismissed while the check ran; its buttons are
+    // inert then, so hand focus back to the screen instead.
+    if (previous?.isConnected && !previous.closest('[inert]')) setFocused(previous)
+    else focusFirst()
+  }, [])
+
   const toggleFavourite = useCallback(
     (card: Card) => {
       if (!signedIn || card.kind !== 'series') return
@@ -291,6 +377,24 @@ export default function App(): React.JSX.Element {
         return
       }
       if (action === 'back') cancelSignOut()
+      return
+    }
+
+    // The update dialog is modal as well. Installing has no cancel: the file
+    // is on its way in and the app restarts, so a press must not land behind
+    // the backdrop while that happens.
+    if (update) {
+      if (update.name === 'installing' || update.name === 'restarting') return
+      if (action === 'up' || action === 'down' || action === 'left' || action === 'right') {
+        move(action, document.querySelector<HTMLElement>('.dialog') ?? undefined)
+        return
+      }
+      if (action === 'accept') {
+        const active = document.activeElement as HTMLElement | null
+        active?.click()
+        return
+      }
+      if (action === 'back') closeUpdate()
       return
     }
 
@@ -457,6 +561,10 @@ export default function App(): React.JSX.Element {
         onHome={goHome}
         onSearch={openSearch}
         onSignOut={signedIn ? requestSignOut : undefined}
+        version={version}
+        availableVersion={knownUpdate?.latest ?? null}
+        checking={update?.name === 'checking'}
+        onCheckForUpdates={requestUpdateCheck}
       />
       {stack.map((entry, index) => (
         <div
@@ -486,6 +594,17 @@ export default function App(): React.JSX.Element {
               testId: 'confirm-signout'
             }
           ]}
+        />
+      ) : null}
+
+      {update && update.name !== 'checking' ? (
+        // Keyed by state so a new prompt gets its own first action focused.
+        <UpdateDialog
+          key={update.name}
+          prompt={update}
+          onClose={closeUpdate}
+          onInstall={() => void installUpdate()}
+          onRetry={retryUpdate}
         />
       ) : null}
 

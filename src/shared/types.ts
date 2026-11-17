@@ -193,6 +193,21 @@ export interface ProgressReport {
   duration: number
 }
 
+/** What GitHub's latest stable release says about this build. */
+export interface UpdateInfo {
+  /** The version running now, without a leading `v`. */
+  current: string
+  /** The newest stable release, without a leading `v`. */
+  latest: string
+  /** True when `latest` is newer than `current`. */
+  available: boolean
+  /**
+   * True when this build can replace itself: it runs from a writable AppImage.
+   * Otherwise there is only a download to point at.
+   */
+  canInstall: boolean
+}
+
 export interface BeaconApi {
   auth: {
     status(): Promise<AuthStatus>
@@ -238,5 +253,16 @@ export interface BeaconApi {
     toggleFullscreen(): void
     platform(): Promise<string>
     initialSlug(): Promise<string | null>
+    /** The running version, without a leading `v`. */
+    version(): Promise<string>
+  }
+  /**
+   * GitHub Releases is the only update channel. `install` replaces this
+   * AppImage in place and restarts the app; the promise rejects when that is
+   * not possible.
+   */
+  updates: {
+    check(): Promise<UpdateInfo>
+    install(): Promise<void>
   }
 }

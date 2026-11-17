@@ -1,4 +1,4 @@
-import { Home, LogOut, NavArrowLeft, Search } from 'iconoir-react'
+import { Home, LogOut, NavArrowLeft, RefreshDouble, Search } from 'iconoir-react'
 
 interface NavRailProps {
   open: boolean
@@ -7,6 +7,13 @@ interface NavRailProps {
   onSearch: () => void
   /** Absent for a free-video session: there is no account to sign out of. */
   onSignOut?: () => void
+  /** The running version, shown at the foot of the rail. */
+  version: string | null
+  /** A newer release the last check found, named on the button instead. */
+  availableVersion?: string | null
+  /** True while a check is in flight: the button says so and stays put. */
+  checking: boolean
+  onCheckForUpdates: () => void
 }
 
 /**
@@ -18,7 +25,11 @@ export function NavRail({
   showHome,
   onHome,
   onSearch,
-  onSignOut
+  onSignOut,
+  version,
+  availableVersion,
+  checking,
+  onCheckForUpdates
 }: NavRailProps): React.JSX.Element {
   return (
     <>
@@ -60,19 +71,57 @@ export function NavRail({
           <Search className="rail__icon" width={20} height={20} strokeWidth={1.7} aria-hidden />
           <span className="rail__label">Search</span>
         </button>
-        {onSignOut ? (
+
+        {/* App actions sit apart from browsing, at the foot of the rail. The
+            version line stays under them, always: it is the one thing here that
+            is read rather than pressed. */}
+        <div className="rail__footer">
           <button
             type="button"
-            className="rail__item rail__item--bottom"
+            className="rail__item"
             data-focus
-            data-testid="rail-signout"
+            data-testid="rail-update"
             tabIndex={-1}
-            onClick={onSignOut}
+            disabled={checking}
+            aria-busy={checking}
+            onClick={onCheckForUpdates}
           >
-            <LogOut className="rail__icon" width={20} height={20} strokeWidth={1.7} aria-hidden />
-            <span className="rail__label">Sign out</span>
+            {checking ? (
+              <span className="rail__spinner" aria-hidden />
+            ) : (
+              <RefreshDouble
+                className="rail__icon"
+                width={20}
+                height={20}
+                strokeWidth={1.7}
+                aria-hidden
+              />
+            )}
+            <span className="rail__label">
+              {checking
+                ? 'Checking…'
+                : availableVersion
+                  ? `Update to v${availableVersion}`
+                  : 'Check for updates'}
+            </span>
           </button>
-        ) : null}
+          {onSignOut ? (
+            <button
+              type="button"
+              className="rail__item"
+              data-focus
+              data-testid="rail-signout"
+              tabIndex={-1}
+              onClick={onSignOut}
+            >
+              <LogOut className="rail__icon" width={20} height={20} strokeWidth={1.7} aria-hidden />
+              <span className="rail__label">Sign out</span>
+            </button>
+          ) : null}
+          <p className="rail__version" data-testid="rail-version">
+            {version ? `v${version}` : ''}
+          </p>
+        </div>
       </nav>
     </>
   )

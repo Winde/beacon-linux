@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Card, FavouriteItem, FavouritesData, HomeData } from '@shared/types'
+import type { Card, FavouriteItem, FavouritesData, HomeData, UpdateInfo } from '@shared/types'
 import App from './App'
 
 beforeEach(() => {
@@ -45,6 +45,9 @@ interface StubOptions {
   homeImpl?: () => Promise<HomeData>
   add?: (card: Card) => Promise<FavouritesData>
   remove?: (slug: string) => Promise<FavouritesData>
+  version?: string
+  check?: () => Promise<UpdateInfo>
+  install?: () => Promise<void>
 }
 
 function stubApp({
@@ -53,7 +56,10 @@ function stubApp({
   home = { hero: [], rows: [] },
   homeImpl,
   add,
-  remove: removeImpl
+  remove: removeImpl,
+  version = '0.1.4',
+  check,
+  install
 }: StubOptions = {}): {
   signOut: ReturnType<typeof vi.fn>
   list: ReturnType<typeof vi.fn>
@@ -61,6 +67,8 @@ function stubApp({
   add: ReturnType<typeof vi.fn>
   remove: ReturnType<typeof vi.fn>
   quit: ReturnType<typeof vi.fn>
+  check: ReturnType<typeof vi.fn>
+  install: ReturnType<typeof vi.fn>
 } {
   const signOut = vi.fn(() => Promise.resolve())
   const list = vi.fn(() => Promise.resolve({ items, after: null }))
@@ -68,6 +76,17 @@ function stubApp({
   const addFn = vi.fn(add ?? (() => Promise.resolve({ items, after: null })))
   const remove = vi.fn(removeImpl ?? (() => Promise.resolve({ items: [], after: null })))
   const quit = vi.fn()
+  const checkFn = vi.fn(
+    check ??
+      (() =>
+        Promise.resolve<UpdateInfo>({
+          current: version,
+          latest: version,
+          available: false,
+          canInstall: true
+        }))
+  )
+  const installFn = vi.fn(install ?? (() => Promise.resolve()))
 
   vi.stubGlobal('beacon', {
     auth: {
@@ -101,11 +120,13 @@ function stubApp({
       quit,
       toggleFullscreen: vi.fn(),
       platform: vi.fn(() => Promise.resolve('linux')),
-      initialSlug: vi.fn(() => Promise.resolve(null))
-    }
+      initialSlug: vi.fn(() => Promise.resolve(null)),
+      version: vi.fn(() => Promise.resolve(version))
+    },
+    updates: { check: checkFn, install: installFn }
   })
 
-  return { signOut, list, home: homeFn, add: addFn, remove, quit }
+  return { signOut, list, home: homeFn, add: addFn, remove, quit, check: checkFn, install: installFn }
 }
 
 describe('App sign out', () => {
@@ -162,6 +183,101 @@ describe('App sign out', () => {
     render(<App />)
 
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeDefined()
+  })
+})
+
+describe('App updates', () => {
+  const UP_TO_DATE: UpdateInfo = {
+    current: '0.1.4',
+    latest: '0.1.4',
+    available: false,
+    canInstall: true
+  }
+  const NEWER: UpdateInfo = {
+    current: '0.1.4',
+    latest: '0.2.0',
+    available: true,
+    canInstall: true
+  }
+
+  it('puts the running version in the rail', async () => {
+    stubApp({ version: '0.3.1' })
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByTestId('rail-version').textContent).toBe('v0.3.1'))
+  })
+
+  it('says when there is nothing newer', async () => {
+    stubApp({ check: () => Promise.resolve(UP_TO_DATE) })
+    render(<App />)
+
+    fireEvent.click(await screen.findByTestId('rail-update'))
+
+    const dialog = await screen.findByRole('dialog', { name: "You're up to date" })
+    expect(dialog.textContent).toContain('v0.1.4')
+
+    fireEvent.click(screen.getByTestId('update-close'))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('offers the newer release and installs it', async () => {
+    let finish!: () => void
+    const { install } = stubApp({
+      check: () => Promise.resolve(NEWER),
+      install: () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    })
+    render(<App />)
+
+    fireEvent.click(await screen.findByTestId('rail-update'))
+    await screen.findByRole('dialog', { name: 'Beacon v0.2.0 is available' })
+
+    fireEvent.click(screen.getByTestId('update-install'))
+    expect(install).toHaveBeenCalledOnce()
+    expect(screen.getByText(/Downloading Beacon v0\.2\.0/)).toBeDefined()
+
+    await act(async () => finish())
+
+    expect(await screen.findByText(/is installed\. Restarting/)).toBeDefined()
+  })
+
+  it('keeps offering the release after Later', async () => {
+    stubApp({ check: () => Promise.resolve(NEWER) })
+    render(<App />)
+
+    fireEvent.click(await screen.findByTestId('rail-update'))
+    await screen.findByRole('dialog', { name: 'Beacon v0.2.0 is available' })
+    fireEvent.click(screen.getByTestId('update-later'))
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByTestId('rail-update').textContent).toContain('Update to v0.2.0')
+  })
+
+  it('reports a failed check and tries again', async () => {
+    const { check } = stubApp({
+      check: () => Promise.reject(new Error('Could not reach GitHub.'))
+    })
+    render(<App />)
+
+    fireEvent.click(await screen.findByTestId('rail-update'))
+    const dialog = await screen.findByRole('dialog', { name: "Couldn't check for updates" })
+    expect(dialog.textContent).toContain('Could not reach GitHub.')
+
+    fireEvent.click(screen.getByTestId('update-retry'))
+    await waitFor(() => expect(check).toHaveBeenCalledTimes(2))
+  })
+
+  it('points a copy that cannot update itself at the release page', async () => {
+    stubApp({ check: () => Promise.resolve({ ...NEWER, canInstall: false }) })
+    render(<App />)
+
+    fireEvent.click(await screen.findByTestId('rail-update'))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Beacon v0.2.0 is available' })
+    expect(dialog.textContent).toContain("can't replace itself")
+    expect(screen.queryByTestId('update-install')).toBeNull()
   })
 })
 

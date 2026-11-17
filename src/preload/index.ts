@@ -37,7 +37,12 @@ const api: BeaconApi = {
     quit: () => ipcRenderer.invoke('app:quit'),
     toggleFullscreen: () => ipcRenderer.invoke('app:toggleFullscreen'),
     platform: () => ipcRenderer.invoke('app:platform'),
-    initialSlug: () => ipcRenderer.invoke('app:initialSlug')
+    initialSlug: () => ipcRenderer.invoke('app:initialSlug'),
+    version: () => ipcRenderer.invoke('app:version')
+  },
+  updates: {
+    check: () => ipcRenderer.invoke('updates:check'),
+    install: () => ipcRenderer.invoke('updates:install')
   }
 }
 

@@ -119,6 +119,12 @@ name, layout and any artwork you changed in Steam alone. `--no-steam`,
 `--version vX.Y.Z`, `--force-art` and `--uninstall` are described in
 [docs/install-steamos.md](docs/install-steamos.md).
 
+After that, updates come from the app: **Check for updates** at the foot of the
+left menu compares this build with the latest GitHub release. If one is newer,
+`Update now` downloads it beside the running AppImage, checks it against the
+release's `SHA256SUMS.txt` and restarts into the new version. The installer
+stays for a first install, or when the app cannot replace itself.
+
 The installer and the artwork are separate release assets; the AppImage stays a
 single self-contained file.
 

@@ -6,6 +6,16 @@ const glue = vi.hoisted(() => ({
   fromContents: null as any,
   exposed: null as Record<string, Record<string, (...args: any[]) => unknown>> | null,
   invoked: [] as string[],
+  app: {
+    getPath: vi.fn(() => 'C:/tmp/beacon-linux-test'),
+    getVersion: vi.fn(() => '9.9.9'),
+    relaunch: vi.fn(),
+    quit: vi.fn()
+  },
+  updater: {
+    check: vi.fn(),
+    install: vi.fn()
+  },
   client: {
     status: vi.fn(),
     signIn: vi.fn(),
@@ -28,7 +38,7 @@ const glue = vi.hoisted(() => ({
 }))
 
 vi.mock('electron', () => ({
-  app: { getPath: () => 'C:/tmp/beacon-linux-test' },
+  app: glue.app,
   ipcMain: {
     handle: (channel: string, handler: (...args: any[]) => any) => {
       glue.handlers.set(channel, handler)
@@ -48,7 +58,8 @@ vi.mock('electron', () => ({
       glue.invoked.push(channel)
       return Promise.resolve(undefined)
     }
-  }
+  },
+  net: { fetch: vi.fn() }
 }))
 
 vi.mock('./beacon/client', () => ({
@@ -62,6 +73,13 @@ vi.mock('./beacon/catalog', () => ({
   })
 }))
 vi.mock('./hls', () => ({ fetchMasterPlaylist: vi.fn(), fetchCaptionFile: vi.fn() }))
+vi.mock('./updates', () => ({
+  Updater: vi.fn(function () {
+    return glue.updater
+  }),
+  currentAppImage: vi.fn(() => null),
+  relaunchArgs: vi.fn((argv: string[]) => argv.filter((arg) => !arg.startsWith('--open=')))
+}))
 
 import '../preload/index'
 import { registerIpc } from './ipc'
@@ -75,6 +93,9 @@ function handler(channel: string): (...args: any[]) => any {
 
 beforeEach(() => {
   vi.resetAllMocks()
+  glue.app.getPath.mockReturnValue('C:/tmp/beacon-linux-test')
+  glue.app.getVersion.mockReturnValue('9.9.9')
+  glue.updater.install.mockResolvedValue('/home/deck/Applications/Beacon.AppImage')
   glue.handlers.clear()
   glue.invoked.length = 0
   glue.windows = []
@@ -209,5 +230,28 @@ describe('registerIpc', () => {
 
   it('reports the platform', () => {
     expect(handler('app:platform')()).toBe(process.platform)
+  })
+
+  it('reports the running version', () => {
+    expect(handler('app:version')()).toBe('9.9.9')
+  })
+
+  it('installs an update and relaunches the replaced AppImage', async () => {
+    await handler('updates:install')({})
+
+    expect(glue.updater.install).toHaveBeenCalledOnce()
+    expect(glue.app.relaunch).toHaveBeenCalledWith({
+      execPath: '/home/deck/Applications/Beacon.AppImage',
+      args: process.argv.slice(1).filter((arg) => !arg.startsWith('--open='))
+    })
+    expect(glue.app.quit).toHaveBeenCalledOnce()
+  })
+
+  it('stays up when the update cannot be installed', async () => {
+    glue.updater.install.mockRejectedValue(new Error('The downloaded update failed its checksum.'))
+
+    await expect(handler('updates:install')({})).rejects.toThrow(/checksum/)
+    expect(glue.app.relaunch).not.toHaveBeenCalled()
+    expect(glue.app.quit).not.toHaveBeenCalled()
   })
 })
