@@ -3,12 +3,14 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ContentData } from '@shared/types'
 import { focusFirst } from '../nav/focus'
+import { pageCache } from '../lib/pages'
 import { Content } from './Content'
 
 vi.mock('../nav/focus', () => ({ focusFirst: vi.fn() }))
 
 afterEach(() => {
   cleanup()
+  pageCache.clear()
   vi.unstubAllGlobals()
 })
 
@@ -37,7 +39,7 @@ function contentData(overrides: Partial<ContentData> = {}): ContentData {
 
 /** Replace the preload bridge with a catalog that answers content(). */
 function stubContent(
-  result: ContentData | Promise<ContentData>,
+  result: ContentData | null | Promise<ContentData | null>,
   mark = vi.fn(() => Promise.resolve({ watched: true, progress: 1 }))
 ): ReturnType<typeof vi.fn> {
   const content = vi.fn(() => Promise.resolve(result))
@@ -46,12 +48,56 @@ function stubContent(
 }
 
 describe('Content', () => {
-  it('shows the loader while the episode loads', () => {
+  it('shows the skeleton while the episode loads', () => {
     stubContent(new Promise<ContentData>(() => {}))
     render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
 
     expect(screen.getByRole('status')).toBeDefined()
     expect(screen.getByText('Loading episode')).toBeDefined()
+  })
+
+  it('paints a saved page before the request answers', () => {
+    pageCache.rememberContent(contentData())
+    stubContent(new Promise<ContentData>(() => {}))
+    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
+
+    expect(screen.getByText('Campaign 1 Episode 5')).toBeDefined()
+    expect(screen.getByText('An episode.')).toBeDefined()
+    expect(screen.queryByText('Loading episode')).toBeNull()
+  })
+
+  it('prefills the header from the tile that opened it', () => {
+    stubContent(new Promise<ContentData>(() => {}))
+    render(
+      <Content
+        slug="c1e5"
+        card={{
+          kind: 'video',
+          slug: 'c1e5',
+          title: 'The Waters Edge',
+          subtitle: 'Campaign 1',
+          image: null,
+          image2x: null,
+          minutes: 55
+        }}
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole('heading', { level: 1, name: 'The Waters Edge' })).toBeDefined()
+    expect(screen.getByText('Campaign 1')).toBeDefined()
+    expect(screen.getByText('55 min')).toBeDefined()
+    expect(screen.getByText('Loading episode')).toBeDefined()
+  })
+
+  it('drops a saved page the CMS no longer has', async () => {
+    pageCache.rememberContent(contentData())
+    stubContent(null)
+    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
+
+    expect(await screen.findByText('Video not found.')).toBeDefined()
+    expect(pageCache.content('c1e5')).toBeNull()
   })
 
   it('shows the episode details', async () => {
@@ -90,7 +136,13 @@ describe('Content', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'View series' }))
 
-    expect(onOpenSeries).toHaveBeenCalledWith('campaign-1')
+    expect(onOpenSeries).toHaveBeenCalledWith('campaign-1', {
+      kind: 'series',
+      slug: 'campaign-1',
+      title: 'Campaign 1',
+      image: null,
+      image2x: null
+    })
     expect(onOpen).not.toHaveBeenCalled()
   })
 

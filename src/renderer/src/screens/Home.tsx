@@ -9,10 +9,33 @@ import { Hero } from '../components/Hero'
 import { RefreshNote } from '../components/RefreshNote'
 import { Row } from '../components/Row'
 import { ScreenScroll } from '../components/ScreenScroll'
-import { DelayedSpinner, ErrorNote } from '../components/ui'
+import { DelayedSkeleton, SkeletonBlock, SkeletonRows } from '../components/Skeleton'
+import { ErrorNote } from '../components/ui'
 
 const FAVOURITES_ROW = 'Favourites'
 const NO_FAVOURITES: FavouriteItem[] = []
+
+function HomeSkeleton(): React.JSX.Element {
+  return (
+    <div className="screen screen--split" aria-busy="true">
+      <div className="hero-skeleton">
+        <SkeletonBlock className="skeleton--eyebrow" />
+        <SkeletonBlock className="skeleton--title" />
+        <div className="skeleton-lines" aria-hidden>
+          <SkeletonBlock />
+          <SkeletonBlock />
+        </div>
+        <div className="button-row" aria-hidden>
+          <SkeletonBlock className="skeleton-button" />
+          <SkeletonBlock className="skeleton-button skeleton-button--ghost" />
+        </div>
+      </div>
+      <ScreenScroll>
+        <SkeletonRows rows={2} tiles={6} />
+      </ScreenScroll>
+    </div>
+  )
+}
 
 interface HomeProps {
   onOpen: (card: Card) => void
@@ -140,9 +163,9 @@ export function Home({
 
   if (loading && !data) {
     return (
-      <div className="screen screen--center">
-        <DelayedSpinner label="Loading Beacon" />
-      </div>
+      <DelayedSkeleton label="Loading Beacon">
+        <HomeSkeleton />
+      </DelayedSkeleton>
     )
   }
   if (error && !data) {

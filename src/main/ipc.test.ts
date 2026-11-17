@@ -19,6 +19,7 @@ const glue = vi.hoisted(() => ({
   },
   updater: {
     check: vi.fn(),
+    notes: vi.fn(),
     install: vi.fn()
   },
   client: {
@@ -29,6 +30,7 @@ const glue = vi.hoisted(() => ({
     favouriteCollectionIds: vi.fn(() => Promise.resolve([])),
     setCollectionFavourite: vi.fn(() => Promise.resolve(true)),
     home: vi.fn(),
+    cachedPages: vi.fn(() => Promise.resolve({ collections: [], contents: [] })),
     collection: vi.fn(),
     content: vi.fn(),
     search: vi.fn(),
@@ -172,6 +174,7 @@ describe('registerIpc', () => {
     await handler('auth:status')()
     await handler('auth:signOut')()
     await handler('catalog:home')()
+    await handler('catalog:cachedPages')()
     await handler('catalog:collection')({}, 'campaign-1')
     await handler('catalog:content')({}, 'c1e1')
     await handler('catalog:search')({}, 'vox')
@@ -180,6 +183,7 @@ describe('registerIpc', () => {
     expect(glue.client.status).toHaveBeenCalled()
     expect(glue.client.signOut).toHaveBeenCalled()
     expect(glue.client.home).toHaveBeenCalled()
+    expect(glue.client.cachedPages).toHaveBeenCalled()
     expect(glue.client.collection).toHaveBeenCalledWith('campaign-1')
     expect(glue.client.content).toHaveBeenCalledWith('c1e1')
     expect(glue.client.search).toHaveBeenCalledWith('vox')
@@ -340,6 +344,14 @@ describe('registerIpc', () => {
     const info = { current: '0.1.4', latest: '0.2.0', available: true, canInstall: true }
     glue.updater.check.mockResolvedValue(info)
     await expect(handler('updates:check')()).resolves.toEqual(info)
+  })
+
+  it('delegates the notes for a pending update', async () => {
+    const notes = [{ version: '0.2.0', notes: 'Player changes.' }]
+    glue.updater.notes.mockResolvedValue(notes)
+
+    await expect(handler('updates:notes')()).resolves.toEqual(notes)
+    expect(glue.updater.notes).toHaveBeenCalledOnce()
   })
 
   it('does nothing when a fullscreen request has no window', () => {

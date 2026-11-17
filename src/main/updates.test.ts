@@ -10,6 +10,7 @@ import {
   compareVersions,
   currentAppImage,
   parseRelease,
+  parseReleaseNotes,
   relaunchArgs,
   Updater,
   writableAppImage
@@ -125,6 +126,65 @@ describe('parseRelease', () => {
   })
 })
 
+describe('parseReleaseNotes', () => {
+  function release(version: string, body: string | null, extra: Record<string, unknown> = {}) {
+    return { tag_name: `v${version}`, body, prerelease: false, draft: false, ...extra }
+  }
+
+  it('keeps the stable releases between the running version and the offered one', () => {
+    const notes = parseReleaseNotes(
+      [
+        release('0.3.0', 'Player changes.'),
+        release('0.2.1', 'Caption fix.'),
+        release('0.2.0', 'Big changes.'),
+        release('0.1.4', 'Running version.'),
+        release('0.1.3', 'Older.')
+      ],
+      '0.1.4',
+      '0.3.0'
+    )
+
+    expect(notes).toEqual([
+      { version: '0.3.0', notes: 'Player changes.' },
+      { version: '0.2.1', notes: 'Caption fix.' },
+      { version: '0.2.0', notes: 'Big changes.' }
+    ])
+  })
+
+  it('leaves pre-releases, drafts and unusable tags out', () => {
+    const notes = parseReleaseNotes(
+      [
+        release('0.3.0-beta.1', 'Beta.', { prerelease: true }),
+        release('0.2.2', 'Draft.', { draft: true }),
+        release('nightly', 'Nightly.'),
+        release('0.2.1', null),
+        { tag_name: 'v0.2.0' }
+      ],
+      '0.1.4',
+      '0.3.0'
+    )
+
+    expect(notes).toEqual([
+      { version: '0.2.1', notes: '' },
+      { version: '0.2.0', notes: '' }
+    ])
+  })
+
+  it('reads the notes newest first even when GitHub lists them out of order', () => {
+    const notes = parseReleaseNotes(
+      [release('0.2.0', 'Second.'), release('0.10.0', 'Tenth.'), release('0.3.0', 'Third.')],
+      '0.1.4',
+      '0.10.0'
+    )
+
+    expect(notes.map((note) => note.version)).toEqual(['0.10.0', '0.3.0', '0.2.0'])
+  })
+
+  it('refuses a payload that is not a list', () => {
+    expect(() => parseReleaseNotes({ tag_name: 'v0.2.0' }, '0.1.4', '0.2.0')).toThrow(/unexpected/)
+  })
+})
+
 describe('checksumFor', () => {
   const hash = 'a'.repeat(64)
 
@@ -214,6 +274,93 @@ describe('Updater', () => {
 
     expect(info.available).toBe(true)
     expect(info.canInstall).toBe(false)
+  })
+
+  const RELEASES_LIST = 'https://api.github.com/repos/Winde/beacon-linux/releases?per_page=100'
+
+  it('fetches the notes of every release between the running and pending ones once', async () => {
+    const list = [
+      { tag_name: 'v0.2.0', body: 'Player changes.' },
+      { tag_name: 'v0.1.5', body: 'Caption fix.' },
+      { tag_name: 'v0.1.4', body: 'Running version.' }
+    ]
+    const fetch = vi.fn((url: string) =>
+      Promise.resolve(jsonResponse(url === RELEASES_LIST ? list : releasePayload('0.2.0')))
+    )
+    const service = updater(fetch)
+
+    await service.check()
+    const expected = [
+      { version: '0.2.0', notes: 'Player changes.' },
+      { version: '0.1.5', notes: 'Caption fix.' }
+    ]
+    await expect(service.notes()).resolves.toEqual(expected)
+    await expect(service.notes()).resolves.toEqual(expected)
+
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(fetch).toHaveBeenLastCalledWith(
+      RELEASES_LIST,
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'user-agent': 'Winde/beacon-linux 0.1.4' })
+      })
+    )
+  })
+
+  it('has no notes before a check or when the running version is current', async () => {
+    const fetch = vi.fn(() => Promise.resolve(jsonResponse(releasePayload('0.1.4'))))
+    const service = updater(fetch)
+
+    await expect(service.notes()).resolves.toEqual([])
+    await service.check()
+    await expect(service.notes()).resolves.toEqual([])
+
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it('fetches a new changelog when the offered release changes', async () => {
+    let latest = '0.2.0'
+    const fetch = vi.fn((url: string) =>
+      Promise.resolve(
+        jsonResponse(
+          url === RELEASES_LIST
+            ? [{ tag_name: `v${latest}`, body: `Notes for ${latest}.` }]
+            : releasePayload(latest)
+        )
+      )
+    )
+    const service = updater(fetch)
+
+    await service.check()
+    await expect(service.notes()).resolves.toEqual([
+      { version: '0.2.0', notes: 'Notes for 0.2.0.' }
+    ])
+
+    latest = '0.3.0'
+    await service.check()
+    await expect(service.notes()).resolves.toEqual([
+      { version: '0.3.0', notes: 'Notes for 0.3.0.' }
+    ])
+  })
+
+  it('explains a release list that could not be read, and tries again next time', async () => {
+    let fail = true
+    const fetch = vi.fn((url: string) => {
+      if (url === RELEASES_LIST) {
+        return Promise.resolve(
+          fail
+            ? ({ ...jsonResponse(null), ok: false, status: 500 } as UpdateResponse)
+            : jsonResponse([{ tag_name: 'v0.2.0', body: 'Player changes.' }])
+        )
+      }
+      return Promise.resolve(jsonResponse(releasePayload('0.2.0')))
+    })
+    const service = updater(fetch)
+
+    await service.check()
+    await expect(service.notes()).rejects.toThrow(/GitHub answered 500/)
+
+    fail = false
+    await expect(service.notes()).resolves.toEqual([{ version: '0.2.0', notes: 'Player changes.' }])
   })
 
   it('explains a GitHub that is out of reach', async () => {

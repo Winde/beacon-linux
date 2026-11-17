@@ -18,6 +18,7 @@ const api: BeaconApi = {
   catalog: {
     home: () => ipcRenderer.invoke('catalog:home'),
     cachedHome: () => ipcRenderer.invoke('catalog:cachedHome'),
+    cachedPages: () => ipcRenderer.invoke('catalog:cachedPages'),
     browse: () => ipcRenderer.invoke('catalog:browse'),
     collection: (slug: string) => ipcRenderer.invoke('catalog:collection', slug),
     content: (slug: string) => ipcRenderer.invoke('catalog:content', slug),
@@ -51,6 +52,7 @@ const api: BeaconApi = {
   },
   updates: {
     check: () => ipcRenderer.invoke('updates:check'),
+    notes: () => ipcRenderer.invoke('updates:notes'),
     install: () => ipcRenderer.invoke('updates:install')
   }
 }

@@ -14,6 +14,7 @@ import { credentialStorage } from './beacon/session'
 import { FavouritesService } from './favourites'
 import { fetchCaptionFile, fetchMasterPlaylist } from './hls'
 import { HomeStore } from './home-store'
+import { PageStore } from './page-store'
 import { PreferencesStore, preferencesPath } from './preferences'
 import { currentAppImage, relaunchArgs, Updater } from './updates'
 
@@ -22,6 +23,8 @@ export const catalog = new Catalog(client)
 client.catalog = catalog
 export const homeStore = new HomeStore(() => app.getPath('userData'))
 client.homeStore = homeStore
+export const pageStore = new PageStore(() => app.getPath('userData'))
+client.pageStore = pageStore
 export const favourites = new FavouritesService(
   client,
   catalog,
@@ -47,6 +50,7 @@ export function registerIpc(): void {
 
   ipcMain.handle('catalog:home', () => client.home())
   ipcMain.handle('catalog:cachedHome', () => client.cachedHome())
+  ipcMain.handle('catalog:cachedPages', () => client.cachedPages())
   ipcMain.handle('catalog:browse', async (): Promise<BrowseData> => {
     await catalog.ensure()
     const all = catalog.allCollections()
@@ -122,6 +126,8 @@ export function registerIpc(): void {
   ipcMain.handle('app:version', () => app.getVersion())
 
   ipcMain.handle('updates:check', () => updater.check())
+
+  ipcMain.handle('updates:notes', () => updater.notes())
 
   ipcMain.handle('updates:install', async () => {
     const appImage = await updater.install()

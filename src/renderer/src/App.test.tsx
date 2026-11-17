@@ -3,13 +3,17 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   AuthStatus,
+  CachedPages,
   Card,
+  ContentData,
   FavouriteItem,
   FavouritesData,
   HomeData,
+  ReleaseNote,
   UpdateInfo
 } from '@shared/types'
 import App, { upToCollection, type Entry } from './App'
+import { pageCache } from './lib/pages'
 
 beforeEach(() => {
   // Focus navigation scrolls what it focuses; jsdom has no layout engine.
@@ -18,6 +22,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  pageCache.clear()
   vi.unstubAllGlobals()
 })
 
@@ -45,6 +50,28 @@ const SERIES: Card = {
 
 const HOME_WITH_SERIES: HomeData = { hero: [SERIES], rows: [] }
 
+const EPISODE: ContentData = {
+  id: 'e5',
+  slug: 'c1e5',
+  title: 'Campaign 1 Episode 5',
+  description: 'An episode.',
+  continuedSummary: '',
+  image: null,
+  image2x: null,
+  minutes: 55,
+  released: null,
+  series: { slug: 'campaign-1', title: 'Campaign 1', isSeries: true },
+  tier: 'Apprentice',
+  locked: false,
+  signInNeeded: false,
+  signedIn: true,
+  watched: false,
+  resumeAt: 0,
+  rows: []
+}
+
+const NO_PAGES: CachedPages = { collections: [], contents: [] }
+
 interface StubOptions {
   signedIn?: boolean
   items?: FavouriteItem[]
@@ -55,10 +82,12 @@ interface StubOptions {
   listImpl?: () => Promise<FavouritesData>
   version?: string
   check?: () => Promise<UpdateInfo>
+  notes?: () => Promise<ReleaseNote[]>
   install?: () => Promise<void>
   initialSlug?: string | null
   cachedHome?: HomeData | null
   cachedFavourites?: FavouritesData | null
+  cachedPages?: CachedPages
   status?: () => Promise<AuthStatus>
 }
 
@@ -72,10 +101,12 @@ function stubApp({
   listImpl,
   version = '0.1.4',
   check,
+  notes,
   install,
   initialSlug = null,
   cachedHome = null,
   cachedFavourites = null,
+  cachedPages = NO_PAGES,
   status
 }: StubOptions = {}): {
   signOut: ReturnType<typeof vi.fn>
@@ -86,6 +117,7 @@ function stubApp({
   remove: ReturnType<typeof vi.fn>
   quit: ReturnType<typeof vi.fn>
   check: ReturnType<typeof vi.fn>
+  notes: ReturnType<typeof vi.fn>
   install: ReturnType<typeof vi.fn>
 } {
   const signOut = vi.fn(() => Promise.resolve())
@@ -93,7 +125,7 @@ function stubApp({
   const homeFn = vi.fn(homeImpl ?? (() => Promise.resolve(home)))
   const addFn = vi.fn(add ?? (() => Promise.resolve({ items, after: null })))
   const remove = vi.fn(removeImpl ?? (() => Promise.resolve({ items: [], after: null })))
-  const content = vi.fn(() => Promise.resolve(null))
+  const content = vi.fn(() => Promise.resolve(EPISODE))
   const quit = vi.fn()
   const checkFn = vi.fn(
     check ??
@@ -106,6 +138,7 @@ function stubApp({
         }))
   )
   const installFn = vi.fn(install ?? (() => Promise.resolve()))
+  const notesFn = vi.fn(notes ?? (() => Promise.resolve<ReleaseNote[]>([])))
 
   vi.stubGlobal('beacon', {
     auth: {
@@ -127,6 +160,7 @@ function stubApp({
     catalog: {
       home: homeFn,
       cachedHome: vi.fn(() => Promise.resolve(cachedHome)),
+      cachedPages: vi.fn(() => Promise.resolve(cachedPages)),
       browse: vi.fn(),
       collection: vi.fn(),
       content,
@@ -149,7 +183,7 @@ function stubApp({
       initialSlug: vi.fn(() => Promise.resolve(initialSlug)),
       version: vi.fn(() => Promise.resolve(version))
     },
-    updates: { check: checkFn, install: installFn }
+    updates: { check: checkFn, notes: notesFn, install: installFn }
   })
 
   return {
@@ -161,12 +195,14 @@ function stubApp({
     remove,
     quit,
     check: checkFn,
+    notes: notesFn,
     install: installFn
   }
 }
 
 describe('App sign out', () => {
   it('asks before dropping the session', async () => {
+    pageCache.load({ collections: [], contents: [EPISODE] })
     const { signOut, list, remove } = stubApp({ items: [favourite('campaign-1', 'Campaign 1')] })
     render(<App />)
 
@@ -181,6 +217,8 @@ describe('App sign out', () => {
     await waitFor(() => expect(signOut).toHaveBeenCalledOnce())
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(remove).not.toHaveBeenCalled()
+    // The signed-out screen must not keep the previous account's pages.
+    expect(pageCache.content('c1e5')).toBeNull()
     // Signed out, the list is read again and comes back empty.
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2))
   })
@@ -212,6 +250,13 @@ describe('App sign out', () => {
     render(<App />)
 
     await waitFor(() => expect(list).toHaveBeenCalledOnce())
+  })
+
+  it('fills the page cache before the first route renders', async () => {
+    stubApp({ cachedPages: { collections: [], contents: [EPISODE] } })
+    render(<App />)
+
+    await waitFor(() => expect(pageCache.content('c1e5')).not.toBeNull())
   })
 
   it('opens a deep-linked episode over Home', async () => {
@@ -378,6 +423,42 @@ describe('App updates', () => {
     await act(async () => finish())
 
     expect(await screen.findByText(/is installed\. Restarting/)).toBeDefined()
+  })
+
+  it('lists the notes of every release between the running one and the offered one', async () => {
+    const { notes } = stubApp({
+      check: () => Promise.resolve(NEWER),
+      notes: () =>
+        Promise.resolve([
+          { version: '0.2.0', notes: 'Player changes.' },
+          { version: '0.1.5', notes: 'Caption fix.' }
+        ])
+    })
+    render(<App />)
+
+    fireEvent.click(await screen.findByTestId('rail-update'))
+    await screen.findByRole('dialog', { name: 'Beacon v0.2.0 is available' })
+
+    expect(await screen.findByRole('heading', { name: 'v0.2.0' })).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'v0.1.5' })).toBeDefined()
+    expect(screen.getByText('Player changes.')).toBeDefined()
+    expect(screen.getByText('Caption fix.')).toBeDefined()
+    expect(notes).toHaveBeenCalledOnce()
+  })
+
+  it('still installs when the release notes cannot be loaded', async () => {
+    const { install } = stubApp({
+      check: () => Promise.resolve(NEWER),
+      notes: () => Promise.reject(new Error('offline'))
+    })
+    render(<App />)
+
+    fireEvent.click(await screen.findByTestId('rail-update'))
+    await screen.findByRole('dialog', { name: 'Beacon v0.2.0 is available' })
+
+    expect(await screen.findByText(/Release notes couldn't be loaded/)).toBeDefined()
+    fireEvent.click(screen.getByTestId('update-install'))
+    expect(install).toHaveBeenCalledOnce()
   })
 
   it('keeps offering the release after Later', async () => {

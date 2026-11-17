@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react'
-import { focusWithin } from '../nav/focus'
+import { useEffect, useRef, useState } from 'react'
+import type { ReleaseNote } from '@shared/types'
+import { focusFirst } from '../nav/focus'
 import type { DialogAction } from './ConfirmDialog'
-import { Spinner } from './ui'
+import { DelayedSpinner, Spinner } from './ui'
 
 /** What the update dialog is saying right now. `checking` lives in the rail. */
 export type UpdatePrompt =
@@ -18,6 +19,12 @@ interface UpdateDialogProps {
   onRetry: () => void
 }
 
+type NotesState =
+  | { name: 'idle' }
+  | { name: 'loading' }
+  | { name: 'ready'; releases: ReleaseNote[] }
+  | { name: 'failed' }
+
 /**
  * The update flow's one decision per state: nothing to do, install (with the
  * restart it implies), or try again. Installing is deliberately uncancellable:
@@ -31,12 +38,38 @@ export function UpdateDialog({
   onRetry
 }: UpdateDialogProps): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
+  const latest = prompt.name === 'available' ? prompt.latest : null
+  const [notes, setNotes] = useState<NotesState>({ name: 'idle' })
 
-  // A new prompt brings new actions; the first one takes focus. The busy
-  // states have none, and the caller swallows input until the restart.
+  // A new prompt brings new actions; the first one takes focus, never a
+  // heading in the changelog above it. The busy states have none, and the
+  // caller swallows input until the restart.
   useEffect(() => {
-    if (ref.current) focusWithin(ref.current)
+    if (ref.current) focusFirst('[data-focus="action"]', ref.current)
   }, [prompt.name])
+
+  // Notes are a second request, so they are read only once an update is on
+  // offer. The main process caches them for that release; a failed read does
+  // not take the install action down with it.
+  useEffect(() => {
+    if (!latest) {
+      setNotes({ name: 'idle' })
+      return
+    }
+    let cancelled = false
+    setNotes({ name: 'loading' })
+    void window.beacon.updates
+      .notes()
+      .then((releases) => {
+        if (!cancelled) setNotes(releases.length ? { name: 'ready', releases } : { name: 'idle' })
+      })
+      .catch(() => {
+        if (!cancelled) setNotes({ name: 'failed' })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [latest])
 
   const busy = prompt.name === 'installing' || prompt.name === 'restarting'
   let title: string
@@ -119,6 +152,7 @@ export function UpdateDialog({
         <div className="dialog__message" id="update-dialog-message">
           {busy ? <Spinner label={message} /> : message}
         </div>
+        {prompt.name === 'available' ? <ReleaseNotes state={notes} /> : null}
         {actions.length > 0 ? (
           <div className="dialog__actions">
             {actions.map((action) => (
@@ -132,7 +166,7 @@ export function UpdateDialog({
                       ? 'button--danger'
                       : 'button--ghost'
                 }`}
-                data-focus
+                data-focus="action"
                 data-testid={action.testId}
                 tabIndex={-1}
                 onClick={action.onSelect}
@@ -143,6 +177,42 @@ export function UpdateDialog({
           </div>
         ) : null}
       </div>
+    </div>
+  )
+}
+
+/**
+ * The changelog for everything between the running version and the offered
+ * one. The pane scrolls; each version heading is a focus stop, so a controller
+ * can walk the releases and the pane follows.
+ */
+function ReleaseNotes({ state }: { state: NotesState }): React.JSX.Element | null {
+  if (state.name === 'idle') return null
+  return (
+    <div
+      className="dialog__notes"
+      role="region"
+      aria-label="Release notes"
+      data-testid="update-notes"
+    >
+      {state.name === 'loading' ? <DelayedSpinner label="Loading release notes…" /> : null}
+      {state.name === 'failed' ? (
+        <p className="dialog__notes-status">Release notes couldn&apos;t be loaded.</p>
+      ) : null}
+      {state.name === 'ready'
+        ? state.releases.map((release) => (
+            <section className="dialog__release" key={release.version}>
+              <h3 className="dialog__release-title" tabIndex={-1} data-focus>
+                v{release.version}
+              </h3>
+              {release.notes ? (
+                <p className="dialog__release-body">{release.notes}</p>
+              ) : (
+                <p className="dialog__release-body">No notes for this release.</p>
+              )}
+            </section>
+          ))
+        : null}
     </div>
   )
 }

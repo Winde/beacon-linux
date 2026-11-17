@@ -12,14 +12,15 @@ interface ProbeProps {
   deps: unknown[]
   keepData?: boolean
   initial?: unknown
+  dropDataOnError?: (error: unknown) => boolean
 }
 
 let latest: AsyncState<unknown>
 let root: Root
 let container: HTMLDivElement
 
-function Probe({ load, deps, keepData = false, initial }: ProbeProps): null {
-  latest = useAsync(load, deps, { keepData, initial })
+function Probe({ load, deps, keepData = false, initial, dropDataOnError }: ProbeProps): null {
+  latest = useAsync(load, deps, { keepData, initial, dropDataOnError })
   return null
 }
 
@@ -27,10 +28,11 @@ function render(
   load: () => Promise<unknown>,
   deps: unknown[] = [],
   keepData = false,
-  initial?: unknown
+  initial?: unknown,
+  dropDataOnError?: (error: unknown) => boolean
 ): void {
   act(() => {
-    root.render(createElement(Probe, { load, deps, keepData, initial }))
+    root.render(createElement(Probe, { load, deps, keepData, initial, dropDataOnError }))
   })
 }
 
@@ -172,5 +174,25 @@ describe('useAsync', () => {
     expect(latest.error).toContain('offline')
     // The failed refresh must leave the viewer on the page they were reading.
     expect(latest.data).toBe('first')
+  })
+
+  it('drops held data when the error says the page itself is gone', async () => {
+    const refresh = deferred<string>()
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce('first')
+      .mockImplementationOnce(() => refresh.promise)
+    const drop = (error: unknown): boolean =>
+      error instanceof Error && error.message === 'Video not found.'
+    render(load, [1], true, undefined, drop)
+    await settle()
+    expect(latest.data).toBe('first')
+
+    render(load, [2], true, undefined, drop)
+    refresh.reject(new Error('Video not found.'))
+    await settle()
+
+    expect(latest.data).toBeNull()
+    expect(latest.error).toBe('Video not found.')
   })
 })

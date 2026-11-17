@@ -4,7 +4,8 @@ import { useAsync } from '../lib/useAsync'
 import { focusFirst } from '../nav/focus'
 import { ScreenScroll } from '../components/ScreenScroll'
 import { Tile } from '../components/Tile'
-import { Empty, ErrorNote, Spinner } from '../components/ui'
+import { SkeletonStatus, SkeletonTiles } from '../components/Skeleton'
+import { Empty, ErrorNote } from '../components/ui'
 
 type Tab = 'series' | 'collections'
 
@@ -36,8 +37,15 @@ export function Browse({ onOpen }: BrowseProps): React.JSX.Element | null {
 
   if (loading) {
     return (
-      <div className="screen screen--center">
-        <Spinner label="Loading series and collections" />
+      <div className="screen screen--split" aria-busy="true">
+        <header className="browse__head">
+          <h1 className="browse__title">Browse</h1>
+          <p className="browse__sub">Every series and collection in the catalog.</p>
+        </header>
+        <ScreenScroll>
+          <SkeletonTiles count={12} />
+        </ScreenScroll>
+        <SkeletonStatus label="Loading series and collections" />
       </div>
     )
   }

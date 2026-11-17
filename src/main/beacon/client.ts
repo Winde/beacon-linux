@@ -1,6 +1,7 @@
 import { net } from 'electron'
 import type {
   AuthStatus,
+  CachedPages,
   Card,
   CollectionData,
   ContentData,
@@ -27,6 +28,7 @@ import type { CmsCard, ProgressInfo } from './cms-types'
 import { buildHome } from './home'
 import { PLATFORM } from './platform'
 import type { HomeStore } from '../home-store'
+import type { PageStore } from '../page-store'
 
 const CMS_URL = 'https://critrole-beacon-production-backend.clockhosting.com/api/graphql'
 const OAUTH_URL = 'https://pocketbeacon.memberful.com/oauth/token'
@@ -110,6 +112,14 @@ const RESUME_TAIL = 3 * 60 // seconds
 /** A position this close to the start is not worth offering as a resume. */
 const RESUME_MIN = 5 // seconds
 
+/**
+ * The CMS answered with no such page. This is our own conclusion from an empty
+ * result (`Contents.docs` / a catalog lookup), not an error code the API sends:
+ * a missing slug is HTTP 200 with an empty list. The IPC layer turns it into
+ * `null`, so the renderer never has to inspect an error message.
+ */
+class PageMissing extends Error {}
+
 export class BeaconClient {
   // Loaded once, on first use and after the app is ready: safeStorage needs that,
   // and this class is constructed at module load, before it.
@@ -136,12 +146,22 @@ export class BeaconClient {
    * which is what lets the next launch paint before the first request.
    */
   homeStore: HomeStore | null = null
+  /**
+   * The last collection and episode pages on disk. Unlike the TTL caches above,
+   * this survives a quit; the request cache still decides when to revalidate.
+   */
+  pageStore: PageStore | null = null
   /** Bumped when the account changes, so an old fetch cannot write the slot. */
   private authGeneration = 0
   /** Bumped when progress or a watch mark makes the cached feed old. */
   private feedGeneration = 0
-  /** Five minutes: series cards show progress, so shorter is more accurate. */
+  /**
+   * Five minutes: series cards show progress, so a shorter freshness window is
+   * more accurate. Expiry only means the page is revalidated; the saved copy
+   * in `PageStore` is what keeps it on screen during that refresh.
+   */
   private readonly collectionCache = new TtlCache<string, CollectionData>(5 * 60_000, 40)
+  /** Ten minutes for the same reason; the saved copy outlives both windows. */
   private readonly contentCache = new TtlCache<string, ContentData>(10 * 60_000, 40)
   private readonly searchCache = new TtlCache<string, SearchData>(5 * 60_000, 30)
   private readonly playbackCache = new TtlCache<string, PlaybackData | null>(5 * 60_000, 40)
@@ -174,6 +194,7 @@ export class BeaconClient {
     this.memberLoad = null
     this.memberCache = null
     this.homeStore?.clear()
+    this.pageStore?.clear()
     this.homeCache.clear()
     this.collectionCache.clear()
     this.contentCache.clear()
@@ -625,6 +646,15 @@ export class BeaconClient {
     return this.homeStore.read(await this.scope())?.favourites ?? null
   }
 
+  /**
+   * Every collection and episode page the last launch kept for this account.
+   * The renderer holds them in memory and paints one before asking the CMS.
+   */
+  async cachedPages(): Promise<CachedPages> {
+    if (!this.pageStore) return { collections: [], contents: [] }
+    return this.pageStore.readAll(await this.scope())
+  }
+
   async home(): Promise<HomeData> {
     await this.settleReports()
     const key = await this.scope()
@@ -654,10 +684,29 @@ export class BeaconClient {
     return data
   }
 
-  async collection(slug: string): Promise<CollectionData> {
+  async collection(slug: string): Promise<CollectionData | null> {
     await this.settleReports()
-    const key = `${await this.scope()}|${slug}`
-    return this.collectionCache.load(key, () => this.buildCollection(slug))
+    const scope = await this.scope()
+    // A progress write during the read makes the page too old to keep, though
+    // the caller still gets the answer it asked for.
+    const generation = this.authGeneration
+    const feedGeneration = this.feedGeneration
+    try {
+      const data = await this.collectionCache.load(`${scope}|${slug}`, () =>
+        this.buildCollection(slug)
+      )
+      if (generation === this.authGeneration && feedGeneration === this.feedGeneration) {
+        this.pageStore?.saveCollection(scope, data)
+      }
+      return data
+    } catch (error) {
+      // The series is gone from the CMS; a saved copy would only resurrect it.
+      if (error instanceof PageMissing) {
+        this.pageStore?.deleteCollection(scope, slug)
+        return null
+      }
+      throw error
+    }
   }
 
   private async buildCollection(slug: string): Promise<CollectionData> {
@@ -665,10 +714,17 @@ export class BeaconClient {
     let known = this.catalog?.collectionBySlug(slug) ?? null
     // A home block can feature a collection newer than the catalog snapshot.
     if (!known) {
-      await this.catalog?.refresh().catch(() => {})
+      try {
+        await this.catalog?.refresh()
+      } catch {
+        // The index could not be refreshed, which says nothing about whether
+        // the series exists. Keep the saved copy and let the screen report a
+        // failed refresh instead of treating it as a deletion.
+        throw new Error('Could not load series.')
+      }
       known = this.catalog?.collectionBySlug(slug) ?? null
     }
-    if (!known) throw new Error('Series not found.')
+    if (!known) throw new PageMissing('Series not found.')
     const level = await this.userLevel()
     const { email, marks } = await this.watchMarks()
 
@@ -756,10 +812,25 @@ export class BeaconClient {
     }
   }
 
-  async content(slug: string): Promise<ContentData> {
+  async content(slug: string): Promise<ContentData | null> {
     await this.settleReports()
-    const key = `${await this.scope()}|${slug}`
-    return this.contentCache.load(key, () => this.buildContent(slug))
+    const scope = await this.scope()
+    const generation = this.authGeneration
+    const feedGeneration = this.feedGeneration
+    try {
+      const data = await this.contentCache.load(`${scope}|${slug}`, () => this.buildContent(slug))
+      if (generation === this.authGeneration && feedGeneration === this.feedGeneration) {
+        this.pageStore?.saveContent(scope, data)
+      }
+      return data
+    } catch (error) {
+      // The episode is gone from the CMS; drop the copy instead of painting it.
+      if (error instanceof PageMissing) {
+        this.pageStore?.deleteContent(scope, slug)
+        return null
+      }
+      throw error
+    }
   }
 
   private async buildContent(slug: string): Promise<ContentData> {
@@ -783,7 +854,7 @@ export class BeaconClient {
     }>(Q.CONTENT, { slug })
 
     const doc = r.Contents?.docs?.[0]
-    if (!doc) throw new Error('Video not found.')
+    if (!doc) throw new PageMissing('Video not found.')
 
     this.catalog?.ensure().catch(() => {})
     const level = await this.userLevel()

@@ -23,6 +23,14 @@ export interface AsyncOptions<T> {
    * The load still runs, so the screen still refreshes.
    */
   initial?: T
+  /**
+   * A failed reload normally keeps what is on screen. When the error means the
+   * thing itself is gone (the CMS says the series no longer exists), holding a
+   * saved copy would resurrect it; drop it and let the screen show the error.
+   * The original error is passed, so a caller can use an error type rather
+   * than matching the message.
+   */
+  dropDataOnError?: (error: unknown) => boolean
 }
 
 export function useAsync<T>(
@@ -30,7 +38,7 @@ export function useAsync<T>(
   deps: unknown[],
   options: AsyncOptions<T> = {}
 ): AsyncState<T> {
-  const { keepData = false, initial } = options
+  const { keepData = false, initial, dropDataOnError } = options
   // A prepared value is data for this screen: hold it while the refresh runs.
   const holdData = keepData || initial !== undefined
   const [state, setState] = useState<AsyncState<T>>({
@@ -56,10 +64,12 @@ export function useAsync<T>(
       (err: unknown) => {
         if (cancelled) return
         const message = cleanError(err)
+        const gone = dropDataOnError?.(err) ?? false
         setState((previous) =>
           // A failed refresh must not throw away what the viewer is looking
           // at. The screen can say it could not refresh; it cannot un-show it.
-          holdData && previous.data !== null
+          // A page the CMS says is gone is the one exception.
+          holdData && previous.data !== null && !gone
             ? { data: previous.data, error: message, loading: false, refreshing: false }
             : { data: null, error: message, loading: false, refreshing: false }
         )

@@ -1,15 +1,21 @@
-import { useEffect, useRef, useState } from 'react'
-import type { Card } from '@shared/types'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Card, CollectionData } from '@shared/types'
 import { useAsync } from '../lib/useAsync'
+import { isPageMissing, PageMissingError } from '../lib/errors'
+import { pageCache } from '../lib/pages'
 import { focusFirst } from '../nav/focus'
 import { backdropUrl } from '../lib/images'
 import { Tile } from '../components/Tile'
 import { ScreenScroll } from '../components/ScreenScroll'
 import { FavouriteButton } from '../components/FavouriteButton'
-import { ErrorNote, Spinner } from '../components/ui'
+import { RefreshNote } from '../components/RefreshNote'
+import { SkeletonBlock, SkeletonStatus, SkeletonTiles } from '../components/Skeleton'
+import { ErrorNote } from '../components/ui'
 
 interface CollectionProps {
   slug: string
+  /** The tile that opened this page; its title and art carry the first paint. */
+  card?: Card
   onOpen: (card: Card) => void
   /** Bumped when playback ends or a watch mark lands; card progress is stale. */
   refreshKey?: number
@@ -20,20 +26,68 @@ interface CollectionProps {
   favouritePending?: boolean
 }
 
+function CollectionSkeleton({ card }: { card?: Card }): React.JSX.Element {
+  return (
+    <div className="screen screen--split" aria-busy="true">
+      <header className="page-head">
+        {card?.image ? (
+          <img
+            className="page-head__bg"
+            src={backdropUrl(card.image, card.image2x) ?? undefined}
+            alt=""
+          />
+        ) : null}
+        <div className="page-head__shade" />
+        <div className="page-head__body">
+          {card ? (
+            <>
+              <h1 className="page-head__title">{card.title}</h1>
+              <p className="page-head__sub">
+                {card.count ? `${card.count} videos` : 'Loading videos'}
+              </p>
+            </>
+          ) : (
+            <>
+              <SkeletonBlock className="skeleton--eyebrow" />
+              <SkeletonBlock className="skeleton--title" />
+              <SkeletonBlock className="skeleton--sub" />
+            </>
+          )}
+        </div>
+      </header>
+      <ScreenScroll>
+        <SkeletonTiles count={8} />
+      </ScreenScroll>
+      <SkeletonStatus label="Loading series" />
+    </div>
+  )
+}
+
 export function Collection({
   slug,
+  card,
   onOpen,
   refreshKey = 0,
   onToggleFavourite,
   inFavourites = false,
   favouritePending = false
 }: CollectionProps): React.JSX.Element | null {
-  // Keep the page on screen while it reloads: it is what the player uncovers,
-  // so blanking to the spinner would drop the grid and the focus inside it.
-  const { data, error, loading } = useAsync(
-    () => window.beacon.catalog.collection(slug),
+  // A page from this run or the last launch paints immediately. The request
+  // still runs, so the page is never treated as fresh; `keepData` leaves it on
+  // screen while that refresh is in flight.
+  const initial = useMemo(() => pageCache.collection(slug), [slug])
+  const { data, error, loading, refreshing } = useAsync(
+    async (): Promise<CollectionData> => {
+      const page = await window.beacon.catalog.collection(slug)
+      if (!page) {
+        pageCache.forgetCollection(slug)
+        throw new PageMissingError('Series not found.')
+      }
+      pageCache.rememberCollection(page)
+      return page
+    },
     [slug, refreshKey],
-    { keepData: true }
+    { keepData: true, initial: initial ?? undefined, dropDataOnError: isPageMissing }
   )
   const [seasonIndex, setSeasonIndex] = useState(0)
   const placed = useRef(false)
@@ -47,11 +101,7 @@ export function Collection({
   }, [data])
 
   if (loading && !data) {
-    return (
-      <div className="screen screen--center">
-        <Spinner label="Loading series" />
-      </div>
-    )
+    return <CollectionSkeleton card={card} />
   }
   if (error && !data) {
     return (
@@ -76,6 +126,7 @@ export function Collection({
 
   return (
     <div className="screen screen--split">
+      <RefreshNote refreshing={refreshing} error={error} hasData />
       <header className="page-head">
         {data.image ? (
           <img
@@ -123,8 +174,8 @@ export function Collection({
 
       <ScreenScroll>
         <div className="grid" data-focus-row>
-          {season?.items.map((card) => (
-            <Tile key={card.slug} card={card} onSelect={onOpen} />
+          {season?.items.map((item) => (
+            <Tile key={item.slug} card={item} onSelect={onOpen} />
           ))}
         </div>
       </ScreenScroll>

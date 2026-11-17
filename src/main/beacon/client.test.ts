@@ -3,6 +3,7 @@ import * as Q from './queries'
 import type { IndexedCollection, IndexedVideo } from './catalog-types'
 import type { CatalogLike } from './client'
 import type { HomeStore } from '../home-store'
+import type { PageStore } from '../page-store'
 import { BeaconClient, BeaconError, MARK_RETRIES } from './client'
 
 const net = vi.hoisted(() => ({ fetch: vi.fn() }))
@@ -712,7 +713,7 @@ describe('content', () => {
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos })
 
-    const content = await client.content('c1e5')
+    const content = (await client.content('c1e5'))!
 
     expect(content).toMatchObject({
       id: 'e5',
@@ -744,7 +745,7 @@ describe('content', () => {
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos })
 
-    const content = await client.content('c1e5')
+    const content = (await client.content('c1e5'))!
 
     expect(content.series).toEqual({
       slug: 'previously-on',
@@ -758,7 +759,7 @@ describe('content', () => {
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos })
 
-    const content = await client.content('c1e5')
+    const content = (await client.content('c1e5'))!
 
     expect(content.rows.map((row) => row.title)).toEqual([
       'Next episode',
@@ -778,7 +779,7 @@ describe('content', () => {
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos: versions })
 
-    const content = await client.content('c1e5')
+    const content = (await client.content('c1e5'))!
 
     expect(content.rows.map((row) => row.title)).toEqual([
       'Next episode',
@@ -798,7 +799,7 @@ describe('content', () => {
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos })
 
-    const content = await client.content('c1e8')
+    const content = (await client.content('c1e8'))!
 
     expect(content.rows.map((row) => row.title)).toEqual(['More from Campaign 1'])
     expect(content.rows[0].items.map((item) => item.slug)).toEqual([
@@ -818,7 +819,7 @@ describe('content', () => {
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos })
 
-    const content = await client.content('c1e5')
+    const content = (await client.content('c1e5'))!
 
     expect(content.locked).toBe(true)
     expect(content.signInNeeded).toBe(true)
@@ -837,7 +838,7 @@ describe('content', () => {
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos })
 
-    const content = await client.content('c1e5')
+    const content = (await client.content('c1e5'))!
 
     expect(content.resumeAt).toBe(0)
   })
@@ -855,7 +856,7 @@ describe('content', () => {
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos })
 
-    const content = await client.content('c1e5')
+    const content = (await client.content('c1e5'))!
 
     expect(content.resumeAt).toBe(3102)
   })
@@ -873,7 +874,7 @@ describe('content', () => {
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos })
 
-    const content = await client.content('c1e5')
+    const content = (await client.content('c1e5'))!
 
     expect(content.resumeAt).toBe(13_824)
   })
@@ -891,7 +892,7 @@ describe('content', () => {
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos })
 
-    const content = await client.content('c1e5')
+    const content = (await client.content('c1e5'))!
 
     expect(content.watched).toBe(false)
     expect(content.resumeAt).toBe(0)
@@ -915,7 +916,7 @@ describe('content', () => {
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos })
 
-    const content = await client.content('c1e5')
+    const content = (await client.content('c1e5'))!
 
     // The list badge is watched, so the page must offer to unmark it, not mark
     // it again, and must not offer to resume an almost-finished episode.
@@ -945,13 +946,13 @@ describe('content', () => {
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ videos })
 
-    const before = await client.content('c1e5')
+    const before = (await client.content('c1e5'))!
     expect(before.watched).toBe(false)
     expect(before.resumeAt).toBe(300)
 
     await client.markWatched('c1e5', true)
 
-    const after = await client.content('c1e5')
+    const after = (await client.content('c1e5'))!
     expect(after.watched).toBe(true)
     expect(after.resumeAt).toBe(0)
   })
@@ -1453,7 +1454,7 @@ describe('watch state', () => {
     const client = new BeaconClient()
     client.catalog = fakeCatalog({ collections: [collection] })
 
-    const data = await client.collection('campaign-1')
+    const data = (await client.collection('campaign-1'))!
 
     expect(data.seasons[0].items[0]).toMatchObject({
       slug: 'c1e1',
@@ -1465,6 +1466,119 @@ describe('watch state', () => {
       progress: 0.5,
       watched: false
     })
+  })
+
+  it('keeps a collection page and clears it on sign-out', async () => {
+    const collection: IndexedCollection = {
+      id: 's1',
+      slug: 'campaign-1',
+      name: 'Campaign 1',
+      isSeries: true,
+      itemCount: 1,
+      released: null,
+      image: null,
+      image2x: null,
+      portrait: null
+    }
+    routeCms({
+      [Q.ME]: () => MEMBER,
+      [Q.SERIES]: () => ({ fetchSeries: { docs: [{ content: cmsCard() }] } }),
+      [Q.PROGRESS_FOR]: () => ({ getProgressForContent: { timeMap: [] } })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ collections: [collection] })
+    const store = {
+      readAll: vi.fn(() => ({ collections: [], contents: [] })),
+      saveCollection: vi.fn(),
+      saveContent: vi.fn(),
+      deleteCollection: vi.fn(),
+      deleteContent: vi.fn(),
+      clear: vi.fn()
+    }
+    client.pageStore = store as unknown as PageStore
+
+    const data = (await client.collection('campaign-1'))!
+
+    expect(data).not.toBeNull()
+    expect(store.saveCollection).toHaveBeenCalledWith('member@example.com', expect.any(Object))
+    await client.signOut()
+    expect(store.clear).toHaveBeenCalledOnce()
+  })
+
+  it('keeps an episode page and clears it on sign-out', async () => {
+    routeCms({
+      [Q.ME]: () => MEMBER,
+      [Q.CONTENT]: () => ({
+        Contents: {
+          docs: [
+            cmsCard({
+              primaryCollection: {
+                id: 'c1',
+                name: 'One Shots',
+                slug: 'one-shots',
+                isSeries: false
+              }
+            })
+          ]
+        }
+      }),
+      [Q.PROGRESS_FOR]: () => ({ getProgressForContent: { timeMap: [] } })
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog()
+    const store = {
+      readAll: vi.fn(() => ({ collections: [], contents: [] })),
+      saveCollection: vi.fn(),
+      saveContent: vi.fn(),
+      deleteCollection: vi.fn(),
+      deleteContent: vi.fn(),
+      clear: vi.fn()
+    }
+    client.pageStore = store as unknown as PageStore
+
+    const data = (await client.content('c1e1'))!
+
+    expect(data).not.toBeNull()
+    expect(store.saveContent).toHaveBeenCalledWith('member@example.com', expect.any(Object))
+    await client.signOut()
+    expect(store.clear).toHaveBeenCalledOnce()
+  })
+
+  it('answers null and drops a saved collection the CMS no longer has', async () => {
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog()
+    const store = {
+      readAll: vi.fn(() => ({ collections: [], contents: [] })),
+      saveCollection: vi.fn(),
+      saveContent: vi.fn(),
+      deleteCollection: vi.fn(),
+      deleteContent: vi.fn(),
+      clear: vi.fn()
+    }
+    client.pageStore = store as unknown as PageStore
+
+    await expect(client.collection('missing')).resolves.toBeNull()
+    expect(store.deleteCollection).toHaveBeenCalledWith('member@example.com', 'missing')
+    expect(store.saveCollection).not.toHaveBeenCalled()
+  })
+
+  it('answers null and drops a saved episode the CMS no longer has', async () => {
+    routeCms({ [Q.CONTENT]: () => ({ Contents: { docs: [] } }) })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog()
+    const store = {
+      readAll: vi.fn(() => ({ collections: [], contents: [] })),
+      saveCollection: vi.fn(),
+      saveContent: vi.fn(),
+      deleteCollection: vi.fn(),
+      deleteContent: vi.fn(),
+      clear: vi.fn()
+    }
+    client.pageStore = store as unknown as PageStore
+
+    await expect(client.content('missing')).resolves.toBeNull()
+    expect(store.deleteContent).toHaveBeenCalledWith('member@example.com', 'missing')
+    expect(store.saveContent).not.toHaveBeenCalled()
   })
 
   it('refreshes the catalog when a block names a collection it has not seen', async () => {
@@ -1491,7 +1605,7 @@ describe('watch state', () => {
     const client = new BeaconClient()
     client.catalog = catalog
 
-    const data = await client.collection('new-series')
+    const data = (await client.collection('new-series'))!
 
     expect(catalog.refresh).toHaveBeenCalledOnce()
     expect(data).toMatchObject({ title: 'New Series', isSeries: true })
@@ -1885,7 +1999,7 @@ describe('watch state', () => {
     await client.reconcileMarks()
     expect(events).toHaveLength(capped)
 
-    const data = await client.collection('campaign-1')
+    const data = (await client.collection('campaign-1'))!
     expect(data.seasons[0].items[0]).toMatchObject({ progress: 0.4, watched: false })
   })
 
@@ -1964,7 +2078,7 @@ describe('watch state', () => {
 
     // The older choice must not roll that back, and must stop masking it.
     expect(events).toHaveLength(1)
-    const data = await client.collection('campaign-1')
+    const data = (await client.collection('campaign-1'))!
     expect(data.seasons[0].items[0]).toMatchObject({ progress: 0.4, watched: false })
   })
 
@@ -2156,7 +2270,7 @@ describe('watch state', () => {
     await client.reconcileMarks()
 
     expect(events).toHaveLength(1)
-    const data = await client.collection('campaign-1')
+    const data = (await client.collection('campaign-1'))!
     expect(data.seasons[0].items[0]).toMatchObject({ progress: 0.5, watched: false })
   })
 
@@ -2365,7 +2479,7 @@ describe('watch state', () => {
 
     // Beacon answers success but the read still says 50%; the mark must win.
     await client.markWatched('c1e1', true)
-    const data = await client.collection('campaign-1')
+    const data = (await client.collection('campaign-1'))!
 
     expect(data.seasons[0].items[0]).toMatchObject({
       slug: 'c1e1',
@@ -2403,7 +2517,7 @@ describe('watch state', () => {
     await client.markWatched('c1e1', true)
     await client.trackProgress('e1', 900, 3300)
 
-    const data = await client.collection('campaign-1')
+    const data = (await client.collection('campaign-1'))!
 
     expect(data.seasons[0].items[0]).toMatchObject({
       slug: 'c1e1',

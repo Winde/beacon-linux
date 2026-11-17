@@ -1,18 +1,23 @@
-import { useEffect, useRef, useState } from 'react'
-import type { Card } from '@shared/types'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Card, ContentData } from '@shared/types'
 import { useAsync } from '../lib/useAsync'
-import { cleanError } from '../lib/errors'
+import { cleanError, isPageMissing, PageMissingError } from '../lib/errors'
+import { pageCache } from '../lib/pages'
 import { focusFirst } from '../nav/focus'
 import { backdropUrl } from '../lib/images'
 import { Row } from '../components/Row'
 import { ScreenScroll } from '../components/ScreenScroll'
-import { ErrorNote, Spinner } from '../components/ui'
+import { RefreshNote } from '../components/RefreshNote'
+import { SkeletonBlock, SkeletonRows, SkeletonStatus } from '../components/Skeleton'
+import { ErrorNote } from '../components/ui'
 
 interface ContentProps {
   slug: string
+  /** The tile that opened this page; its title, art and runtime are known. */
+  card?: Card
   onOpen: (card: Card) => void
   /** Go up to the collection this episode is filed under, when the app can. */
-  onOpenSeries?: (slug: string) => void
+  onOpenSeries?: (slug: string, card?: Card) => void
   onPlay: (slug: string, startAt?: number) => void
   /** Open the sign-in screen; used when the video is locked to guests. */
   onSignIn?: () => void
@@ -34,8 +39,56 @@ const cleanText = (value: string): string =>
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 
+function ContentSkeleton({ card }: { card?: Card }): React.JSX.Element {
+  return (
+    <div className="screen screen--split" aria-busy="true">
+      <header className="page-head page-head--tall">
+        {card?.image ? (
+          <img
+            className="page-head__bg"
+            src={backdropUrl(card.image, card.image2x) ?? undefined}
+            alt=""
+          />
+        ) : null}
+        <div className="page-head__shade" />
+        <div className="page-head__body">
+          {card?.subtitle ? (
+            <p className="page-head__eyebrow">{card.subtitle}</p>
+          ) : (
+            <SkeletonBlock className="skeleton--eyebrow" />
+          )}
+          {card ? (
+            <h1 className="page-head__title">{card.title}</h1>
+          ) : (
+            <SkeletonBlock className="skeleton--title" />
+          )}
+          {card?.minutes ? (
+            <p className="page-head__sub">{card.minutes} min</p>
+          ) : (
+            <SkeletonBlock className="skeleton--sub" />
+          )}
+          <div className="skeleton-lines" aria-hidden>
+            <SkeletonBlock />
+            <SkeletonBlock />
+            <SkeletonBlock />
+          </div>
+          <div className="button-row" aria-hidden>
+            <SkeletonBlock className="skeleton-button" />
+            <SkeletonBlock className="skeleton-button skeleton-button--ghost" />
+          </div>
+        </div>
+      </header>
+      <ScreenScroll>
+        <SkeletonRows rows={2} tiles={6} />
+      </ScreenScroll>
+      <SkeletonStatus label="Loading episode" />
+    </div>
+  )
+}
+
 export function Content({
   slug,
+  card,
   onOpen,
   onOpenSeries,
   onPlay,
@@ -43,11 +96,20 @@ export function Content({
   refreshKey = 0,
   onWatchedChanged
 }: ContentProps): React.JSX.Element | null {
-  // Keep the page on screen while it reloads: it is what the player uncovers.
-  const { data, error, loading } = useAsync(
-    () => window.beacon.catalog.content(slug),
+  // The last copy of this page paints at once; the request confirms it behind.
+  const initial = useMemo(() => pageCache.content(slug), [slug])
+  const { data, error, loading, refreshing } = useAsync(
+    async (): Promise<ContentData> => {
+      const page = await window.beacon.catalog.content(slug)
+      if (!page) {
+        pageCache.forgetContent(slug)
+        throw new PageMissingError('Video not found.')
+      }
+      pageCache.rememberContent(page)
+      return page
+    },
     [slug, refreshKey],
-    { keepData: true }
+    { keepData: true, initial: initial ?? undefined, dropDataOnError: isPageMissing }
   )
   const placed = useRef(false)
   const wasLocked = useRef(false)
@@ -95,11 +157,7 @@ export function Content({
   }, [data])
 
   if (loading && !data) {
-    return (
-      <div className="screen screen--center">
-        <Spinner label="Loading episode" />
-      </div>
-    )
+    return <ContentSkeleton card={card} />
   }
   if (error && !data) {
     return (
@@ -112,21 +170,24 @@ export function Content({
 
   const resuming = data.resumeAt > 0
   const series = data.series
+  const seriesCard: Card | null = series
+    ? {
+        kind: 'series',
+        slug: series.slug,
+        title: series.title,
+        image: null,
+        image2x: null
+      }
+    : null
   const openSeries = (): void => {
-    if (!series) return
+    if (!seriesCard) return
     if (onOpenSeries) {
-      onOpenSeries(series.slug)
+      onOpenSeries(seriesCard.slug, seriesCard)
       return
     }
-    onOpen({
-      kind: 'series',
-      slug: series.slug,
-      title: series.title,
-      image: null,
-      image2x: null
-    })
+    onOpen(seriesCard)
   }
-  const seriesAction = series ? (
+  const seriesAction = seriesCard ? (
     <button
       type="button"
       className="button button--ghost"
@@ -135,7 +196,7 @@ export function Content({
       tabIndex={-1}
       onClick={openSeries}
     >
-      {series.isSeries ? 'View series' : 'View collection'}
+      {series?.isSeries ? 'View series' : 'View collection'}
     </button>
   ) : null
   const description = cleanText(data.description)
@@ -165,6 +226,7 @@ export function Content({
 
   return (
     <div className="screen screen--split">
+      <RefreshNote refreshing={refreshing} error={error} hasData />
       <header className="page-head page-head--tall">
         {data.image ? (
           <img

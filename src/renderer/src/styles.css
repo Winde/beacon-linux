@@ -211,7 +211,8 @@ kbd {
  * scroller whenever a screen has more rows. */
 .screen--split > .hero,
 .screen--split > .page-head,
-.screen--split > .tabs {
+.screen--split > .tabs,
+.screen--split > .hero-skeleton {
   flex: 0 0 auto;
 }
 
@@ -955,6 +956,141 @@ kbd {
   width: 100%;
 }
 
+/* ---------- skeletons ---------- */
+
+/*
+ * A page that has nothing cached still shows its shape: the real title and art
+ * from the tile that opened it, then blocks where the shelves will land. The
+ * shimmer is slow and low-contrast; it should read as "coming", not as motion.
+ */
+.skeleton {
+  display: block;
+  border-radius: 8px;
+  background: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0.045) 20%,
+    rgba(255, 255, 255, 0.095) 40%,
+    rgba(255, 255, 255, 0.045) 60%
+  );
+  background-size: 220% 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
+.hero-skeleton {
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 0 var(--gutter) 24px;
+}
+
+.skeleton--eyebrow {
+  width: 160px;
+  height: 12px;
+  margin-bottom: 12px;
+}
+
+.skeleton--title {
+  width: min(420px, 60%);
+  height: 38px;
+  margin-bottom: 14px;
+}
+
+.skeleton--sub {
+  width: 220px;
+  height: 14px;
+}
+
+.skeleton-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(560px, 70%);
+  margin: 6px 0 18px;
+}
+
+.skeleton-lines .skeleton {
+  height: 12px;
+}
+
+.skeleton-lines .skeleton:nth-child(2) {
+  width: 88%;
+}
+
+.skeleton-lines .skeleton:nth-child(3) {
+  width: 64%;
+}
+
+.skeleton-button {
+  width: 112px;
+  height: 48px;
+  border-radius: 999px;
+}
+
+.skeleton-button--ghost {
+  width: 150px;
+  opacity: 0.65;
+}
+
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 22px;
+  padding: 16px var(--gutter) 40px;
+}
+
+.skeleton-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeleton-grid .skeleton-tile {
+  width: 100%;
+}
+
+.skeleton-row .skeleton-tile {
+  flex: 0 0 auto;
+  width: var(--tile-w);
+}
+
+.skeleton-tile__art {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius);
+}
+
+.skeleton-tile__title {
+  width: 78%;
+  height: 14px;
+}
+
+.skeleton-tile__sub {
+  width: 46%;
+  height: 11px;
+}
+
+.skeleton-row__title {
+  width: 180px;
+  height: 18px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
 /* ---------- login ---------- */
 
 .login {
@@ -1283,6 +1419,51 @@ kbd {
   margin: 0 0 24px;
   color: var(--muted);
   line-height: 1.55;
+}
+
+/* The changelog keeps the dialog the same height whatever the release count.
+   Headings are focus stops, so a controller walks the list and the pane
+   scrolls to each; the wheel and a touchscreen work on their own. */
+.dialog__notes {
+  max-height: min(44vh, 380px);
+  margin: -4px 0 22px;
+  padding: 2px 14px 2px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--line);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
+}
+
+.dialog__notes-status {
+  margin: 14px 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.dialog__release {
+  padding: 14px 2px 2px;
+}
+
+.dialog__release + .dialog__release {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.dialog__release-title {
+  margin: 0 0 6px;
+  border-radius: 3px;
+  font-size: 0.98rem;
+  outline-offset: 4px;
+}
+
+.dialog__release-body {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .dialog__actions {

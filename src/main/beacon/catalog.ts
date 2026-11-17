@@ -330,8 +330,11 @@ export class Catalog implements CatalogLike {
     if (this.building) await this.building.catch(() => {})
     this.building = this.build()
       .catch((err: Error) => {
+        // A caller using this to tell "not in the index" from "the CMS could
+        // not be read" needs the failure; swallowing it would make a network
+        // error look like a deleted series.
         console.warn('[catalog] refresh failed:', err.message)
-        if (!this.snapshot) throw err
+        throw err
       })
       .finally(() => {
         this.building = null

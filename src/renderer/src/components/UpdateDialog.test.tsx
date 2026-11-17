@@ -7,9 +7,13 @@ import { UpdateDialog } from './UpdateDialog'
 beforeEach(() => {
   // Focus navigation scrolls what it focuses; jsdom has no layout engine.
   Element.prototype.scrollIntoView = vi.fn()
+  vi.stubGlobal('beacon', { updates: { notes: vi.fn(() => Promise.resolve([])) } })
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 function renderPrompt(
   prompt: UpdatePrompt,
@@ -94,5 +98,48 @@ describe('UpdateDialog', () => {
     renderPrompt({ name: 'failed', stage: 'check', reason: 'Could not reach GitHub.' })
 
     expect(screen.getByText("Couldn't check for updates")).toBeDefined()
+  })
+
+  it('lists the release notes between the running version and the offered one', async () => {
+    vi.stubGlobal('beacon', {
+      updates: {
+        notes: vi.fn(() =>
+          Promise.resolve([
+            { version: '0.2.0', notes: 'Player changes.' },
+            { version: '0.1.5', notes: 'Caption fix.' }
+          ])
+        )
+      }
+    })
+    renderPrompt({ name: 'available', current: '0.1.4', latest: '0.2.0', canInstall: true })
+
+    expect(await screen.findByRole('heading', { name: 'v0.2.0' })).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'v0.1.5' })).toBeDefined()
+    expect(screen.getByText('Player changes.')).toBeDefined()
+    expect(screen.getByText('Caption fix.')).toBeDefined()
+  })
+
+  it('keeps the install action when the notes cannot be loaded', async () => {
+    vi.stubGlobal('beacon', {
+      updates: { notes: vi.fn(() => Promise.reject(new Error('offline'))) }
+    })
+    const { onInstall } = renderPrompt({
+      name: 'available',
+      current: '0.1.4',
+      latest: '0.2.0',
+      canInstall: true
+    })
+
+    expect(await screen.findByText(/Release notes couldn't be loaded/)).toBeDefined()
+    fireEvent.click(screen.getByTestId('update-install'))
+    expect(onInstall).toHaveBeenCalledOnce()
+  })
+
+  it('does not ask for notes when no update is on offer', () => {
+    const notes = vi.fn(() => Promise.resolve([]))
+    vi.stubGlobal('beacon', { updates: { notes } })
+    renderPrompt({ name: 'current', version: '0.2.0' })
+
+    expect(notes).not.toHaveBeenCalled()
   })
 })

@@ -15,13 +15,15 @@ import { NavRail } from './components/NavRail'
 import { UpdateDialog, type UpdatePrompt } from './components/UpdateDialog'
 import { DelayedSpinner } from './components/ui'
 import { cleanError } from './lib/errors'
+import { pageCache } from './lib/pages'
 
 export type Route =
   | { name: 'login' }
   /** `feed` carries a home feed fetched while the sign-in panel was up. */
   | { name: 'home'; feed?: HomeData }
-  | { name: 'collection'; slug: string }
-  | { name: 'content'; slug: string }
+  /** `card` is the tile that opened the page, used to paint its header first. */
+  | { name: 'collection'; slug: string; card?: Card }
+  | { name: 'content'; slug: string; card?: Card }
   | { name: 'browse' }
   | { name: 'search' }
 
@@ -44,7 +46,12 @@ export interface Entry {
  * Search, must not end up duplicated when the viewer reaches one of its episodes
  * through search.
  */
-export function upToCollection(stack: Entry[], slug: string, nextId: () => number): Entry[] {
+export function upToCollection(
+  stack: Entry[],
+  slug: string,
+  nextId: () => number,
+  card?: Card
+): Entry[] {
   const previous = stack[stack.length - 2]
   if (previous?.route.name === 'collection' && previous.route.slug === slug) {
     return stack.slice(0, -1)
@@ -53,7 +60,7 @@ export function upToCollection(stack: Entry[], slug: string, nextId: () => numbe
   const withoutExisting = stack.filter(
     (entry) => !(entry.route.name === 'collection' && entry.route.slug === slug)
   )
-  return [...withoutExisting, { id: nextId(), route: { name: 'collection', slug } }]
+  return [...withoutExisting, { id: nextId(), route: { name: 'collection', slug, card } }]
 }
 
 /**
@@ -117,15 +124,15 @@ export default function App(): React.JSX.Element {
 
   const openCard = useCallback(
     (card: Card) => {
-      if (card.kind === 'series') push({ name: 'collection', slug: card.slug })
-      else push({ name: 'content', slug: card.slug })
+      if (card.kind === 'series') push({ name: 'collection', slug: card.slug, card })
+      else push({ name: 'content', slug: card.slug, card })
     },
     [push]
   )
 
   /** The episode page's series link is an "up" move, not a new stack level. */
-  const openSeriesUp = useCallback((slug: string) => {
-    setStack((current) => upToCollection(current, slug, () => nextId.current++))
+  const openSeriesUp = useCallback((slug: string, card?: Card) => {
+    setStack((current) => upToCollection(current, slug, () => nextId.current++, card))
   }, [])
 
   const play = useCallback((slug: string, startAt?: number) => {
@@ -237,6 +244,7 @@ export default function App(): React.JSX.Element {
         // Invalidate a favourite read that may still be in flight for the
         // account status() just signed out of.
         favouriteSeq.current += 1
+        pageCache.clear()
         setSignedIn(false)
         setFavourites(EMPTY_FAVOURITES)
         // Anything behind the account screen still holds signed-in rows.
@@ -282,6 +290,7 @@ export default function App(): React.JSX.Element {
       // Storage can be unavailable; the session itself is already gone.
     }
     bootFeed.current = null
+    pageCache.clear()
     setSignedIn(false)
     reset({ name: 'login' })
     pendingCounts.current.clear()
@@ -443,13 +452,17 @@ export default function App(): React.JSX.Element {
         // The first screen is chosen from local data only: the stored session,
         // the last feed on disk, and any deep link. None of these touches the
         // network, so a slow `meMember` cannot hold the app on a spinner.
-        const [session, slug, cached, cachedRow] = await Promise.all([
+        const [session, slug, cached, cachedRow, pages] = await Promise.all([
           window.beacon.auth.session(),
           window.beacon.app.initialSlug(),
           window.beacon.catalog.cachedHome().catch(() => null),
-          window.beacon.favourites.cached().catch(() => null)
+          window.beacon.favourites.cached().catch(() => null),
+          window.beacon.catalog.cachedPages().catch(() => null)
         ])
         if (cancelled) return
+        // Fill the screen cache before the first route renders, so a deep link
+        // or a page reopened after a relaunch can paint on its first frame.
+        if (pages) pageCache.load(pages)
         setSignedIn(session.signedIn)
         // Both halves of Home come from the same cached slot, so the
         // Favourites row does not pop in after the first paint.
@@ -613,6 +626,9 @@ export default function App(): React.JSX.Element {
           <Login
             onSignedIn={() => {
               bootFeed.current = null
+              // Pages cached for the guest or the previous account must not
+              // appear under the account that just signed in.
+              pageCache.clear()
               setSignedIn(true)
               // The session now names the account, so swap in its favourites.
               void loadFavourites()
@@ -656,6 +672,7 @@ export default function App(): React.JSX.Element {
         return (
           <Collection
             slug={route.slug}
+            card={route.card}
             onOpen={openCard}
             refreshKey={progressVersion}
             onToggleFavourite={signedIn ? toggleFavourite : undefined}
@@ -667,6 +684,7 @@ export default function App(): React.JSX.Element {
         return (
           <Content
             slug={route.slug}
+            card={route.card}
             onOpen={openCard}
             onOpenSeries={openSeriesUp}
             onPlay={play}

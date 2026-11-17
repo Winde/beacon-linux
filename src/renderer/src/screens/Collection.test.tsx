@@ -3,12 +3,14 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Card, CollectionData } from '@shared/types'
 import { focusFirst } from '../nav/focus'
+import { pageCache } from '../lib/pages'
 import { Collection } from './Collection'
 
 vi.mock('../nav/focus', () => ({ focusFirst: vi.fn() }))
 
 afterEach(() => {
   cleanup()
+  pageCache.clear()
   vi.unstubAllGlobals()
 })
 
@@ -35,7 +37,7 @@ function collectionData(overrides: Partial<CollectionData> = {}): CollectionData
 }
 
 function stubCollection(
-  result: CollectionData | Promise<CollectionData>
+  result: CollectionData | null | Promise<CollectionData | null>
 ): ReturnType<typeof vi.fn> {
   const collection = vi.fn(() => Promise.resolve(result))
   vi.stubGlobal('beacon', { catalog: { collection } })
@@ -43,12 +45,31 @@ function stubCollection(
 }
 
 describe('Collection', () => {
-  it('shows the loader while the collection loads', () => {
+  it('shows the skeleton while the collection loads', () => {
     stubCollection(new Promise<CollectionData>(() => {}))
     render(<Collection slug="campaign-1" onOpen={vi.fn()} />)
 
     expect(screen.getByRole('status')).toBeDefined()
     expect(screen.getByText('Loading series')).toBeDefined()
+  })
+
+  it('paints a saved page before the request answers', () => {
+    pageCache.rememberCollection(collectionData())
+    stubCollection(new Promise<CollectionData>(() => {}))
+    render(<Collection slug="campaign-1" onOpen={vi.fn()} />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Campaign 1' })).toBeDefined()
+    expect(screen.getByText('Episode 2')).toBeDefined()
+    expect(screen.queryByText('Loading series')).toBeNull()
+  })
+
+  it('drops a saved page the CMS no longer has', async () => {
+    pageCache.rememberCollection(collectionData())
+    stubCollection(null)
+    render(<Collection slug="campaign-1" onOpen={vi.fn()} />)
+
+    expect(await screen.findByText('Series not found.')).toBeDefined()
+    expect(pageCache.collection('campaign-1')).toBeNull()
   })
 
   it('shows a clean error from the main process', async () => {

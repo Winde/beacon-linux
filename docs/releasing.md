@@ -135,7 +135,12 @@ menu keeps it current: it asks GitHub for the latest stable release
 (`releases/latest`, so pre-releases are never offered), downloads the
 `Beacon-<version>-x86_64.AppImage` asset beside the running file, verifies it
 against that release's `SHA256SUMS.txt`, atomically replaces the AppImage and
-relaunches. Renaming the verified download over the AppImage path does not
+relaunches. The confirmation dialog also lists the notes of every stable
+release between the running version and the offered one, newest first. Those
+come from the releases list (`releases?per_page=100`), read when the dialog
+opens and cached in the app for as long as that release is pending; a body
+that is empty, or a list that cannot be read, only loses the notes, never the
+update. Renaming the verified download over the AppImage path does not
 disturb the running process: it keeps the file it already opened, the next
 launch starts the new one, and progress is flushed on the quit that happens
 first. A build that is not a writable AppImage (a dev checkout, or an AppImage
@@ -173,5 +178,5 @@ separate Flathub repository.
 - [ ] AppImage installs and plays a video on a Steam Machine
 - [ ] Tag matches `package.json` exactly (`v` prefix)
 - [ ] Release created; pre-release checkbox matches the tag suffix
-- [ ] Release notes read sensibly
+- [ ] Release notes read sensibly in the update dialog
 - [ ] Run finished; assets and `SHA256SUMS.txt` are on the release

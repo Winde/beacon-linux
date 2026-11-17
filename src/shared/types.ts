@@ -195,6 +195,15 @@ export interface BrowseData {
   collections: Card[]
 }
 
+/**
+ * The collection and episode pages the last launch left behind, for a first
+ * paint before any request. Both lists are account-specific and bounded.
+ */
+export interface CachedPages {
+  collections: CollectionData[]
+  contents: ContentData[]
+}
+
 export interface IndexStatus {
   videos: number
   collections: number
@@ -225,6 +234,14 @@ export interface UpdateInfo {
   canInstall: boolean
 }
 
+/** One release's notes, for the changelog shown before an update. */
+export interface ReleaseNote {
+  /** The version the notes belong to, without a leading `v`. */
+  version: string
+  /** The release body as GitHub stores it (Markdown), empty when there is none. */
+  notes: string
+}
+
 export interface BeaconApi {
   auth: {
     /** The stored session alone: local, no network, no token refresh. */
@@ -241,9 +258,13 @@ export interface BeaconApi {
      * when there is none, it belongs to another account, or its version is old.
      */
     cachedHome(): Promise<HomeData | null>
+    /** Last launch's collection and episode pages for this account. */
+    cachedPages(): Promise<CachedPages>
     browse(): Promise<BrowseData>
-    collection(slug: string): Promise<CollectionData>
-    content(slug: string): Promise<ContentData>
+    /** Null when the CMS no longer has this series/collection. */
+    collection(slug: string): Promise<CollectionData | null>
+    /** Null when the CMS no longer has this episode. */
+    content(slug: string): Promise<ContentData | null>
     search(query: string): Promise<SearchData>
     suggest(query: string): Promise<string[]>
   }
@@ -289,6 +310,12 @@ export interface BeaconApi {
    */
   updates: {
     check(): Promise<UpdateInfo>
+    /**
+     * Notes for every stable release between the running version and the one
+     * a check found, newest first. Read when the dialog opens, and cached in
+     * the main process for as long as that release is pending.
+     */
+    notes(): Promise<ReleaseNote[]>
     install(): Promise<void>
   }
 }

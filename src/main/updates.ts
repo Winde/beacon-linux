@@ -12,7 +12,7 @@ import {
 import { dirname } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import type { UpdateInfo } from '@shared/types'
+import type { ReleaseNote, UpdateInfo } from '@shared/types'
 
 /**
  * Updates come from GitHub Releases, the only channel the app has. The AppImage
@@ -23,6 +23,7 @@ import type { UpdateInfo } from '@shared/types'
 export const RELEASES_REPO = 'Winde/beacon-linux'
 export const RELEASES_PAGE = `https://github.com/${RELEASES_REPO}/releases`
 const LATEST_RELEASE_API = `https://api.github.com/repos/${RELEASES_REPO}/releases/latest`
+const RELEASES_API = `https://api.github.com/repos/${RELEASES_REPO}/releases?per_page=100`
 const DOWNLOAD_PREFIX = `${RELEASES_PAGE}/download/`
 const CHECKSUMS_NAME = 'SHA256SUMS.txt'
 /** GitHub's API rejects requests without a user agent. */
@@ -160,6 +161,44 @@ export function parseRelease(value: unknown): Release {
   return { version, assets }
 }
 
+/**
+ * The notes of every stable release newer than `current`, newest first.
+ *
+ * The list endpoint, unlike `releases/latest`, includes pre-releases, so the
+ * filter is what keeps a beta out of the changelog for a stable update. A tag
+ * that is not a version (or a body GitHub did not send) is skipped rather than
+ * failing the list: the update itself does not depend on either.
+ *
+ * The list is capped at 100 releases. A checkout older than that page's tail
+ * gets the notes it can see; the dialog never claims to have the whole range.
+ */
+export function parseReleaseNotes(value: unknown, current: string, latest: string): ReleaseNote[] {
+  if (!Array.isArray(value)) throw new Error('GitHub sent unexpected release data')
+
+  const notes: ReleaseNote[] = []
+  for (const entry of value as unknown[]) {
+    if (!entry || typeof entry !== 'object') continue
+    const release = entry as {
+      tag_name?: unknown
+      body?: unknown
+      prerelease?: unknown
+      draft?: unknown
+    }
+    if (release.prerelease === true || release.draft === true) continue
+    const version =
+      typeof release.tag_name === 'string' ? release.tag_name.trim().replace(/^v/, '') : ''
+    if (!parseVersion(version)) continue
+    if (compareVersions(version, current) <= 0 || compareVersions(version, latest) > 0) continue
+    notes.push({
+      version,
+      notes: typeof release.body === 'string' ? release.body.trim() : ''
+    })
+  }
+
+  // GitHub lists releases by creation date; tags can be published out of order.
+  return notes.sort((a, b) => compareVersions(b.version, a.version))
+}
+
 /** The expected hash for `name` in a `sha256sum *` file, or null. */
 export function checksumFor(sums: string, name: string): string | null {
   for (const line of sums.split(/\r?\n/)) {
@@ -228,6 +267,8 @@ export interface UpdaterOptions {
 export class Updater {
   /** The release a check found, kept so install does not check twice. */
   private pending: Release | null = null
+  /** Notes for `pending`, fetched once when the dialog first asks for them. */
+  private notesRequest: Promise<ReleaseNote[]> | null = null
 
   constructor(private readonly options: UpdaterOptions) {}
 
@@ -236,7 +277,7 @@ export class Updater {
     let response: UpdateResponse
     try {
       response = await this.options.fetch(LATEST_RELEASE_API, {
-        headers: { ...API_HEADERS, 'user-agent': `${API_HEADERS['user-agent']} ${current}` },
+        headers: this.headers(current),
         signal: AbortSignal.timeout(CHECK_TIMEOUT_MS)
       })
     } catch {
@@ -258,6 +299,9 @@ export class Updater {
     }
     const release = parseRelease(json)
     const available = compareVersions(release.version, current) > 0
+    // Notes belong to the release that was pending; a different one (or none)
+    // invalidates them, so the next dialog fetches a matching changelog.
+    if (release.version !== this.pending?.version) this.notesRequest = null
     this.pending = available ? release : null
     return {
       current,
@@ -265,6 +309,25 @@ export class Updater {
       available,
       canInstall: available && this.options.appImage() !== null
     }
+  }
+
+  /**
+   * The notes of every release between the running version and the pending
+   * one, newest first. One request, cached for the life of that release:
+   * closing the dialog and opening it again must not spend quota again.
+   */
+  async notes(): Promise<ReleaseNote[]> {
+    const release = this.pending
+    if (!release) return []
+    if (!this.notesRequest) {
+      const request = this.fetchNotes(release.version).catch((error: unknown) => {
+        // A failed load is not an answer: reopening the dialog tries again.
+        if (this.notesRequest === request) this.notesRequest = null
+        throw error
+      })
+      this.notesRequest = request
+    }
+    return this.notesRequest
   }
 
   /**
@@ -312,7 +375,45 @@ export class Updater {
       throw error
     }
     this.pending = null
+    this.notesRequest = null
     return target
+  }
+
+  private headers(current: string): Record<string, string> {
+    return { ...API_HEADERS, 'user-agent': `${API_HEADERS['user-agent']} ${current}` }
+  }
+
+  /**
+   * The releases page is the only endpoint that returns notes for more than
+   * one release at a time; GraphQL could ask for fewer fields but needs a
+   * token, and the Atom feed keeps no history beyond its latest entries.
+   */
+  private async fetchNotes(latest: string): Promise<ReleaseNote[]> {
+    const current = this.options.currentVersion()
+    let response: UpdateResponse
+    try {
+      response = await this.options.fetch(RELEASES_API, {
+        headers: this.headers(current),
+        signal: AbortSignal.timeout(CHECK_TIMEOUT_MS)
+      })
+    } catch {
+      throw new Error('Could not reach GitHub. Check the connection and try again.')
+    }
+    if (!response.ok) {
+      throw new Error(
+        response.status === 404
+          ? 'No release has been published yet.'
+          : `GitHub answered ${response.status}. Try again later.`
+      )
+    }
+
+    let json: unknown
+    try {
+      json = await response.json()
+    } catch {
+      throw new Error('GitHub sent unexpected release data')
+    }
+    return parseReleaseNotes(json, current, latest)
   }
 
   private async download(url: string, destination: string): Promise<void> {
