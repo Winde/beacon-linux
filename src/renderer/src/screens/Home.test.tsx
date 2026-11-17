@@ -104,6 +104,15 @@ describe('Home', () => {
     expect(await screen.findByText('Network down')).toBeDefined()
   })
 
+  it('keeps the cached feed on screen when its refresh fails', async () => {
+    stubHome(Promise.reject(new Error('Network down')))
+    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} initial={homeData()} />)
+
+    expect(await screen.findByText("Couldn't refresh — saved copy")).toBeDefined()
+    expect(screen.getByRole('heading', { level: 1, name: 'Featured One' })).toBeDefined()
+    expect(screen.queryByText('Network down')).toBeNull()
+  })
+
   it('shows the first featured card and the rows', async () => {
     stubHome(homeData())
     render(<Home onOpen={vi.fn()} onPlay={vi.fn()} />)

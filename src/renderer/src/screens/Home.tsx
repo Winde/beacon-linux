@@ -6,6 +6,7 @@ import { useAsync } from '../lib/useAsync'
 import { backdropUrl, preloadAll } from '../lib/images'
 import { focusFirst } from '../nav/focus'
 import { Hero } from '../components/Hero'
+import { RefreshNote } from '../components/RefreshNote'
 import { Row } from '../components/Row'
 import { ScreenScroll } from '../components/ScreenScroll'
 import { ErrorNote, Spinner } from '../components/ui'
@@ -47,14 +48,33 @@ export function Home({
   // After sign-in there is no previous feed yet, so the app passes the one it
   // fetched while the sign-in panel was still up, and this screen never blanks
   // to a spinner of its own.
-  const { data, error, loading } = useAsync(() => window.beacon.catalog.home(), [refreshKey], {
-    keepData: true,
-    initial
-  })
+  // Coming back online, or back to the window, is the moment a cached feed is
+  // most likely to be out of date. Both re-run the same held-data load.
+  const [retry, setRetry] = useState(0)
+  const { data, error, loading, refreshing } = useAsync(
+    () => window.beacon.catalog.home(),
+    [refreshKey, retry],
+    { keepData: true, initial }
+  )
   // The hero previews whatever the player is pointing at, so the backdrop
   // changes as focus moves rather than staying on the first featured item.
   const [preview, setPreview] = useState<Card | null>(null)
   const placed = useRef(false)
+
+  useEffect(() => {
+    const again = (): void => setRetry((count) => count + 1)
+    const visible = (): void => {
+      if (!document.hidden) again()
+    }
+    window.addEventListener('online', again)
+    window.addEventListener('focus', again)
+    document.addEventListener('visibilitychange', visible)
+    return () => {
+      window.removeEventListener('online', again)
+      window.removeEventListener('focus', again)
+      document.removeEventListener('visibilitychange', visible)
+    }
+  }, [])
 
   // Home ships its shelves in editorial order. Favourites is ours, so it is
   // dropped in after a named shelf rather than at an index that would drift
@@ -112,14 +132,14 @@ export function Home({
     })
   }, [data, favourites])
 
-  if (loading) {
+  if (loading && !data) {
     return (
       <div className="screen screen--center">
         <Spinner label="Loading Beacon" />
       </div>
     )
   }
-  if (error) {
+  if (error && !data) {
     return (
       <div className="screen screen--center">
         <ErrorNote>{error}</ErrorNote>
@@ -132,6 +152,7 @@ export function Home({
 
   return (
     <div className="screen screen--split">
+      <RefreshNote refreshing={refreshing} error={error} hasData />
       {featured ? (
         <Hero
           card={featured}

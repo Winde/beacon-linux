@@ -13,16 +13,20 @@ import { indexedCollectionCard } from './beacon/cards'
 import { credentialStorage } from './beacon/session'
 import { FavouritesService } from './favourites'
 import { fetchCaptionFile, fetchMasterPlaylist } from './hls'
+import { HomeStore } from './home-store'
 import { PreferencesStore, preferencesPath } from './preferences'
 import { currentAppImage, relaunchArgs, Updater } from './updates'
 
 export const client = new BeaconClient()
 export const catalog = new Catalog(client)
 client.catalog = catalog
+export const homeStore = new HomeStore(() => app.getPath('userData'))
+client.homeStore = homeStore
 export const favourites = new FavouritesService(
   client,
   catalog,
-  new PreferencesStore(() => preferencesPath(app.getPath('userData')))
+  new PreferencesStore(() => preferencesPath(app.getPath('userData'))),
+  homeStore
 )
 const updater = new Updater({
   currentVersion: () => app.getVersion(),
@@ -33,6 +37,7 @@ const updater = new Updater({
 })
 
 export function registerIpc(): void {
+  ipcMain.handle('auth:session', () => client.session())
   ipcMain.handle('auth:status', () => client.status())
   ipcMain.handle('auth:signIn', (_event, email: string, password: string) =>
     client.signIn(email, password)
@@ -41,6 +46,7 @@ export function registerIpc(): void {
   ipcMain.handle('auth:storage', () => credentialStorage())
 
   ipcMain.handle('catalog:home', () => client.home())
+  ipcMain.handle('catalog:cachedHome', () => client.cachedHome())
   ipcMain.handle('catalog:browse', async (): Promise<BrowseData> => {
     await catalog.ensure()
     const all = catalog.allCollections()
@@ -62,6 +68,7 @@ export function registerIpc(): void {
   ipcMain.handle('catalog:search', (_event, query: string) => client.search(query))
   ipcMain.handle('catalog:suggest', (_event, query: string) => client.suggest(query))
 
+  ipcMain.handle('favourites:cached', () => client.cachedFavourites())
   ipcMain.handle('favourites:list', () => favourites.list())
   ipcMain.handle('favourites:add', (_event, card: Card) => favourites.add(card))
   ipcMain.handle('favourites:remove', (_event, slug: string) => favourites.remove(slug))

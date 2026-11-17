@@ -12,6 +12,16 @@ export interface AuthStatus {
 }
 
 /**
+ * What the stored session says without asking the account. Enough to choose
+ * the first screen and the cache slot; `AuthStatus` still confirms it.
+ */
+export interface SessionInfo {
+  signedIn: boolean
+  /** The account the session belongs to, or null for a guest. */
+  email: string | null
+}
+
+/**
  * Where the main process can keep a session. `plaintext` means Linux selected
  * safeStorage's `basic_text` backend: the session is saved, but only
  * obfuscated. `unavailable` means there is nowhere to keep it.
@@ -217,6 +227,8 @@ export interface UpdateInfo {
 
 export interface BeaconApi {
   auth: {
+    /** The stored session alone: local, no network, no token refresh. */
+    session(): Promise<SessionInfo>
     status(): Promise<AuthStatus>
     signIn(email: string, password: string): Promise<AuthStatus>
     signOut(): Promise<void>
@@ -224,6 +236,11 @@ export interface BeaconApi {
   }
   catalog: {
     home(): Promise<HomeData>
+    /**
+     * Last launch's feed for the current account, for the first paint. Null
+     * when there is none, it belongs to another account, or its version is old.
+     */
+    cachedHome(): Promise<HomeData | null>
     browse(): Promise<BrowseData>
     collection(slug: string): Promise<CollectionData>
     content(slug: string): Promise<ContentData>
@@ -235,6 +252,8 @@ export interface BeaconApi {
    * nobody is signed in. The row's position on Home is the one local part.
    */
   favourites: {
+    /** Last launch's row for this account, read before the first paint. */
+    cached(): Promise<FavouritesData | null>
     list(): Promise<FavouritesData>
     add(card: Card): Promise<FavouritesData>
     remove(slug: string): Promise<FavouritesData>

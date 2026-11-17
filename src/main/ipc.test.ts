@@ -86,6 +86,16 @@ vi.mock('./beacon/catalog', () => ({
   })
 }))
 vi.mock('./hls', () => ({ fetchMasterPlaylist: vi.fn(), fetchCaptionFile: vi.fn() }))
+vi.mock('./home-store', () => ({
+  HomeStore: vi.fn(function () {
+    return {
+      read: vi.fn(() => null),
+      saveHome: vi.fn(),
+      saveFavourites: vi.fn(),
+      clear: vi.fn()
+    }
+  })
+}))
 vi.mock('./updates', () => ({
   Updater: vi.fn(function () {
     return glue.updater

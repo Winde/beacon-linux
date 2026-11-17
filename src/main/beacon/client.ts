@@ -4,12 +4,14 @@ import type {
   Card,
   CollectionData,
   ContentData,
+  FavouritesData,
   HomeData,
   NextEpisode,
   NextEpisodeRequest,
   PlaybackData,
   Row,
   SearchData,
+  SessionInfo,
   WatchState
 } from '@shared/types'
 import { loadSession, saveSession, type Session } from './session'
@@ -24,6 +26,7 @@ import { captionsOf, closingStretch, indexedVideoCard, minutes, videoCard } from
 import type { CmsCard, ProgressInfo } from './cms-types'
 import { buildHome } from './home'
 import { PLATFORM } from './platform'
+import type { HomeStore } from '../home-store'
 
 const CMS_URL = 'https://critrole-beacon-production-backend.clockhosting.com/api/graphql'
 const OAUTH_URL = 'https://pocketbeacon.memberful.com/oauth/token'
@@ -41,6 +44,15 @@ const API_TIMEOUT = 30_000
 export class BeaconError extends Error {
   status?: number
   rejected?: boolean
+}
+
+/** The `meMember` fields this client reads. */
+interface Member {
+  user?: {
+    username?: string
+    activeSubscription?: boolean
+    tier?: { name?: string; planLevel?: number } | null
+  }
 }
 
 /** The parts of the catalog index this client needs. */
@@ -104,6 +116,10 @@ export class BeaconClient {
   private sessionState: Session | null | undefined = undefined
   private sessionLoad: Promise<Session | null> | null = null
   private refreshing: Promise<string | null> | null = null
+  /** One `meMember` query, shared by account status and the feed's tier read. */
+  private memberLoad: Promise<Member | null> | null = null
+  /** The answer stays useful for a while; the tier changes even less often. */
+  private memberCache: { at: number; value: Member | null } | null = null
   private level: { at: number; value: number } | null = null
   private sessionId = 'linux-' + Math.random().toString(36).slice(2, 10)
   /** Explicit marks, kept per account until real playback supersedes them. */
@@ -115,6 +131,13 @@ export class BeaconClient {
   // and most answers stay right for minutes. The keys carry the account, and
   // everything is dropped when the account changes.
   private readonly homeCache = new TtlCache<string, HomeData>(60_000, 4)
+  /**
+   * The last feed on disk. Unlike the TTL cache above, this survives a quit,
+   * which is what lets the next launch paint before the first request.
+   */
+  homeStore: HomeStore | null = null
+  /** Bumped when the account changes, so an old fetch cannot write the slot. */
+  private authGeneration = 0
   /** Five minutes: series cards show progress, so shorter is more accurate. */
   private readonly collectionCache = new TtlCache<string, CollectionData>(5 * 60_000, 40)
   private readonly contentCache = new TtlCache<string, ContentData>(10 * 60_000, 40)
@@ -143,6 +166,12 @@ export class BeaconClient {
   }
 
   private clearCaches(): void {
+    // A feed from the previous account must not survive sign-out or a switch,
+    // even if the file delete fails: the read is scoped as well.
+    this.authGeneration += 1
+    this.memberLoad = null
+    this.memberCache = null
+    this.homeStore?.clear()
     this.homeCache.clear()
     this.collectionCache.clear()
     this.contentCache.clear()
@@ -188,6 +217,18 @@ export class BeaconClient {
   async isSignedIn(): Promise<boolean> {
     const session = await this.currentSession()
     return Boolean(session?.accessToken && session.refreshToken)
+  }
+
+  /**
+   * The stored session alone. No CMS call and no token refresh: the first
+   * screen and the cache slot cannot wait on the network.
+   */
+  async session(): Promise<SessionInfo> {
+    const session = await this.currentSession()
+    return {
+      signedIn: Boolean(session?.accessToken && session.refreshToken),
+      email: session?.email ?? null
+    }
   }
 
   /**
@@ -265,20 +306,56 @@ export class BeaconClient {
     this.clearCaches()
   }
 
+  /**
+   * The `meMember` answer, once per burst. The first screen no longer waits
+   * for `status()`, so the account check and the feed's tier read now race;
+   * they share this promise instead of asking the CMS the same question twice.
+   */
+  private member(): Promise<Member | null> {
+    // A fast answer can beat the second caller to the promise, so the result
+    // is kept briefly as well as shared while in flight.
+    if (this.memberCache && Date.now() - this.memberCache.at < LEVEL_TTL) {
+      return Promise.resolve(this.memberCache.value)
+    }
+    if (!this.memberLoad) {
+      const generation = this.authGeneration
+      const pending = this.gql<{ meMember?: Member }>(Q.ME)
+        .then((r) => {
+          const member = r.meMember ?? null
+          // A sign-out while this was in flight must not refill the next
+          // account's cache with the previous member's tier.
+          if (generation === this.authGeneration) {
+            this.memberCache = { at: Date.now(), value: member }
+          }
+          return member
+        })
+        .finally(() => {
+          // Only retire our own entry: a sign-in may have put a new query here.
+          if (this.memberLoad === pending) this.memberLoad = null
+        })
+      this.memberLoad = pending
+    }
+    return this.memberLoad
+  }
+
   async status(): Promise<AuthStatus> {
     const session = await this.currentSession()
     if (!session) return { signedIn: false, user: null }
+    const generation = this.authGeneration
     try {
-      const r = await this.gql<{
-        meMember?: {
-          user?: {
-            username?: string
-            activeSubscription?: boolean
-            tier?: { name?: string; planLevel?: number } | null
-          }
+      const member = await this.member()
+      // The account may have changed while the query was in flight. Do not
+      // report the previous member's name or tier, and do not repopulate the
+      // level cache the sign-out just cleared.
+      if (generation !== this.authGeneration) {
+        const current = await this.currentSession()
+        if (!current) return { signedIn: false, user: null }
+        return {
+          signedIn: true,
+          user: { name: current.email || 'Member', tier: null, active: true }
         }
-      }>(Q.ME)
-      const user = r.meMember?.user
+      }
+      const user = member?.user
       // Home and the screens ask for the level straight after boot; this saves
       // a second ME query and answers it with what status() already learned.
       this.level = { at: Date.now(), value: user?.tier?.planLevel ?? 1 }
@@ -376,11 +453,12 @@ export class BeaconClient {
   private async userLevel(): Promise<number> {
     if (!(await this.currentSession())) return 1
     if (this.level && Date.now() - this.level.at < LEVEL_TTL) return this.level.value
-    const r = await this.gql<{
-      meMember?: { user?: { tier?: { planLevel?: number } | null } }
-    }>(Q.ME).catch(() => null)
-    const value = r?.meMember?.user?.tier?.planLevel ?? 1
-    this.level = { at: Date.now(), value }
+    const generation = this.authGeneration
+    const member = await this.member().catch(() => null)
+    const value = member?.user?.tier?.planLevel ?? 1
+    // A level read that started before a sign-out must not refill the cache
+    // for the account that just left.
+    if (generation === this.authGeneration) this.level = { at: Date.now(), value }
     return value
   }
 
@@ -530,7 +608,23 @@ export class BeaconClient {
 
   // ---------- screens ----------
 
+  /**
+   * The feed for the first paint, scoped to the session in hand. A file that
+   * belongs to another account (or an older schema) is deleted on the way out.
+   */
+  async cachedHome(): Promise<HomeData | null> {
+    if (!this.homeStore) return null
+    return this.homeStore.read(await this.scope())?.home ?? null
+  }
+
+  /** The Favourites row from the same slot, for the same first paint. */
+  async cachedFavourites(): Promise<FavouritesData | null> {
+    if (!this.homeStore) return null
+    return this.homeStore.read(await this.scope())?.favourites ?? null
+  }
+
   async home(): Promise<HomeData> {
+    const generation = this.authGeneration
     await this.settleReports()
     const key = await this.scope()
     const data = await this.homeCache.load(key, () =>
@@ -546,6 +640,9 @@ export class BeaconClient {
     )
     // A CMS hiccup must not be remembered as an empty home for a minute.
     if (!data.hero.length && !data.rows.length) this.homeCache.delete(key)
+    // Only the account that asked for it may fill the slot: a sign-out while
+    // this was in flight must not leave the previous member's rows on disk.
+    else if (generation === this.authGeneration) this.homeStore?.saveHome(key, data)
     return data
   }
 

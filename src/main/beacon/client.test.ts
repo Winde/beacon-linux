@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as Q from './queries'
 import type { IndexedCollection, IndexedVideo } from './catalog-types'
 import type { CatalogLike } from './client'
+import type { HomeStore } from '../home-store'
 import { BeaconClient, BeaconError, MARK_RETRIES } from './client'
 
 const net = vi.hoisted(() => ({ fetch: vi.fn() }))
@@ -2610,6 +2611,65 @@ describe('caching', () => {
 
     expect(cmsCalls(Q.HOME_BLOCKS)).toBe(1)
     expect(cmsCalls(Q.CONTINUE_WATCHING)).toBe(1)
+  })
+
+  it('shares one meMember query between the account check and the feed', async () => {
+    routeCms(homeRoutes())
+    const client = new BeaconClient()
+
+    const [status] = await Promise.all([client.status(), client.home()])
+
+    expect(status.signedIn).toBe(true)
+    expect(cmsCalls(Q.ME)).toBe(1)
+  })
+
+  it('writes the feed for the account and clears it on sign-out', async () => {
+    routeCms(
+      homeRoutes({
+        [Q.HOME_BLOCKS]: () => ({
+          MemberHomePage: {
+            pageContent: [
+              {
+                __typename: 'LatestCarousel',
+                id: 'latest-block',
+                title: 'Latest Videos',
+                content: [blockContent({ id: 'r1', slug: 'recent', title: 'Recent' })]
+              }
+            ]
+          }
+        })
+      })
+    )
+    const client = new BeaconClient()
+    const store = {
+      read: vi.fn(() => null),
+      saveHome: vi.fn(),
+      saveFavourites: vi.fn(),
+      clear: vi.fn()
+    }
+    client.homeStore = store as unknown as HomeStore
+
+    await client.home()
+    expect(store.saveHome).toHaveBeenCalledWith('member@example.com', expect.any(Object))
+
+    await client.signOut()
+    expect(store.clear).toHaveBeenCalledOnce()
+  })
+
+  it('reads the cached feed and Favourites row for the account in the session', async () => {
+    const client = new BeaconClient()
+    const store = {
+      read: vi.fn(() => ({ home: null, favourites: null })),
+      saveHome: vi.fn(),
+      saveFavourites: vi.fn(),
+      clear: vi.fn()
+    }
+    client.homeStore = store as unknown as HomeStore
+
+    await expect(client.cachedHome()).resolves.toBeNull()
+    await expect(client.cachedFavourites()).resolves.toBeNull()
+
+    expect(store.read).toHaveBeenCalledWith('member@example.com')
   })
 
   it('does not hide a CMS failure as an empty home', async () => {

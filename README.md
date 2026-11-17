@@ -162,6 +162,9 @@ HLS from JW Player — no Widevine. That makes a native client straightforward. 
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
+What happens between launch and the first usable screen, and where that time
+goes, is in [docs/startup.md](docs/startup.md).
+
 ### Home
 
 Home is Beacon's own editorial page: `MemberHomePage.pageContent` supplies the

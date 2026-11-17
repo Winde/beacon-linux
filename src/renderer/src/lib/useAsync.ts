@@ -5,6 +5,11 @@ export interface AsyncState<T> {
   data: T | null
   error: string | null
   loading: boolean
+  /**
+   * A request is in flight while data from an earlier one is already on
+   * screen. `loading` stays false then: there is something to look at.
+   */
+  refreshing: boolean
 }
 
 export interface AsyncOptions<T> {
@@ -31,22 +36,33 @@ export function useAsync<T>(
   const [state, setState] = useState<AsyncState<T>>({
     data: initial ?? null,
     error: null,
-    loading: initial === undefined
+    loading: initial === undefined,
+    refreshing: false
   })
 
   useEffect(() => {
     let cancelled = false
     setState((previous) =>
       holdData && previous.data !== null
-        ? { ...previous, error: null }
-        : { data: null, error: null, loading: true }
+        ? { ...previous, error: null, loading: false, refreshing: true }
+        : { data: null, error: null, loading: true, refreshing: false }
     )
     load().then(
       (data) => {
-        if (!cancelled) setState({ data, error: null, loading: false })
+        if (!cancelled) {
+          setState({ data, error: null, loading: false, refreshing: false })
+        }
       },
       (err: unknown) => {
-        if (!cancelled) setState({ data: null, error: cleanError(err), loading: false })
+        if (cancelled) return
+        const message = cleanError(err)
+        setState((previous) =>
+          // A failed refresh must not throw away what the viewer is looking
+          // at. The screen can say it could not refresh; it cannot un-show it.
+          holdData && previous.data !== null
+            ? { data: previous.data, error: message, loading: false, refreshing: false }
+            : { data: null, error: message, loading: false, refreshing: false }
+        )
       }
     )
     return () => {

@@ -94,14 +94,14 @@ export function Content({
     wasSignIn.current = data.signInNeeded
   }, [data])
 
-  if (loading) {
+  if (loading && !data) {
     return (
       <div className="screen screen--center">
         <Spinner label="Loading episode" />
       </div>
     )
   }
-  if (error) {
+  if (error && !data) {
     return (
       <div className="screen screen--center">
         <ErrorNote>{error}</ErrorNote>

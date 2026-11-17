@@ -91,6 +91,8 @@ export default function App(): React.JSX.Element {
   const [progressVersion, setProgressVersion] = useState(0)
   /** The running version, read once: it cannot change while the app is open. */
   const [version, setVersion] = useState<string | null>(null)
+  /** A guest's last feed, kept for Skip so Home paints before the request. */
+  const bootFeed = useRef<HomeData | null>(null)
   /** `checking` is shown in the rail; the rest open the dialog. */
   const [update, setUpdate] = useState<UpdatePrompt | { name: 'checking' } | null>(null)
   /** The last check that found a newer release, so the rail can offer it again. */
@@ -201,6 +203,42 @@ export default function App(): React.JSX.Element {
     }
   }, [])
 
+  /**
+   * Confirm the stored session with the account, after the first screen is
+   * already up. A rejected token still means the sign-in screen; everything
+   * else keeps the optimistic view and costs no extra render.
+   */
+  const refreshSession = useCallback(async (): Promise<void> => {
+    try {
+      const status = await window.beacon.auth.status()
+      if (!status.signedIn) {
+        // Invalidate a favourite read that may still be in flight for the
+        // account status() just signed out of.
+        favouriteSeq.current += 1
+        setSignedIn(false)
+        setFavourites(EMPTY_FAVOURITES)
+        // Anything behind the account screen still holds signed-in rows.
+        setProgressVersion((version) => version + 1)
+        // Replace the optimistic Home with Login, but keep a page the launch
+        // was asked to open on top of it. Resetting the whole stack would drop
+        // a --open deep link before it could show its sign-in prompt.
+        setStack((current) => {
+          const root = current[0]
+          if (!root || root.route.name !== 'home') return current
+          const login = { ...root, route: { name: 'login' as const } }
+          if (current.length === 2 && current[1]?.route.name === 'content') {
+            return [login, current[1]]
+          }
+          return [login]
+        })
+        return
+      }
+      setSignedIn(true)
+    } catch {
+      // A transport failure is not a sign-out; the next screen read decides.
+    }
+  }, [])
+
   const trackPending = useCallback((slug: string, delta: number) => {
     const counts = pendingCounts.current
     const next = Math.max(0, (counts.get(slug) ?? 0) + delta)
@@ -221,6 +259,7 @@ export default function App(): React.JSX.Element {
     } catch {
       // Storage can be unavailable; the session itself is already gone.
     }
+    bootFeed.current = null
     setSignedIn(false)
     reset({ name: 'login' })
     pendingCounts.current.clear()
@@ -374,18 +413,26 @@ export default function App(): React.JSX.Element {
     let cancelled = false
     const boot = async (): Promise<void> => {
       try {
-        const [status, slug] = await Promise.all([
-          window.beacon.auth.status(),
-          window.beacon.app.initialSlug()
+        // The first screen is chosen from local data only: the stored session,
+        // the last feed on disk, and any deep link. None of these touches the
+        // network, so a slow `meMember` cannot hold the app on a spinner.
+        const [session, slug, cached, cachedRow] = await Promise.all([
+          window.beacon.auth.session(),
+          window.beacon.app.initialSlug(),
+          window.beacon.catalog.cachedHome().catch(() => null),
+          window.beacon.favourites.cached().catch(() => null)
         ])
-        // Read the list only after status(): a rejected token signs the member
-        // out inside status(), and the favourites must follow the account that
-        // is actually active, not the one whose tokens just failed.
-        const list = await window.beacon.favourites.list().catch(() => EMPTY_FAVOURITES)
         if (cancelled) return
-        setSignedIn(status.signedIn)
-        setFavourites(list)
-        const home: Route = status.signedIn ? { name: 'home' } : { name: 'login' }
+        setSignedIn(session.signedIn)
+        // Both halves of Home come from the same cached slot, so the
+        // Favourites row does not pop in after the first paint.
+        setFavourites(session.signedIn && cachedRow ? cachedRow : EMPTY_FAVOURITES)
+        // An account's cached feed is only ever used for that account. A
+        // guest's may be reused by Skip, which lands on the same content.
+        bootFeed.current = session.signedIn ? null : cached
+        const home: Route = session.signedIn
+          ? { name: 'home', feed: cached ?? undefined }
+          : { name: 'login' }
         if (slug) {
           setStack([
             { id: nextId.current++, route: home },
@@ -394,6 +441,13 @@ export default function App(): React.JSX.Element {
         } else {
           reset(home)
         }
+        // The account check and the Favourites refresh run behind the screen.
+        // The list is cached above; starting it now means the first launch
+        // after an upgrade fills that cache rather than waiting on status().
+        // A rejected account bumps the sequence in refreshSession(), which
+        // discards any list that was still in flight for it.
+        void loadFavourites()
+        void refreshSession()
       } catch {
         if (!cancelled) reset({ name: 'login' })
       }
@@ -402,7 +456,7 @@ export default function App(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [reset])
+  }, [loadFavourites, refreshSession, reset])
 
   useInput((action) => {
     if (player) {
@@ -531,6 +585,7 @@ export default function App(): React.JSX.Element {
         return (
           <Login
             onSignedIn={() => {
+              bootFeed.current = null
               setSignedIn(true)
               // The session now names the account, so swap in its favourites.
               void loadFavourites()
@@ -551,7 +606,7 @@ export default function App(): React.JSX.Element {
             }}
             onSkip={() => {
               if (returnsToScreen) back()
-              else reset({ name: 'home' })
+              else reset({ name: 'home', feed: bootFeed.current ?? undefined })
             }}
           />
         )

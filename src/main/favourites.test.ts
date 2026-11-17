@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Card, FavouritesAnchor } from '@shared/types'
 import type { CatalogLike } from './beacon/client'
-import type { FavouritesApi } from './favourites'
+import type { FavouritesApi, FavouritesCache } from './favourites'
 import { FavouritesService } from './favourites'
 import type { PreferencesStore } from './preferences'
 
@@ -25,6 +25,7 @@ function harness(
     ids?: string[]
     set?: FavouritesApi['setCollectionFavourite']
     collections?: { id: string; slug: string; name: string }[]
+    store?: FavouritesCache
   } = {}
 ) {
   const email = options.email === undefined ? 'member@example.com' : options.email
@@ -56,8 +57,9 @@ function harness(
     favouritesAfter: vi.fn(() => null),
     setFavouritesAfter: vi.fn((value: FavouritesAnchor) => value)
   } as unknown as PreferencesStore
-  const service = new FavouritesService(api, catalog, preferences)
-  return { service, api, catalog, preferences }
+  const store = options.store ?? { saveFavourites: vi.fn() }
+  const service = new FavouritesService(api, catalog, preferences, store)
+  return { service, api, catalog, preferences, store }
 }
 
 const series: Card = {
@@ -78,6 +80,34 @@ describe('FavouritesService', () => {
 
     await expect(service.list()).resolves.toEqual({ items: [], after: null })
     expect(api.favouriteCollectionIds).not.toHaveBeenCalled()
+  })
+
+  it('caches the row for the signed-in account', async () => {
+    const { service, store } = harness({ ids: ['c1'] })
+
+    const data = await service.list()
+
+    expect(store.saveFavourites).toHaveBeenCalledWith('member@example.com', data)
+  })
+
+  it('does not leave a guest row behind', async () => {
+    const { service, store } = harness({ email: null })
+
+    await service.list()
+
+    expect(store.saveFavourites).not.toHaveBeenCalled()
+  })
+
+  it('updates the cached row when the row moves', async () => {
+    const { service, store } = harness({ ids: ['c1'] })
+    await service.list()
+
+    service.setPosition('top')
+
+    expect(store.saveFavourites).toHaveBeenLastCalledWith(
+      'member@example.com',
+      expect.objectContaining({ after: 'top' })
+    )
   })
 
   it('hydrates the account ids from the catalog', async () => {

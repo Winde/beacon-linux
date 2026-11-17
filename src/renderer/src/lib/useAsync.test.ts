@@ -72,11 +72,11 @@ describe('useAsync', () => {
     const load = vi.fn(async () => 'data')
     render(load)
 
-    expect(latest).toEqual({ data: null, error: null, loading: true })
+    expect(latest).toEqual({ data: null, error: null, loading: true, refreshing: false })
 
     await settle()
 
-    expect(latest).toEqual({ data: 'data', error: null, loading: false })
+    expect(latest).toEqual({ data: 'data', error: null, loading: false, refreshing: false })
     expect(load).toHaveBeenCalledTimes(1)
   })
 
@@ -90,7 +90,12 @@ describe('useAsync', () => {
 
     await settle()
 
-    expect(latest).toEqual({ data: null, error: 'Video not found.', loading: false })
+    expect(latest).toEqual({
+      data: null,
+      error: 'Video not found.',
+      loading: false,
+      refreshing: false
+    })
   })
 
   it('clears the previous value while reloading', async () => {
@@ -104,7 +109,7 @@ describe('useAsync', () => {
 
     render(load, [2])
 
-    expect(latest).toEqual({ data: null, error: null, loading: true })
+    expect(latest).toEqual({ data: null, error: null, loading: true, refreshing: false })
   })
 
   it('holds the previous value on screen when a reload keeps it', async () => {
@@ -118,14 +123,14 @@ describe('useAsync', () => {
 
     render(load, [2], true)
 
-    expect(latest).toEqual({ data: 'first', error: null, loading: false })
+    expect(latest).toEqual({ data: 'first', error: null, loading: false, refreshing: true })
   })
 
   it('shows a prepared value at once and keeps it while it refreshes', () => {
     const load = vi.fn(() => new Promise<unknown>(() => {}))
     render(load, [], false, 'prepared')
 
-    expect(latest).toEqual({ data: 'prepared', error: null, loading: false })
+    expect(latest).toEqual({ data: 'prepared', error: null, loading: false, refreshing: true })
     expect(load).toHaveBeenCalledTimes(1)
   })
 
@@ -157,12 +162,15 @@ describe('useAsync', () => {
     expect(latest.data).toBe('first')
 
     render(load, [2], true)
-    expect(latest).toEqual({ data: 'first', error: null, loading: false })
+    expect(latest).toEqual({ data: 'first', error: null, loading: false, refreshing: true })
 
     refresh.reject(new Error('offline'))
     await settle()
 
     expect(latest.loading).toBe(false)
+    expect(latest.refreshing).toBe(false)
     expect(latest.error).toContain('offline')
+    // The failed refresh must leave the viewer on the page they were reading.
+    expect(latest.data).toBe('first')
   })
 })

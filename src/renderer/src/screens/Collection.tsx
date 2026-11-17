@@ -46,14 +46,14 @@ export function Collection({
     focusFirst(data.seasons.length > 1 ? '.tab' : '.grid [data-focus]')
   }, [data])
 
-  if (loading) {
+  if (loading && !data) {
     return (
       <div className="screen screen--center">
         <Spinner label="Loading series" />
       </div>
     )
   }
-  if (error) {
+  if (error && !data) {
     return (
       <div className="screen screen--center">
         <ErrorNote>{error}</ErrorNote>

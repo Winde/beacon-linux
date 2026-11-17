@@ -11,6 +11,11 @@ export interface FavouritesApi {
   setCollectionFavourite(id: string, favourite: boolean): Promise<boolean>
 }
 
+/** The disk half, kept narrow so the service does not depend on the store class. */
+export interface FavouritesCache {
+  saveFavourites(scope: string, data: FavouritesData): void
+}
+
 function itemFromCollection(collection: IndexedCollection): FavouriteItem {
   return {
     kind: 'series',
@@ -38,11 +43,14 @@ export class FavouritesService {
    * finishing together would let the earlier one drop the later one's series.
    */
   private writes: Promise<unknown> = Promise.resolve()
+  /** The account the current list belongs to; null for a guest, which is not cached. */
+  private scope: string | null = null
 
   constructor(
     private readonly api: FavouritesApi,
     private readonly catalog: CatalogLike,
-    private readonly preferences: PreferencesStore
+    private readonly preferences: PreferencesStore,
+    private readonly store: FavouritesCache | null = null
   ) {}
 
   /**
@@ -51,7 +59,11 @@ export class FavouritesService {
    */
   async list(): Promise<FavouritesData> {
     const after = this.preferences.favouritesAfter()
-    if (!(await this.api.accountEmail())) return this.snapshot([], after)
+    // The row is cached under the account it belongs to. A guest has no row
+    // and is never cached, so signing out leaves nothing behind to clean.
+    const email = await this.api.accountEmail()
+    this.scope = email
+    if (!email) return this.snapshot([], after, false)
     const ids = await this.api.favouriteCollectionIds()
     if (!ids.length) return this.snapshot([], after)
     // Cold boots have the catalog on disk; this only waits the first time.
@@ -64,7 +76,9 @@ export class FavouritesService {
       // stable for this run rather than making it flicker.
       else if (this.shown.has(id)) items.push(this.shown.get(id)!)
     }
-    return this.snapshot(items, after)
+    // Ids the catalog could not hydrate (a failed ensure, a cold index) must
+    // not replace a useful cached row with an empty one.
+    return this.snapshot(items, after, items.length > 0)
   }
 
   /** Favourites are collections only: an episode has no favourite of its own. */
@@ -132,7 +146,7 @@ export class FavouritesService {
   /** Moving the row is local, so it must not re-read the account. */
   setPosition(after: FavouritesAnchor): FavouritesData {
     const value = this.preferences.setFavouritesAfter(after)
-    return { items: [...this.shown.values()], after: value }
+    return this.snapshot([...this.shown.values()], value)
   }
 
   private async idForSlug(slug: string): Promise<string | null> {
@@ -141,9 +155,17 @@ export class FavouritesService {
     return this.catalog.collectionBySlug(slug)?.id ?? null
   }
 
-  private snapshot(items: FavouriteItem[], after: FavouritesAnchor | null): FavouritesData {
+  private snapshot(
+    items: FavouriteItem[],
+    after: FavouritesAnchor | null,
+    cache = true
+  ): FavouritesData {
     this.shown.clear()
     for (const item of items) this.shown.set(item.id, item)
-    return { items, after }
+    const data: FavouritesData = { items, after }
+    // A write to the row (add, remove, move) is newer than the cached copy;
+    // keep the next launch in step without another account read.
+    if (cache && this.scope) this.store?.saveFavourites(this.scope, data)
+    return data
   }
 }

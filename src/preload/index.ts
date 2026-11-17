@@ -9,6 +9,7 @@ import type {
 
 const api: BeaconApi = {
   auth: {
+    session: () => ipcRenderer.invoke('auth:session'),
     status: () => ipcRenderer.invoke('auth:status'),
     signIn: (email: string, password: string) => ipcRenderer.invoke('auth:signIn', email, password),
     signOut: () => ipcRenderer.invoke('auth:signOut'),
@@ -16,6 +17,7 @@ const api: BeaconApi = {
   },
   catalog: {
     home: () => ipcRenderer.invoke('catalog:home'),
+    cachedHome: () => ipcRenderer.invoke('catalog:cachedHome'),
     browse: () => ipcRenderer.invoke('catalog:browse'),
     collection: (slug: string) => ipcRenderer.invoke('catalog:collection', slug),
     content: (slug: string) => ipcRenderer.invoke('catalog:content', slug),
@@ -23,6 +25,7 @@ const api: BeaconApi = {
     suggest: (query: string) => ipcRenderer.invoke('catalog:suggest', query)
   },
   favourites: {
+    cached: () => ipcRenderer.invoke('favourites:cached'),
     list: () => ipcRenderer.invoke('favourites:list'),
     add: (card: Card) => ipcRenderer.invoke('favourites:add', card),
     remove: (slug: string) => ipcRenderer.invoke('favourites:remove', slug),

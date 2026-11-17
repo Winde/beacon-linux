@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Card, FavouriteItem, FavouritesData, HomeData, UpdateInfo } from '@shared/types'
+import type {
+  AuthStatus,
+  Card,
+  FavouriteItem,
+  FavouritesData,
+  HomeData,
+  UpdateInfo
+} from '@shared/types'
 import App, { upToCollection, type Entry } from './App'
 
 beforeEach(() => {
@@ -45,10 +52,14 @@ interface StubOptions {
   homeImpl?: () => Promise<HomeData>
   add?: (card: Card) => Promise<FavouritesData>
   remove?: (slug: string) => Promise<FavouritesData>
+  listImpl?: () => Promise<FavouritesData>
   version?: string
   check?: () => Promise<UpdateInfo>
   install?: () => Promise<void>
   initialSlug?: string | null
+  cachedHome?: HomeData | null
+  cachedFavourites?: FavouritesData | null
+  status?: () => Promise<AuthStatus>
 }
 
 function stubApp({
@@ -58,10 +69,14 @@ function stubApp({
   homeImpl,
   add,
   remove: removeImpl,
+  listImpl,
   version = '0.1.4',
   check,
   install,
-  initialSlug = null
+  initialSlug = null,
+  cachedHome = null,
+  cachedFavourites = null,
+  status
 }: StubOptions = {}): {
   signOut: ReturnType<typeof vi.fn>
   list: ReturnType<typeof vi.fn>
@@ -74,7 +89,7 @@ function stubApp({
   install: ReturnType<typeof vi.fn>
 } {
   const signOut = vi.fn(() => Promise.resolve())
-  const list = vi.fn(() => Promise.resolve({ items, after: null }))
+  const list = vi.fn(listImpl ?? (() => Promise.resolve({ items, after: null })))
   const homeFn = vi.fn(homeImpl ?? (() => Promise.resolve(home)))
   const addFn = vi.fn(add ?? (() => Promise.resolve({ items, after: null })))
   const remove = vi.fn(removeImpl ?? (() => Promise.resolve({ items: [], after: null })))
@@ -94,11 +109,16 @@ function stubApp({
 
   vi.stubGlobal('beacon', {
     auth: {
-      status: vi.fn(() =>
-        Promise.resolve({
-          signedIn,
-          user: signedIn ? { name: 'Member', tier: 'Apprentice', active: true } : null
-        })
+      session: vi.fn(() =>
+        Promise.resolve({ signedIn, email: signedIn ? 'member@example.com' : null })
+      ),
+      status: vi.fn(
+        status ??
+          (() =>
+            Promise.resolve({
+              signedIn,
+              user: signedIn ? { name: 'Member', tier: 'Apprentice', active: true } : null
+            }))
       ),
       signIn: vi.fn(),
       signOut,
@@ -106,6 +126,7 @@ function stubApp({
     },
     catalog: {
       home: homeFn,
+      cachedHome: vi.fn(() => Promise.resolve(cachedHome)),
       browse: vi.fn(),
       collection: vi.fn(),
       content,
@@ -113,6 +134,7 @@ function stubApp({
       suggest: vi.fn()
     },
     favourites: {
+      cached: vi.fn(() => Promise.resolve(cachedFavourites)),
       list,
       add: addFn,
       remove,
@@ -201,6 +223,45 @@ describe('App sign out', () => {
 
   it('shows sign-in when there is no session', async () => {
     stubApp({ signedIn: false })
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeDefined()
+  })
+})
+
+describe('App startup', () => {
+  it('paints the cached feed without waiting for the account check', async () => {
+    stubApp({
+      cachedHome: HOME_WITH_SERIES,
+      homeImpl: () => new Promise<HomeData>(() => {}),
+      status: () => new Promise<AuthStatus>(() => {})
+    })
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })).toBeDefined()
+    expect(screen.queryByText('Loading Beacon')).toBeNull()
+  })
+
+  it('paints the cached Favourites row with the feed', async () => {
+    stubApp({
+      cachedHome: HOME_WITH_SERIES,
+      cachedFavourites: { items: [favourite('campaign-1', 'Campaign 1')], after: null },
+      homeImpl: () => new Promise<HomeData>(() => {}),
+      status: () => new Promise<AuthStatus>(() => {}),
+      listImpl: () => new Promise<FavouritesData>(() => {})
+    })
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'Favourites' })).toBeDefined()
+  })
+
+  it('falls back to sign-in when the stored session is rejected', async () => {
+    stubApp({
+      cachedHome: HOME_WITH_SERIES,
+      homeImpl: () => new Promise<HomeData>(() => {}),
+      status: () => Promise.resolve({ signedIn: false, user: null })
+    })
     render(<App />)
 
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeDefined()
