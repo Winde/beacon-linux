@@ -721,7 +721,7 @@ describe('content', () => {
       continuedSummary: 'The rest of the page body.',
       minutes: 55,
       released: '2024-01-01T00:00:00.000Z',
-      series: { slug: 'campaign-1', title: 'Campaign 1' },
+      series: { slug: 'campaign-1', title: 'Campaign 1', isSeries: true },
       tier: 'Apprentice',
       locked: false,
       signInNeeded: false,

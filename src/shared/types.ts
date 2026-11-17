@@ -114,7 +114,8 @@ export interface ContentData {
   image2x: string | null
   minutes: number | null
   released: string | null
-  series: { slug: string; title: string } | null
+  /** The collection this video is filed under; the header links to it. */
+  series: { slug: string; title: string; isSeries: boolean } | null
   tier: string | null
   locked: boolean
   signInNeeded: boolean

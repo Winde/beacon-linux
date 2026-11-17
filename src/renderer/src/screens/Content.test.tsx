@@ -23,7 +23,7 @@ function contentData(overrides: Partial<ContentData> = {}): ContentData {
     image2x: 'https://images.example/wide/format=auto',
     minutes: 55,
     released: '2024-01-01T00:00:00.000Z',
-    series: { slug: 'campaign-1', title: 'Campaign 1' },
+    series: { slug: 'campaign-1', title: 'Campaign 1', isSeries: true },
     tier: 'Apprentice',
     locked: false,
     signInNeeded: false,
@@ -82,11 +82,40 @@ describe('Content', () => {
     })
   })
 
+  it('offers an explicit View series action as well as the header link', async () => {
+    const onOpen = vi.fn()
+    stubContent(contentData())
+    render(<Content slug="c1e5" onOpen={onOpen} onPlay={vi.fn()} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'View series' }))
+
+    expect(onOpen).toHaveBeenCalledWith({
+      kind: 'series',
+      slug: 'campaign-1',
+      title: 'Campaign 1',
+      image: null,
+      image2x: null
+    })
+  })
+
+  it('calls a non-series collection a collection', async () => {
+    stubContent(
+      contentData({
+        series: { slug: 'previously-on', title: 'Previously On...', isSeries: false }
+      })
+    )
+    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
+
+    expect(await screen.findByRole('button', { name: 'View collection' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'View series' })).toBeNull()
+  })
+
   it('has no series link when the video is filed nowhere', async () => {
     stubContent(contentData({ series: null }))
     render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
 
     await screen.findByText('Campaign 1 Episode 5')
+    expect(screen.queryByTestId('series-link')).toBeNull()
     expect(screen.queryByTestId('open-series')).toBeNull()
   })
 

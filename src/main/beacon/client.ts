@@ -824,7 +824,9 @@ export class BeaconClient {
       image2x: img(doc.thumbnail?.sizes?.landscape2x?.url, 1280),
       minutes: minutes(doc.duration),
       released: doc.releaseDate ?? null,
-      series: series ? { slug: series.slug, title: series.name } : null,
+      series: series
+        ? { slug: series.slug, title: series.name, isSeries: Boolean(series.isSeries) }
+        : null,
       tier: doc.contentTier?.name ?? null,
       locked: !video?.video,
       signInNeeded: !video?.video && !signedIn,

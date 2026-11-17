@@ -109,6 +109,28 @@ export function Content({
 
   const resuming = data.resumeAt > 0
   const series = data.series
+  const openSeries = (): void => {
+    if (!series) return
+    onOpen({
+      kind: 'series',
+      slug: series.slug,
+      title: series.title,
+      image: null,
+      image2x: null
+    })
+  }
+  const seriesAction = series ? (
+    <button
+      type="button"
+      className="button button--ghost"
+      data-focus
+      data-testid="open-series"
+      tabIndex={-1}
+      onClick={openSeries}
+    >
+      {series.isSeries ? 'View series' : 'View collection'}
+    </button>
+  ) : null
   const description = cleanText(data.description)
   const continuedSummary = cleanText(data.continuedSummary)
   // Only offer the toggle when there is a continuation to reveal. The app also
@@ -151,18 +173,10 @@ export function Content({
               type="button"
               className="page-head__eyebrow page-head__eyebrow--link"
               data-focus
-              data-testid="open-series"
+              data-testid="series-link"
               tabIndex={-1}
               title={`View ${series.title}`}
-              onClick={() =>
-                onOpen({
-                  kind: 'series',
-                  slug: series.slug,
-                  title: series.title,
-                  image: null,
-                  image2x: null
-                })
-              }
+              onClick={openSeries}
             >
               {series.title}
             </button>
@@ -218,42 +232,48 @@ export function Content({
             </div>
           ) : null}
 
-          {!data.locked ? (
+          {!data.locked || series ? (
             <div className="button-row">
-              <button
-                type="button"
-                className="button button--primary"
-                data-focus
-                data-testid="play"
-                tabIndex={-1}
-                onClick={() => onPlay(slug)}
-              >
-                {resuming ? 'Resume' : 'Play'}
-              </button>
-              {resuming ? (
-                <button
-                  type="button"
-                  className="button button--ghost"
-                  data-focus
-                  tabIndex={-1}
-                  onClick={() => onPlay(slug, 0)}
-                >
-                  Start over
-                </button>
+              {!data.locked ? (
+                <>
+                  <button
+                    type="button"
+                    className="button button--primary"
+                    data-focus
+                    data-testid="play"
+                    tabIndex={-1}
+                    onClick={() => onPlay(slug)}
+                  >
+                    {resuming ? 'Resume' : 'Play'}
+                  </button>
+                  {seriesAction}
+                  {resuming ? (
+                    <button
+                      type="button"
+                      className="button button--ghost"
+                      data-focus
+                      tabIndex={-1}
+                      onClick={() => onPlay(slug, 0)}
+                    >
+                      Start over
+                    </button>
+                  ) : null}
+                  {data.signedIn ? (
+                    <button
+                      type="button"
+                      className="button button--ghost"
+                      data-focus
+                      data-testid="watch-toggle"
+                      tabIndex={-1}
+                      disabled={marking}
+                      onClick={() => void toggleWatched()}
+                    >
+                      {watched ? 'Mark as unwatched' : 'Mark as watched'}
+                    </button>
+                  ) : null}
+                </>
               ) : null}
-              {data.signedIn ? (
-                <button
-                  type="button"
-                  className="button button--ghost"
-                  data-focus
-                  data-testid="watch-toggle"
-                  tabIndex={-1}
-                  disabled={marking}
-                  onClick={() => void toggleWatched()}
-                >
-                  {watched ? 'Mark as unwatched' : 'Mark as watched'}
-                </button>
-              ) : null}
+              {data.locked ? seriesAction : null}
             </div>
           ) : null}
           {markError ? <ErrorNote>{markError}</ErrorNote> : null}
