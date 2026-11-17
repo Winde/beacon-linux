@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { IndexedVideo } from './catalog-types'
+import type { IndexedCollection, IndexedVideo } from './catalog-types'
 import type { CmsCard, CmsCollection } from './cms-types'
 import {
   captionsOf,
   closingStretch,
   heroSized,
+  indexedCollectionCard,
   indexedVideoCard,
   minutes,
   seriesCard,
@@ -110,6 +111,29 @@ describe('card mapping', () => {
       image: 'https://images.example/portrait/format=auto,width=480',
       image2x: 'https://images.example/landscape2x/format=auto,width=480',
       count: 42
+    })
+  })
+
+  it('maps an indexed collection for the browse grid', () => {
+    const indexedCollection: IndexedCollection = {
+      id: 'p1',
+      slug: 'previously-on',
+      name: 'Previously On...',
+      isSeries: false,
+      itemCount: 5,
+      released: null,
+      image: null,
+      image2x: null,
+      portrait: 'https://images.example/portrait/format=auto'
+    }
+    expect(indexedCollectionCard(indexedCollection)).toEqual({
+      kind: 'series',
+      id: 'p1',
+      slug: 'previously-on',
+      title: 'Previously On...',
+      image: 'https://images.example/portrait/format=auto,width=480',
+      image2x: null,
+      count: 5
     })
   })
 

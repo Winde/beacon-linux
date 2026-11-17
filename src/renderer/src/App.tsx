@@ -4,6 +4,7 @@ import { isFavourite, optimisticItem } from '@shared/favourites'
 import { useInput } from './input/useInput'
 import { focusFirst, getFocused, move, setFocused } from './nav/focus'
 import { Home } from './screens/Home'
+import { Browse } from './screens/Browse'
 import { Login } from './screens/Login'
 import { Collection } from './screens/Collection'
 import { Content } from './screens/Content'
@@ -21,6 +22,7 @@ type Route =
   | { name: 'home'; feed?: HomeData }
   | { name: 'collection'; slug: string }
   | { name: 'content'; slug: string }
+  | { name: 'browse' }
   | { name: 'search' }
 
 interface Entry {
@@ -137,6 +139,12 @@ export default function App(): React.JSX.Element {
     setRailOpen(false)
     push({ name: 'search' })
   }, [push])
+
+  const openBrowse = useCallback(() => {
+    setRailOpen(false)
+    const top = stack[stack.length - 1]
+    if (top?.route.name !== 'browse') push({ name: 'browse' })
+  }, [push, stack])
 
   // Home is a root destination, not another screen on top of the current one:
   // drop the whole stack so Back from Home exits instead of retracing a trail
@@ -554,6 +562,8 @@ export default function App(): React.JSX.Element {
         )
       case 'search':
         return <Search onOpen={openCard} />
+      case 'browse':
+        return <Browse onOpen={openCard} />
       default:
         return null
     }
@@ -565,6 +575,7 @@ export default function App(): React.JSX.Element {
         open={railOpen}
         showHome={current.route.name !== 'home'}
         onHome={goHome}
+        onBrowse={openBrowse}
         onSearch={openSearch}
         onSignOut={signedIn ? requestSignOut : undefined}
         version={version}

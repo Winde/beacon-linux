@@ -16,6 +16,7 @@ const api: BeaconApi = {
   },
   catalog: {
     home: () => ipcRenderer.invoke('catalog:home'),
+    browse: () => ipcRenderer.invoke('catalog:browse'),
     collection: (slug: string) => ipcRenderer.invoke('catalog:collection', slug),
     content: (slug: string) => ipcRenderer.invoke('catalog:content', slug),
     search: (query: string) => ipcRenderer.invoke('catalog:search', query),

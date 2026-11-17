@@ -1,9 +1,10 @@
-import { Home, LogOut, NavArrowLeft, RefreshDouble, Search } from 'iconoir-react'
+import { Home, LogOut, NavArrowLeft, RefreshDouble, Search, ViewGrid } from 'iconoir-react'
 
 interface NavRailProps {
   open: boolean
   showHome: boolean
   onHome: () => void
+  onBrowse: () => void
   onSearch: () => void
   /** Absent for a free-video session: there is no account to sign out of. */
   onSignOut?: () => void
@@ -24,6 +25,7 @@ export function NavRail({
   open,
   showHome,
   onHome,
+  onBrowse,
   onSearch,
   onSignOut,
   version,
@@ -60,6 +62,17 @@ export function NavRail({
             <span className="rail__label">Home</span>
           </button>
         ) : null}
+        <button
+          type="button"
+          className="rail__item"
+          data-focus
+          data-testid="rail-browse"
+          tabIndex={-1}
+          onClick={onBrowse}
+        >
+          <ViewGrid className="rail__icon" width={20} height={20} strokeWidth={1.7} aria-hidden />
+          <span className="rail__label">Browse</span>
+        </button>
         <button
           type="button"
           className="rail__item"

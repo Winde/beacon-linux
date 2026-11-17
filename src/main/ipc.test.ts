@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { IndexedCollection } from './beacon/catalog-types'
+
 const glue = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => any>(),
   windows: [] as { close: () => void }[],
@@ -42,6 +44,7 @@ const glue = vi.hoisted(() => ({
   catalog: {
     status: vi.fn(),
     ensure: vi.fn(() => Promise.resolve()),
+    allCollections: vi.fn((): IndexedCollection[] => []),
     collectionById: vi.fn(() => null),
     collectionBySlug: vi.fn(() => null)
   }
@@ -171,6 +174,55 @@ describe('registerIpc', () => {
     expect(glue.client.content).toHaveBeenCalledWith('c1e1')
     expect(glue.client.search).toHaveBeenCalledWith('vox')
     expect(glue.client.suggest).toHaveBeenCalledWith('cam')
+  })
+
+  it('lists every series and collection for the browse screen, by name', async () => {
+    glue.catalog.allCollections.mockReturnValue([
+      {
+        id: 'c1',
+        slug: 'campaign-1',
+        name: 'Campaign 1',
+        isSeries: true,
+        itemCount: 10,
+        released: null,
+        image: null,
+        image2x: null,
+        portrait: null
+      },
+      {
+        id: 'p1',
+        slug: 'previously-on',
+        name: 'Previously On...',
+        isSeries: false,
+        itemCount: 5,
+        released: null,
+        image: null,
+        image2x: null,
+        portrait: null
+      },
+      {
+        id: 'c2',
+        slug: 'age-of-umbra',
+        name: 'Age of Umbra',
+        isSeries: true,
+        itemCount: 23,
+        released: null,
+        image: null,
+        image2x: null,
+        portrait: null
+      }
+    ])
+
+    const data = await handler('catalog:browse')()
+
+    expect(glue.catalog.ensure).toHaveBeenCalled()
+    expect(data.series.map((card: { title: string }) => card.title)).toEqual([
+      'Age of Umbra',
+      'Campaign 1'
+    ])
+    expect(data.collections.map((card: { title: string }) => card.title)).toEqual([
+      'Previously On...'
+    ])
   })
 
   it('adds the reordered playlist to a play response', async () => {

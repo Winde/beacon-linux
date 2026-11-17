@@ -106,6 +106,7 @@ function stubApp({
     },
     catalog: {
       home: homeFn,
+      browse: vi.fn(),
       collection: vi.fn(),
       content,
       search: vi.fn(),

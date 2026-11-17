@@ -1,0 +1,92 @@
+import { useEffect, useRef, useState } from 'react'
+import type { Card } from '@shared/types'
+import { useAsync } from '../lib/useAsync'
+import { focusFirst } from '../nav/focus'
+import { ScreenScroll } from '../components/ScreenScroll'
+import { Tile } from '../components/Tile'
+import { Empty, ErrorNote, Spinner } from '../components/ui'
+
+type Tab = 'series' | 'collections'
+
+interface BrowseProps {
+  onOpen: (card: Card) => void
+}
+
+/**
+ * Every series and collection in the local catalog, not just the shelves the
+ * editors put on Home. Beacon files these separately, so the two groups get
+ * their own tab rather than one mixed grid.
+ */
+export function Browse({ onOpen }: BrowseProps): React.JSX.Element | null {
+  const { data, error, loading } = useAsync(() => window.beacon.catalog.browse(), [])
+  const [chosen, setChosen] = useState<Tab | null>(null)
+  const placed = useRef(false)
+
+  const both = Boolean(data?.series.length && data?.collections.length)
+  // A missing group must not leave the screen on an empty tab; the viewer can
+  // still switch once the other one has something in it.
+  const active: Tab = chosen ?? (data && !data.series.length ? 'collections' : 'series')
+  const items = active === 'series' ? (data?.series ?? []) : (data?.collections ?? [])
+
+  useEffect(() => {
+    if (!data || placed.current) return
+    placed.current = true
+    focusFirst(data.series.length && data.collections.length ? '.tab' : '.grid [data-focus]')
+  }, [data])
+
+  if (loading) {
+    return (
+      <div className="screen screen--center">
+        <Spinner label="Loading series and collections" />
+      </div>
+    )
+  }
+  if (error) {
+    return (
+      <div className="screen screen--center">
+        <ErrorNote>{error}</ErrorNote>
+      </div>
+    )
+  }
+  if (!data) return null
+
+  return (
+    <div className="screen screen--split">
+      <header className="browse__head">
+        <h1 className="browse__title">Browse</h1>
+        <p className="browse__sub">Every series and collection in the catalog.</p>
+      </header>
+
+      {both ? (
+        <div className="tabs" role="tablist">
+          {(['series', 'collections'] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              aria-selected={active === tab}
+              className={`tab${active === tab ? ' is-active' : ''}`}
+              data-focus
+              tabIndex={-1}
+              onClick={() => setChosen(tab)}
+            >
+              {tab === 'series' ? 'Series' : 'Collections'}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <ScreenScroll>
+        {items.length ? (
+          <div className="grid">
+            {items.map((card) => (
+              <Tile key={card.slug} card={card} onSelect={onOpen} />
+            ))}
+          </div>
+        ) : (
+          <Empty>Nothing to browse yet.</Empty>
+        )}
+      </ScreenScroll>
+    </div>
+  )
+}

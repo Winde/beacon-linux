@@ -202,11 +202,19 @@ export class Catalog implements CatalogLike {
         code: episodeCode(v.title)
       }
     })
-    this.searchableCollections = snapshot.collections.map((c) => ({
-      ...c,
-      norm: normalize(c.name),
-      tokens: normalize(c.name).split(' ').filter(Boolean)
-    }))
+    // A collection is more than its name: "Previously On..." holds the Campaign
+    // 4 recaps, so searching "recap" has to find it even though the word never
+    // appears in the title. Keep `norm` as the name alone, so a name match still
+    // earns the phrase bonus, and add the member episodes to the tokens.
+    this.searchableCollections = snapshot.collections.map((c) => {
+      const own = bySeries.get(c.id) ?? []
+      const text = [c.name, ...own.map((v) => `${v.title} ${displayTitle(v)}`)].join(' ')
+      return {
+        ...c,
+        norm: normalize(c.name),
+        tokens: [...new Set(normalize(text).split(' ').filter(Boolean))]
+      }
+    })
   }
 
   private async fetchPage<T>(
@@ -348,6 +356,11 @@ export class Catalog implements CatalogLike {
     return this.collectionsBySlug.get(slug) ?? null
   }
 
+  /** Every collection the index knows, for the browse screens. */
+  allCollections(): IndexedCollection[] {
+    return this.snapshot?.collections ?? []
+  }
+
   videoById(id: string): IndexedVideo | null {
     return this.videosById.get(id) ?? null
   }
@@ -396,7 +409,11 @@ export class Catalog implements CatalogLike {
       if (!out.some((o) => normalize(o) === normalize(text))) out.push(text)
     }
     for (const c of this.searchableCollections) {
-      if (c.norm.startsWith(q) || c.tokens.some((token) => token.startsWith(q))) add(c.name)
+      // Suggestions are names the member can recognise and retype; a collection
+      // matched only through an episode title would look unrelated here.
+      if (c.norm.startsWith(q) || c.norm.split(' ').some((token) => token.startsWith(q))) {
+        add(c.name)
+      }
     }
     for (const v of this.searchableVideos) {
       if (out.length >= limit) break

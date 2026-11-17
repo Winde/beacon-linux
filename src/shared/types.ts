@@ -178,6 +178,12 @@ export interface SearchData {
   videos: Card[]
 }
 
+/** Every collection in the catalog, split the way Beacon files them. */
+export interface BrowseData {
+  series: Card[]
+  collections: Card[]
+}
+
 export interface IndexStatus {
   videos: number
   collections: number
@@ -217,6 +223,7 @@ export interface BeaconApi {
   }
   catalog: {
     home(): Promise<HomeData>
+    browse(): Promise<BrowseData>
     collection(slug: string): Promise<CollectionData>
     content(slug: string): Promise<ContentData>
     search(query: string): Promise<SearchData>

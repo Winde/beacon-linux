@@ -102,8 +102,8 @@ Build, test and release commands are under [Development](#development).
 
 ## Status
 
-Working end to end: sign-in, home, series, episode pages, search, favourites, and
-video playback with resume, progress sync and next-episode autoplay. Verified on
+Working end to end: sign-in, home, browse, series, episode pages, search, favourites,
+and video playback with resume, progress sync and next-episode autoplay. Verified on
 SteamOS in Game Mode with a real Steam Controller, using one of the layouts under
 [Controller layout](#controller-layout-one-time). Watch progress is flushed when
 the machine suspends.
@@ -157,7 +157,7 @@ HLS from JW Player — no Widevine. That makes a native client straightforward. 
 │                          │ IPC                                          │
 │  renderer (React)        ▼                                             │
 │    focus engine   spatial navigation from d-pad / stick / arrows       │
-│    screens        login, home, series, episode, search, player         │
+│    screens        login, home, browse, series, episode, search, player │
 │    hls.js         plays the reordered playlist                         │
 └────────────────────────────────────────────────────────────────────────┘
 ```

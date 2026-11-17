@@ -1,5 +1,5 @@
 import type { Card, CaptionTrack, WatchState } from '@shared/types'
-import type { IndexedVideo } from './catalog-types'
+import type { IndexedCollection, IndexedVideo } from './catalog-types'
 import type { CmsCard, CmsCollection } from './cms-types'
 import { displayTitle, imageUrl as img } from './text'
 
@@ -92,6 +92,19 @@ export function seriesCard(c: CmsCollection): Card {
     image: img(c.thumbnail?.sizes?.landscape?.url ?? c.thumbnail?.sizes?.portrait?.url, 480),
     image2x: img(c.thumbnail?.sizes?.landscape2x?.url, 480),
     count: c.itemCount ?? null
+  }
+}
+
+/** A collected series/collection from the local index, for the browse grid. */
+export function indexedCollectionCard(c: IndexedCollection): Card {
+  return {
+    kind: 'series',
+    id: c.id,
+    slug: c.slug,
+    title: c.name,
+    image: img(c.image ?? c.portrait, 480),
+    image2x: img(c.image2x, 480),
+    count: c.itemCount
   }
 }
 

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, net } from 'electron'
 import type {
+  BrowseData,
   Card,
   FavouritesAnchor,
   NextEpisodeRequest,
@@ -8,6 +9,7 @@ import type {
 } from '@shared/types'
 import { BeaconClient } from './beacon/client'
 import { Catalog } from './beacon/catalog'
+import { indexedCollectionCard } from './beacon/cards'
 import { credentialStorage } from './beacon/session'
 import { FavouritesService } from './favourites'
 import { fetchCaptionFile, fetchMasterPlaylist } from './hls'
@@ -39,6 +41,22 @@ export function registerIpc(): void {
   ipcMain.handle('auth:storage', () => credentialStorage())
 
   ipcMain.handle('catalog:home', () => client.home())
+  ipcMain.handle('catalog:browse', async (): Promise<BrowseData> => {
+    await catalog.ensure()
+    const all = catalog.allCollections()
+    const byName = (a: { name: string }, b: { name: string }): number =>
+      a.name.localeCompare(b.name)
+    return {
+      series: all
+        .filter((c) => c.isSeries)
+        .sort(byName)
+        .map(indexedCollectionCard),
+      collections: all
+        .filter((c) => !c.isSeries)
+        .sort(byName)
+        .map(indexedCollectionCard)
+    }
+  })
   ipcMain.handle('catalog:collection', (_event, slug: string) => client.collection(slug))
   ipcMain.handle('catalog:content', (_event, slug: string) => client.content(slug))
   ipcMain.handle('catalog:search', (_event, query: string) => client.search(query))

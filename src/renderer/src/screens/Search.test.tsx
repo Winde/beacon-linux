@@ -55,9 +55,9 @@ describe('Search', () => {
     render(<Search onOpen={vi.fn()} />)
 
     expect(focusFirst).toHaveBeenCalledWith('.keyboard .key')
-    expect(screen.getByText('Series, episode, or c4e12')).toBeDefined()
+    expect(screen.getByText('Series, collection, or c4e12')).toBeDefined()
     expect(
-      screen.getByText(/Try a series name, an episode title, or an episode code/)
+      screen.getByText(/Try a series or collection name, an episode title, or an episode code/)
     ).toBeDefined()
   })
 
@@ -76,7 +76,7 @@ describe('Search', () => {
     await waitFor(() => expect(search).toHaveBeenCalledWith('ca'))
     expect(await screen.findByText('Campaign One')).toBeDefined()
     expect(await screen.findByText('The Water’s Edge')).toBeDefined()
-    expect(screen.getByText('Series')).toBeDefined()
+    expect(screen.getByText('Series & collections')).toBeDefined()
     expect(screen.getByText('Videos')).toBeDefined()
   })
 
@@ -114,7 +114,7 @@ describe('Search', () => {
     type(['A', 'B'])
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
 
-    expect(screen.getByText('Series, episode, or c4e12')).toBeDefined()
+    expect(screen.getByText('Series, collection, or c4e12')).toBeDefined()
   })
 
   it('moves focus to the first result when Search is pressed', async () => {
@@ -187,14 +187,14 @@ describe('Search', () => {
 
     fireEvent.keyDown(window, { key: 'c', ctrlKey: true })
     fireEvent.keyDown(window, { key: 'a', metaKey: true })
-    expect(screen.getByText('Series, episode, or c4e12')).toBeDefined()
+    expect(screen.getByText('Series, collection, or c4e12')).toBeDefined()
 
     const player = document.createElement('div')
     player.className = 'player'
     document.body.append(player)
     fireEvent.keyDown(window, { key: 'c' })
     player.remove()
-    expect(screen.getByText('Series, episode, or c4e12')).toBeDefined()
+    expect(screen.getByText('Series, collection, or c4e12')).toBeDefined()
 
     delete (HTMLElement.prototype as { offsetParent?: unknown }).offsetParent
   })

@@ -11,6 +11,7 @@ function rail(overrides: Partial<React.ComponentProps<typeof NavRail>> = {}): Re
       open
       showHome
       onHome={vi.fn()}
+      onBrowse={vi.fn()}
       onSearch={vi.fn()}
       onSignOut={vi.fn()}
       version="0.1.4"
@@ -46,6 +47,15 @@ describe('NavRail', () => {
     fireEvent.click(screen.getByTestId('rail-search'))
 
     expect(onSearch).toHaveBeenCalledOnce()
+  })
+
+  it('opens the browse screen from the rail', () => {
+    const onBrowse = vi.fn()
+    render(rail({ onBrowse }))
+
+    fireEvent.click(screen.getByTestId('rail-browse'))
+
+    expect(onBrowse).toHaveBeenCalledOnce()
   })
 
   it('offers Sign out to a signed-in member', () => {

@@ -214,6 +214,7 @@ describe('Catalog', () => {
 
     expect(catalog.videoById('v1')).toMatchObject({ slug: 'episode-1', title: 'Episode 1' })
     expect(catalog.collectionById('s1')).toMatchObject({ slug: 's1', name: 'Campaign 1' })
+    expect(catalog.allCollections().map((c) => c.slug)).toEqual(['s1'])
     expect(catalog.videoById('missing')).toBeNull()
     expect(catalog.collectionById('missing')).toBeNull()
   })
@@ -387,6 +388,46 @@ describe('Catalog', () => {
       expect(catalog.localSearch('campaign').collections.map((c) => c.slug)).toEqual([
         'campaign-1',
         'campaign-4'
+      ])
+    })
+
+    it('finds a collection by its episodes, not only its name', async () => {
+      const recaps = {
+        id: 'previously-on',
+        name: 'Previously On...',
+        slug: 'previously-on',
+        isSeries: false
+      }
+      const animated = {
+        id: 'crit-recap',
+        name: 'Crit Recap Animated',
+        slug: 'crit-recap-animated',
+        isSeries: true
+      }
+      const { client } = fakeClient({
+        videos: [
+          rawVideo(1, {
+            title: 'The Soldiers’ Table | Campaign 4, Ep 5-11 Recap',
+            primaryCollection: recaps
+          }),
+          rawVideo(2, {
+            title: 'C2 E1 | Come Together',
+            primaryCollection: animated
+          })
+        ],
+        collections: [
+          rawCollection({ ...recaps, itemCount: 1 }),
+          rawCollection({ ...animated, itemCount: 1 })
+        ]
+      })
+      const catalog = new Catalog(client)
+      await catalog.ensure()
+
+      // The name match keeps its phrase bonus, so it outranks the collection
+      // that only matches through an episode title.
+      expect(catalog.localSearch('recap').collections.map((c) => c.slug)).toEqual([
+        'crit-recap-animated',
+        'previously-on'
       ])
     })
 

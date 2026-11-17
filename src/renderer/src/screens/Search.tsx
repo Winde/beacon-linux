@@ -137,7 +137,7 @@ export function Search({ onOpen }: SearchProps): React.JSX.Element {
           {query ? (
             <span>{query}</span>
           ) : (
-            <span className="search__placeholder">Series, episode, or c4e12</span>
+            <span className="search__placeholder">Series, collection, or c4e12</span>
           )}
           <span className="search__caret" />
           {/* Fixed-size slot: the indicator fades in without moving anything. */}
@@ -182,7 +182,7 @@ export function Search({ onOpen }: SearchProps): React.JSX.Element {
           {empty ? <Empty>Nothing matches “{query.trim()}”.</Empty> : null}
 
           {results && results.series.length ? (
-            <Row title="Series" items={results.series} onSelect={onOpen} />
+            <Row title="Series & collections" items={results.series} onSelect={onOpen} />
           ) : null}
 
           {results && results.videos.length ? (
@@ -190,7 +190,9 @@ export function Search({ onOpen }: SearchProps): React.JSX.Element {
           ) : null}
 
           {!query.trim() ? (
-            <Empty>Try a series name, an episode title, or an episode code like “c4e12”.</Empty>
+            <Empty>
+              Try a series or collection name, an episode title, or an episode code like “c4e12”.
+            </Empty>
           ) : null}
         </div>
       </div>

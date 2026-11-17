@@ -66,6 +66,30 @@ describe('Content', () => {
     await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('[data-testid="play"]'))
   })
 
+  it('opens the series from the episode header', async () => {
+    const onOpen = vi.fn()
+    stubContent(contentData())
+    render(<Content slug="c1e5" onOpen={onOpen} onPlay={vi.fn()} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Campaign 1' }))
+
+    expect(onOpen).toHaveBeenCalledWith({
+      kind: 'series',
+      slug: 'campaign-1',
+      title: 'Campaign 1',
+      image: null,
+      image2x: null
+    })
+  })
+
+  it('has no series link when the video is filed nowhere', async () => {
+    stubContent(contentData({ series: null }))
+    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
+
+    await screen.findByText('Campaign 1 Episode 5')
+    expect(screen.queryByTestId('open-series')).toBeNull()
+  })
+
   it('clamps the description and reveals the continued summary on See More', async () => {
     stubContent(
       contentData({

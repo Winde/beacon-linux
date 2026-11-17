@@ -681,6 +681,38 @@ kbd {
   text-transform: uppercase;
 }
 
+/* The series name on an episode page opens that series. It stays an eyebrow:
+   the same weight and colour as a label, with a chevron to read as a link. */
+.page-head__eyebrow--link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: -6px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font-family: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.page-head__eyebrow--link:hover {
+  color: #fff;
+}
+
+.page-head__eyebrow--link::after {
+  content: '›';
+  font-size: 1.1em;
+  line-height: 1;
+}
+
+.page-head__eyebrow--link.is-focused {
+  color: #fff;
+  outline: 3px solid #fff;
+  outline-offset: 3px;
+}
+
 .page-head__title {
   margin: 0 0 10px;
   font-size: clamp(1.7rem, 2.8vw, 2.5rem);
@@ -789,6 +821,26 @@ kbd {
   background: rgba(240, 184, 102, 0.14);
   color: var(--accent);
   border-color: rgba(240, 184, 102, 0.4);
+}
+
+/* ---------- browse ---------- */
+
+/* A plain counterpart to the page head: no artwork, so it only names the grid
+   underneath and stays out of the scroller. */
+.browse__head {
+  flex: 0 0 auto;
+  padding: 44px var(--gutter) 0;
+}
+
+.browse__title {
+  margin: 0 0 6px;
+  font-size: clamp(1.7rem, 2.8vw, 2.5rem);
+  line-height: 1.15;
+}
+
+.browse__sub {
+  margin: 0;
+  color: var(--muted);
 }
 
 /* ---------- grid ---------- */

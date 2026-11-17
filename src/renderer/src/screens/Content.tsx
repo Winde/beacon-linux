@@ -108,6 +108,7 @@ export function Content({
   if (!data) return null
 
   const resuming = data.resumeAt > 0
+  const series = data.series
   const description = cleanText(data.description)
   const continuedSummary = cleanText(data.continuedSummary)
   // Only offer the toggle when there is a continuation to reveal. The app also
@@ -145,7 +146,27 @@ export function Content({
         ) : null}
         <div className="page-head__shade" />
         <div className="page-head__body">
-          {data.series ? <p className="page-head__eyebrow">{data.series.title}</p> : null}
+          {series ? (
+            <button
+              type="button"
+              className="page-head__eyebrow page-head__eyebrow--link"
+              data-focus
+              data-testid="open-series"
+              tabIndex={-1}
+              title={`View ${series.title}`}
+              onClick={() =>
+                onOpen({
+                  kind: 'series',
+                  slug: series.slug,
+                  title: series.title,
+                  image: null,
+                  image2x: null
+                })
+              }
+            >
+              {series.title}
+            </button>
+          ) : null}
           <h1 className="page-head__title">{data.title}</h1>
           <p className="page-head__sub">
             {[data.minutes ? `${data.minutes} min` : null, data.tier].filter(Boolean).join(' · ')}
