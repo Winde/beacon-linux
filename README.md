@@ -114,8 +114,10 @@ bash install.sh
 
 The installer downloads and verifies the AppImage, installs it to
 `~/Applications/Beacon.AppImage`, adds a Steam shortcut, and applies the library
-artwork. Re-run it to update. `--no-steam`, `--version vX.Y.Z` and `--uninstall`
-are described in [docs/install-steamos.md](docs/install-steamos.md).
+artwork. Re-run it to update; it reuses the existing shortcut and leaves its
+name, layout and any artwork you changed in Steam alone. `--no-steam`,
+`--version vX.Y.Z`, `--force-art` and `--uninstall` are described in
+[docs/install-steamos.md](docs/install-steamos.md).
 
 The installer and the artwork are separate release assets; the AppImage stays a
 single self-contained file.

@@ -23,8 +23,9 @@ bash install.sh
 The script downloads and verifies the AppImage, installs it to
 `~/Applications/Beacon.AppImage`, adds a Steam shortcut, and applies the
 library artwork. Re-run it to update. `--no-steam` installs without the
-shortcut; `--version vX.Y.Z` pins a release; `--uninstall` removes the local
-files. It does not write outside `$HOME`.
+shortcut; `--version vX.Y.Z` pins a release; `--force-art` replaces artwork you
+changed in Steam with the packaged set; `--uninstall` removes the local files.
+It does not write outside `$HOME`.
 
 It cannot choose the controller layout (Steam owns that per-shortcut setting),
 so do this once: **Beacon → Properties → Controller → Gamepad** (or **Gamepad
@@ -67,6 +68,13 @@ Re-run the installer; it replaces `~/Applications/Beacon.AppImage` in place, so
 the Steam entry and its appid stay valid. Manually, download the new AppImage
 over the old file at the same path. Check the release notes for anything that
 needs doing first.
+
+The installer detects the existing Steam shortcut instead of adding a second
+one, and does not touch what Steam stores for it: a renamed entry, a chosen
+controller layout and library artwork you replaced or removed stay as they are.
+Artwork it installed itself is refreshed on update. Use `--force-art` to put the
+packaged hero, logo, header and icons back. The desktop entry is also only
+written when it does not exist.
 
 ## Staying signed in
 

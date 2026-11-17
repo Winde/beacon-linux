@@ -10,13 +10,53 @@ ICON_DIR="${HOME}/.local/share/icons/hicolor/512x512/apps"
 ICON="${ICON_DIR}/beacon.png"
 DESKTOP_DIR="${HOME}/.local/share/applications"
 DESKTOP="${DESKTOP_DIR}/beacon.desktop"
+STATE_DIR="${HOME}/.local/state/beacon"
+ART_MANIFEST="${STATE_DIR}/art.sha256"
 
 VERSION=""
 ADD_TO_STEAM=1
 UNINSTALL=0
+FORCE_ART=0
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 say() { printf '==> %s\n' "$*"; }
+
+# The hash this installer recorded for a file it wrote. No entry means the file
+# was not ours to begin with (or the player has replaced ours since).
+art_owner_hash() {
+  [ -f "$ART_MANIFEST" ] || return 0
+  # Hash and path are separated by two spaces; the path may contain spaces.
+  awk -v path="$1" 'substr($0, length($1) + 3) == path { print $1; exit }' \
+    "$ART_MANIFEST" 2>/dev/null
+}
+
+# Copy packaged art into place unless the player has replaced that file. Files
+# we wrote earlier are refreshed, so artwork still improves between releases.
+install_art() {
+  src="$1"
+  dst="$2"
+  [ -f "$src" ] || return 0
+  # No manifest entry is not an error: it just means "leave this one alone".
+  owned="$(art_owner_hash "$dst")"
+  if [ "$FORCE_ART" -eq 0 ]; then
+    if [ ! -f "$dst" ] && [ -n "$owned" ]; then
+      # We put this here before and it is gone now: the player removed it.
+      # Keep the record so later runs keep leaving it removed.
+      printf '%s  %s\n' "$owned" "$dst" >> "$ART_MANIFEST.new"
+      return 1
+    fi
+    if [ -f "$dst" ]; then
+      current="$(sha256sum "$dst" | cut -d' ' -f1)"
+      if [ -z "$owned" ] || [ "$current" != "$owned" ]; then
+        return 1
+      fi
+    fi
+  fi
+  mkdir -p "$(dirname "$dst")"
+  cp -f "$src" "$dst"
+  printf '%s  %s\n' "$(sha256sum "$dst" | cut -d' ' -f1)" "$dst" >> "$ART_MANIFEST.new"
+  return 0
+}
 
 # Steam owns each shortcut's controller configuration, so this cannot be set
 # here. Point at the layouts that present the pad the app reads.
@@ -32,6 +72,7 @@ Usage: install.sh [options]
 
   --version vX.Y.Z   Install a specific release (default: latest)
   --no-steam         Install the app but do not add a Steam shortcut
+  --force-art        Replace library artwork changed in Steam with the packaged set
   --uninstall        Remove the AppImage, desktop entry and icon
   -h, --help         Show this help
 
@@ -56,6 +97,10 @@ while [ $# -gt 0 ]; do
       ADD_TO_STEAM=0
       shift
       ;;
+    --force-art)
+      FORCE_ART=1
+      shift
+      ;;
     --uninstall)
       UNINSTALL=1
       shift
@@ -73,7 +118,8 @@ done
 [ "$(id -u)" -eq 0 ] && die "do not run this as root"
 
 if [ "$UNINSTALL" -eq 1 ]; then
-  rm -f "$APPIMAGE" "$ICON" "$DESKTOP"
+  rm -f "$APPIMAGE" "$ICON" "$DESKTOP" "$ART_MANIFEST" "$ART_MANIFEST.new"
+  rmdir "$STATE_DIR" 2>/dev/null || true
   say "Removed the AppImage, desktop entry and icon"
   say "Remove the Beacon shortcut from Steam in Desktop Mode if it is still listed."
   exit 0
@@ -131,23 +177,29 @@ else
   say "Could not extract the icon; the desktop entry will use a generic icon"
 fi
 
-exec_path="${APPIMAGE//\\/\\\\}"
-exec_path="${exec_path//\"/\\\"}"
-{
-  printf '[Desktop Entry]\n'
-  printf 'Type=Application\n'
-  printf 'Name=%s\n' "$APP_NAME"
-  printf 'Comment=Unofficial Critical Role streaming client\n'
-  printf 'Exec="%s"\n' "$exec_path"
-  if [ -f "$ICON" ]; then
-    printf 'Icon=%s\n' "$ICON"
-  fi
-  printf 'Terminal=false\n'
-  printf 'Categories=AudioVideo;Video;\n'
-  printf 'StartupWMClass=beacon\n'
-} > "$DESKTOP"
-chmod 644 "$DESKTOP"
-say "Wrote ${DESKTOP}"
+# The launcher is generic and never version-specific, so a reinstall leaves an
+# existing one alone: it may have been edited in the desktop or by hand.
+if [ -f "$DESKTOP" ]; then
+  say "Kept the existing desktop entry ${DESKTOP}"
+else
+  exec_path="${APPIMAGE//\\/\\\\}"
+  exec_path="${exec_path//\"/\\\"}"
+  {
+    printf '[Desktop Entry]\n'
+    printf 'Type=Application\n'
+    printf 'Name=%s\n' "$APP_NAME"
+    printf 'Comment=Unofficial Critical Role streaming client\n'
+    printf 'Exec="%s"\n' "$exec_path"
+    if [ -f "$ICON" ]; then
+      printf 'Icon=%s\n' "$ICON"
+    fi
+    printf 'Terminal=false\n'
+    printf 'Categories=AudioVideo;Video;\n'
+    printf 'StartupWMClass=beacon\n'
+  } > "$DESKTOP"
+  chmod 644 "$DESKTOP"
+  say "Wrote ${DESKTOP}"
+fi
 
 if [ "$ADD_TO_STEAM" -eq 0 ]; then
   say "Skipped the Steam shortcut (--no-steam)"
@@ -168,9 +220,11 @@ has_shortcut() {
 }
 
 shortcut_path=""
+shortcut_existed=0
 while IFS= read -r -d '' file; do
   if has_shortcut "$file"; then
     shortcut_path="$file"
+    shortcut_existed=1
     break
   fi
 done < <(shortcut_files)
@@ -220,7 +274,12 @@ if [ -z "$shortcut_path" ]; then
   exit 0
 fi
 
-say "Found the Steam shortcut"
+if [ "$shortcut_existed" -eq 1 ]; then
+  # Its name, icon and launch options are the player's; the appid stays valid.
+  say "Reusing the existing Steam shortcut"
+else
+  say "Found the Steam shortcut"
+fi
 controller_hint
 appid=""
 if command -v python3 >/dev/null 2>&1; then
@@ -264,7 +323,10 @@ ART="$(mktemp -d)"
 if curl -fsSL --retry 3 -o "$ART/steam-art.zip" "${BASE}/steam-art.zip"; then
   unzip -q "$ART/steam-art.zip" -d "$ART"
   GRID="$(dirname "$shortcut_path")/grid"
-  mkdir -p "$GRID"
+  mkdir -p "$GRID" "$STATE_DIR"
+  rm -f "$ART_MANIFEST.new"
+  : > "$ART_MANIFEST.new"
+  kept=0
   for pair in \
     "hero.png:${appid}_hero.png" \
     "portrait.png:${appid}p.png" \
@@ -273,8 +335,15 @@ if curl -fsSL --retry 3 -o "$ART/steam-art.zip" "${BASE}/steam-art.zip"; then
     "icon.png:${appid}_icon.png"; do
     src="${pair%%:*}"
     dst="${pair#*:}"
-    [ -f "$ART/$src" ] && cp -f "$ART/$src" "$GRID/$dst"
+    if ! install_art "$ART/$src" "$GRID/$dst"; then
+      kept=$((kept + 1))
+    fi
   done
+  mv -f "$ART_MANIFEST.new" "$ART_MANIFEST"
+  if [ "$kept" -gt 0 ]; then
+    say "Kept ${kept} artwork file(s) you changed or removed in Steam"
+    say "Run with --force-art to put the packaged set back"
+  fi
   say "Artwork applied"
 else
   say "Could not download steam-art.zip; artwork was skipped"
