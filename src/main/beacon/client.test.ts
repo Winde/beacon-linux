@@ -2656,6 +2656,110 @@ describe('caching', () => {
     expect(store.clear).toHaveBeenCalledOnce()
   })
 
+  it('does not cache a feed read that a watch mark overtook', async () => {
+    const homeBlock = deferred<unknown>()
+    net.fetch.mockImplementation(async (_url: string, init?: { body?: string }) => {
+      const body = init?.body ? (JSON.parse(init.body) as { query?: string }) : {}
+      switch (body.query) {
+        case Q.HOME_BLOCKS:
+          return response({ data: await homeBlock.promise })
+        case Q.CONTINUE_WATCHING:
+          return response({ data: { continueWatching: { docs: [] } } })
+        case Q.ME:
+          return response({ data: MEMBER })
+        case Q.LOOKUP:
+          return response({ data: { Contents: { docs: [{ id: 'e1', duration: 100_000 }] } } })
+        case Q.PROGRESS_FOR:
+          return response({ data: { getProgressForContent: { timeMap: [] } } })
+        case Q.TRACK:
+          return response({ data: { trackView: { success: true } } })
+        default:
+          throw new Error(`unrouted query: ${String(body.query).slice(0, 40)}`)
+      }
+    })
+    const client = new BeaconClient()
+    const store = {
+      read: vi.fn(() => null),
+      saveHome: vi.fn(),
+      saveFavourites: vi.fn(),
+      clear: vi.fn()
+    }
+    client.homeStore = store as unknown as HomeStore
+
+    const pending = client.home()
+    await vi.waitFor(() => expect(cmsCalls(Q.HOME_BLOCKS)).toBe(1))
+
+    await client.markWatched('c1e1', true)
+
+    homeBlock.resolve({
+      MemberHomePage: {
+        pageContent: [
+          {
+            __typename: 'LatestCarousel',
+            id: 'latest-block',
+            title: 'Latest Videos',
+            content: [blockContent({ id: 'r1', slug: 'recent', title: 'Recent' })]
+          }
+        ]
+      }
+    })
+
+    await expect(pending).resolves.toMatchObject({ rows: expect.any(Array) })
+    expect(store.saveHome).not.toHaveBeenCalled()
+  })
+
+  it('does not cache a feed read that a progress write overtook', async () => {
+    const homeBlock = deferred<unknown>()
+    net.fetch.mockImplementation(async (_url: string, init?: { body?: string }) => {
+      const body = init?.body ? (JSON.parse(init.body) as { query?: string }) : {}
+      switch (body.query) {
+        case Q.HOME_BLOCKS:
+          return response({ data: await homeBlock.promise })
+        case Q.CONTINUE_WATCHING:
+          return response({ data: { continueWatching: { docs: [] } } })
+        case Q.ME:
+          return response({ data: MEMBER })
+        case Q.TRACK:
+          return response({ data: { trackView: { success: true } } })
+        default:
+          throw new Error(`unrouted query: ${String(body.query).slice(0, 40)}`)
+      }
+    })
+    const client = new BeaconClient()
+    const store = {
+      read: vi.fn(() => null),
+      saveHome: vi.fn(),
+      saveFavourites: vi.fn(),
+      clear: vi.fn()
+    }
+    client.homeStore = store as unknown as HomeStore
+
+    const pending = client.home()
+    await vi.waitFor(() => expect(cmsCalls(Q.HOME_BLOCKS)).toBe(1))
+
+    // A progress write lands while the feed read is still waiting on the CMS.
+    await client.trackProgress('e1', 30, 100)
+    await client.flushProgress()
+
+    homeBlock.resolve({
+      MemberHomePage: {
+        pageContent: [
+          {
+            __typename: 'LatestCarousel',
+            id: 'latest-block',
+            title: 'Latest Videos',
+            content: [blockContent({ id: 'r1', slug: 'recent', title: 'Recent' })]
+          }
+        ]
+      }
+    })
+
+    await expect(pending).resolves.toMatchObject({ rows: expect.any(Array) })
+    // The answer predates the write, so it is shown to this caller but must
+    // not become the next launch's cached Home.
+    expect(store.saveHome).not.toHaveBeenCalled()
+  })
+
   it('reads the cached feed and Favourites row for the account in the session', async () => {
     const client = new BeaconClient()
     const store = {

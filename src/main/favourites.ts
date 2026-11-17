@@ -45,6 +45,8 @@ export class FavouritesService {
   private writes: Promise<unknown> = Promise.resolve()
   /** The account the current list belongs to; null for a guest, which is not cached. */
   private scope: string | null = null
+  /** Bumped by every local write, so a read that overtook one cannot win. */
+  private epoch = 0
 
   constructor(
     private readonly api: FavouritesApi,
@@ -58,6 +60,13 @@ export class FavouritesService {
    * account, so the caller can keep the row that is already on screen.
    */
   async list(): Promise<FavouritesData> {
+    // Captured before the wait: a write already queued is one this read will
+    // wait for, while one queued during the wait or the read makes the answer
+    // older than both the screen and the cache.
+    const epoch = this.epoch
+    // Let a write that is already in flight finish. A read that overtook it
+    // would otherwise answer with the state before the viewer's own change.
+    await this.writes.catch(() => undefined)
     const after = this.preferences.favouritesAfter()
     // The row is cached under the account it belongs to. A guest has no row
     // and is never cached, so signing out leaves nothing behind to clean.
@@ -65,7 +74,9 @@ export class FavouritesService {
     this.scope = email
     if (!email) return this.snapshot([], after, false)
     const ids = await this.api.favouriteCollectionIds()
-    if (!ids.length) return this.snapshot([], after)
+    if (!ids.length) {
+      return this.epoch === epoch ? this.snapshot([], after) : { items: [], after }
+    }
     // Cold boots have the catalog on disk; this only waits the first time.
     await this.catalog.ensure().catch(() => {})
     const items: FavouriteItem[] = []
@@ -76,6 +87,9 @@ export class FavouritesService {
       // stable for this run rather than making it flicker.
       else if (this.shown.has(id)) items.push(this.shown.get(id)!)
     }
+    // A write while this was reading owns the row now: hand the answer back
+    // without touching `shown` or the cache, so the write's copy stands.
+    if (this.epoch !== epoch) return { items, after }
     // Ids the catalog could not hydrate (a failed ensure, a cold index) must
     // not replace a useful cached row with an empty one.
     return this.snapshot(items, after, items.length > 0)
@@ -92,6 +106,8 @@ export class FavouritesService {
 
   /** Run one write after the previous one has settled, successfully or not. */
   private enqueue<T>(run: () => Promise<T>): Promise<T> {
+    // A read already in flight must not be allowed to replace this row.
+    this.epoch += 1
     const task = this.writes.catch(() => undefined).then(run)
     this.writes = task.catch(() => undefined)
     return task
@@ -145,6 +161,8 @@ export class FavouritesService {
 
   /** Moving the row is local, so it must not re-read the account. */
   setPosition(after: FavouritesAnchor): FavouritesData {
+    // Moving the row is a local layout write; it is still newer than a read.
+    this.epoch += 1
     const value = this.preferences.setFavouritesAfter(after)
     return this.snapshot([...this.shown.values()], value)
   }

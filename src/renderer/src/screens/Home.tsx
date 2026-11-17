@@ -9,7 +9,7 @@ import { Hero } from '../components/Hero'
 import { RefreshNote } from '../components/RefreshNote'
 import { Row } from '../components/Row'
 import { ScreenScroll } from '../components/ScreenScroll'
-import { ErrorNote, Spinner } from '../components/ui'
+import { DelayedSpinner, ErrorNote } from '../components/ui'
 
 const FAVOURITES_ROW = 'Favourites'
 const NO_FAVOURITES: FavouriteItem[] = []
@@ -30,6 +30,8 @@ interface HomeProps {
   onMoveFavourites?: (after: FavouritesAnchor) => void
   /** Slugs whose favourite write is still in flight. */
   pendingFavourites?: ReadonlySet<string>
+  /** Re-read account data that another client may have changed. */
+  onRevalidate?: () => void
 }
 
 export function Home({
@@ -41,7 +43,8 @@ export function Home({
   favouritesAfter = null,
   onToggleFavourite,
   onMoveFavourites,
-  pendingFavourites
+  pendingFavourites,
+  onRevalidate
 }: HomeProps): React.JSX.Element | null {
   // The previous feed stays on screen while the refresh runs: this reload
   // happens behind the viewer, who is looking at the screen below the player.
@@ -62,7 +65,10 @@ export function Home({
   const placed = useRef(false)
 
   useEffect(() => {
-    const again = (): void => setRetry((count) => count + 1)
+    const again = (): void => {
+      setRetry((count) => count + 1)
+      onRevalidate?.()
+    }
     const visible = (): void => {
       if (!document.hidden) again()
     }
@@ -74,7 +80,7 @@ export function Home({
       window.removeEventListener('focus', again)
       document.removeEventListener('visibilitychange', visible)
     }
-  }, [])
+  }, [onRevalidate])
 
   // Home ships its shelves in editorial order. Favourites is ours, so it is
   // dropped in after a named shelf rather than at an index that would drift
@@ -135,7 +141,7 @@ export function Home({
   if (loading && !data) {
     return (
       <div className="screen screen--center">
-        <Spinner label="Loading Beacon" />
+        <DelayedSpinner label="Loading Beacon" />
       </div>
     )
   }

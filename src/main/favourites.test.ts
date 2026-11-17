@@ -5,6 +5,17 @@ import type { FavouritesApi, FavouritesCache } from './favourites'
 import { FavouritesService } from './favourites'
 import type { PreferencesStore } from './preferences'
 
+function deferred<T>(): {
+  promise: Promise<T>
+  resolve: (value: T) => void
+} {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
 function collection(id: string, slug: string, name: string) {
   return {
     id,
@@ -25,6 +36,7 @@ function harness(
     ids?: string[]
     set?: FavouritesApi['setCollectionFavourite']
     collections?: { id: string; slug: string; name: string }[]
+    idsImpl?: () => Promise<string[]>
     store?: FavouritesCache
   } = {}
 ) {
@@ -38,7 +50,9 @@ function harness(
   )
   const api: FavouritesApi = {
     accountEmail: vi.fn(() => Promise.resolve(email)),
-    favouriteCollectionIds: vi.fn(() => Promise.resolve(options.ids ?? ['c1'])),
+    favouriteCollectionIds: vi.fn(
+      options.idsImpl ?? (() => Promise.resolve(options.ids ?? ['c1']))
+    ),
     // By default the account takes the write and answers with the new state.
     setCollectionFavourite:
       options.set ?? vi.fn((_id: string, favourite: boolean) => Promise.resolve(favourite))
@@ -108,6 +122,58 @@ describe('FavouritesService', () => {
       'member@example.com',
       expect.objectContaining({ after: 'top' })
     )
+  })
+
+  it('waits for a write before reading the account', async () => {
+    const gate = deferred<boolean>()
+    const { service, api } = harness({ ids: [], set: () => gate.promise })
+
+    const adding = service.add(series)
+    const listing = service.list()
+    await Promise.resolve()
+    expect(api.favouriteCollectionIds).not.toHaveBeenCalled()
+
+    gate.resolve(true)
+    await adding
+    await listing
+
+    expect(api.favouriteCollectionIds).toHaveBeenCalled()
+  })
+
+  it('does not let a read that started before a write replace the row', async () => {
+    const gate = deferred<string[]>()
+    const { service, store, api } = harness({ idsImpl: () => gate.promise })
+
+    const listing = service.list()
+    await vi.waitFor(() => expect(api.favouriteCollectionIds).toHaveBeenCalled())
+    const added = await service.add(series)
+    expect(store.saveFavourites).toHaveBeenLastCalledWith('member@example.com', added)
+
+    // The read answers with the state before the write; it must not win.
+    gate.resolve([])
+    await expect(listing).resolves.toEqual({ items: [], after: null })
+
+    expect(store.saveFavourites).toHaveBeenLastCalledWith('member@example.com', added)
+  })
+
+  it('writes an added favourite through to the cache', async () => {
+    const { service, store } = harness({ ids: [] })
+    await service.list()
+
+    const data = await service.add(series)
+
+    expect(data.items).toHaveLength(1)
+    expect(store.saveFavourites).toHaveBeenLastCalledWith('member@example.com', data)
+  })
+
+  it('writes a removal through to the cache', async () => {
+    const { service, store } = harness({ ids: ['c1'] })
+    await service.list()
+
+    const data = await service.remove('campaign-1')
+
+    expect(data.items).toEqual([])
+    expect(store.saveFavourites).toHaveBeenLastCalledWith('member@example.com', data)
   })
 
   it('hydrates the account ids from the catalog', async () => {

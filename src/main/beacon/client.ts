@@ -138,6 +138,8 @@ export class BeaconClient {
   homeStore: HomeStore | null = null
   /** Bumped when the account changes, so an old fetch cannot write the slot. */
   private authGeneration = 0
+  /** Bumped when progress or a watch mark makes the cached feed old. */
+  private feedGeneration = 0
   /** Five minutes: series cards show progress, so shorter is more accurate. */
   private readonly collectionCache = new TtlCache<string, CollectionData>(5 * 60_000, 40)
   private readonly contentCache = new TtlCache<string, ContentData>(10 * 60_000, 40)
@@ -624,9 +626,13 @@ export class BeaconClient {
   }
 
   async home(): Promise<HomeData> {
-    const generation = this.authGeneration
     await this.settleReports()
     const key = await this.scope()
+    // Captured after the flush: a queued progress write that just landed is
+    // part of this read, not a reason to distrust it. A write during the read
+    // is a reason not to save the answer.
+    const generation = this.authGeneration
+    const feedGeneration = this.feedGeneration
     const data = await this.homeCache.load(key, () =>
       buildHome({
         gql: (query, variables) => this.gql(query, variables),
@@ -640,9 +646,11 @@ export class BeaconClient {
     )
     // A CMS hiccup must not be remembered as an empty home for a minute.
     if (!data.hero.length && !data.rows.length) this.homeCache.delete(key)
-    // Only the account that asked for it may fill the slot: a sign-out while
-    // this was in flight must not leave the previous member's rows on disk.
-    else if (generation === this.authGeneration) this.homeStore?.saveHome(key, data)
+    // Only the account that asked for it may fill the slot, and only if no
+    // progress write made this answer old while it was in flight.
+    else if (generation === this.authGeneration && feedGeneration === this.feedGeneration) {
+      this.homeStore?.saveHome(key, data)
+    }
     return data
   }
 
@@ -1411,6 +1419,11 @@ export class BeaconClient {
 
   /** The rows, resume points and progress bars now describe an older moment. */
   private invalidateProgress(): void {
+    // A feed read already in flight is now older than a local write; it may
+    // still be shown to the caller, but it must not become the next launch's
+    // cache. Cross-client writes cannot be seen at all, which is why every
+    // launch revalidates regardless of this counter.
+    this.feedGeneration += 1
     this.homeCache.clear()
     this.collectionCache.clear()
     this.contentCache.clear()

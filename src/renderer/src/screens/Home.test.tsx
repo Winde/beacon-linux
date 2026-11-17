@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Card, FavouriteItem, HomeData } from '@shared/types'
+import { SPINNER_DELAY } from '../components/ui'
 import { HERO_WIDTH, preloadAll } from '../lib/images'
 import { focusFirst } from '../nav/focus'
 import { Home } from './Home'
@@ -14,6 +15,7 @@ vi.mock('../lib/images', async (importOriginal) => {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -78,12 +80,25 @@ function stubHome(result: HomeData | Promise<HomeData>): ReturnType<typeof vi.fn
 }
 
 describe('Home', () => {
-  it('shows the loader while the feed loads', () => {
+  it('holds the loader back while a slow feed is still worth waiting for', () => {
+    vi.useFakeTimers()
     stubHome(new Promise<HomeData>(() => {}))
     render(<Home onOpen={vi.fn()} onPlay={vi.fn()} />)
 
-    expect(screen.getByRole('status')).toBeDefined()
+    expect(screen.queryByText('Loading Beacon')).toBeNull()
+    act(() => vi.advanceTimersByTime(SPINNER_DELAY - 1))
+    expect(screen.queryByText('Loading Beacon')).toBeNull()
+    act(() => vi.advanceTimersByTime(1))
     expect(screen.getByText('Loading Beacon')).toBeDefined()
+  })
+
+  it('never flashes the loader when the feed arrives quickly', async () => {
+    stubHome(homeData())
+    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} />)
+
+    expect(screen.queryByText('Loading Beacon')).toBeNull()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Featured One' })).toBeDefined()
+    expect(screen.queryByText('Loading Beacon')).toBeNull()
   })
 
   it('shows a feed fetched during sign-in without a loader', async () => {
@@ -93,6 +108,20 @@ describe('Home', () => {
     expect(screen.queryByText('Loading Beacon')).toBeNull()
     expect(screen.getByRole('heading', { level: 1, name: 'Featured One' })).toBeDefined()
     expect(screen.getByRole('heading', { name: 'Recently added' })).toBeDefined()
+  })
+
+  it('revalidates account data when the window regains focus', async () => {
+    stubHome(new Promise<HomeData>(() => {}))
+    const onRevalidate = vi.fn()
+    render(
+      <Home onOpen={vi.fn()} onPlay={vi.fn()} initial={homeData()} onRevalidate={onRevalidate} />
+    )
+
+    act(() => {
+      window.dispatchEvent(new Event('focus'))
+    })
+
+    expect(onRevalidate).toHaveBeenCalledOnce()
   })
 
   it('shows a clean error from the main process', async () => {

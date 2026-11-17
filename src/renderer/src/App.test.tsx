@@ -231,15 +231,19 @@ describe('App sign out', () => {
 
 describe('App startup', () => {
   it('paints the cached feed without waiting for the account check', async () => {
-    stubApp({
+    const { home } = stubApp({
       cachedHome: HOME_WITH_SERIES,
       homeImpl: () => new Promise<HomeData>(() => {}),
       status: () => new Promise<AuthStatus>(() => {})
     })
     render(<App />)
 
+    // The local boot is long over before the delayed spinner would appear.
+    expect(screen.queryByText('Loading Beacon')).toBeNull()
     expect(await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })).toBeDefined()
     expect(screen.queryByText('Loading Beacon')).toBeNull()
+    // A cache hit is never treated as fresh: the feed is revalidated anyway.
+    expect(home).toHaveBeenCalledOnce()
   })
 
   it('paints the cached Favourites row with the feed', async () => {
@@ -254,6 +258,57 @@ describe('App startup', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })).toBeDefined()
     expect(screen.getByRole('heading', { name: 'Favourites' })).toBeDefined()
+  })
+
+  it('replaces a cached Favourites row when the account has moved on', async () => {
+    let release!: (data: FavouritesData) => void
+    const live = new Promise<FavouritesData>((resolve) => {
+      release = resolve
+    })
+    stubApp({
+      cachedHome: HOME_WITH_SERIES,
+      cachedFavourites: { items: [favourite('old', 'Old Favourite')], after: null },
+      homeImpl: () => new Promise<HomeData>(() => {}),
+      status: () => new Promise<AuthStatus>(() => {}),
+      listImpl: () => live
+    })
+    render(<App />)
+
+    expect(await screen.findByText('Old Favourite')).toBeDefined()
+
+    act(() => release({ items: [favourite('new', 'New Favourite')], after: null }))
+
+    expect(await screen.findByText('New Favourite')).toBeDefined()
+    expect(screen.queryByText('Old Favourite')).toBeNull()
+  })
+
+  it('does not duplicate the boot favourites read on focus', async () => {
+    let release!: (data: FavouritesData) => void
+    const live = new Promise<FavouritesData>((resolve) => {
+      release = resolve
+    })
+    const { list } = stubApp({
+      cachedHome: HOME_WITH_SERIES,
+      homeImpl: () => new Promise<HomeData>(() => {}),
+      listImpl: () => live
+    })
+    render(<App />)
+    await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })
+
+    act(() => {
+      window.dispatchEvent(new Event('focus'))
+    })
+    expect(list).toHaveBeenCalledOnce()
+
+    await act(async () => {
+      release({ items: [], after: null })
+    })
+
+    // The read just landed; a second focus is inside the cooldown.
+    act(() => {
+      window.dispatchEvent(new Event('focus'))
+    })
+    expect(list).toHaveBeenCalledOnce()
   })
 
   it('falls back to sign-in when the stored session is rejected', async () => {

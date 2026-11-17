@@ -27,6 +27,11 @@ phase instead of guessed at.
    feed and row stay on screen throughout and are replaced when the refresh
    lands.
 
+The startup spinner is delayed by 300 ms. A local boot paints the app
+background and goes straight to Home or Login, so a fast launch never flashes a
+spinner; a slow keyring or a waiting feed still gets one once the wait is worth
+acknowledging.
+
 A signed-in first launch — including the first after upgrading — with no
 `home-cache.json` still shows the Home spinner for the feed request, and its
 Favourites row arrives with that first list. Every later launch paints the
@@ -46,10 +51,35 @@ read, merged with the other, and best-effort deleted when:
 
 Deletion failures never block boot, sign-out or sign-in. A slot found for
 another account is deleted on sight, not merely ignored, so a shared Deck does
-not keep the previous member's rows around. Guests are never cached.
+not keep the previous member's rows around. A guest has no account row, so the
+Favourites half is not written for one; the guest's feed may still be reused
+when Skip leaves sign-in.
 
 Because the row is painted from the same slot as the feed, it no longer appears
 after the shelves and shifts the page down.
+
+## Freshness and local writes
+
+There is no clean state for account data. Another client can add or remove a
+favourite, move a progress point or mark an episode watched at any moment, so a
+cached screen is a last-known-good copy, not a claim about the server. A
+persistent clean/dirty flag would be a promise the client cannot keep. Instead:
+
+- Every launch, reconnect and window focus revalidates. The cached screen is
+  shown while the read runs and is never treated as fresh.
+- Favourites are write-through: a list read, add, remove or row move updates the
+  slot. A read waits for a write already queued, and a read that started before
+  a newer write is handed back to its caller but cannot replace the row or the
+  cache.
+- Progress and watch marks bump a feed generation. A feed read that was already
+  in flight when a write landed is still shown to that caller, but it cannot
+  become the next cached Home. The saved feed may lag the last progress tick;
+  the next revalidation is what reconciles it.
+- Cross-client changes are only observable by reading again. A failed read
+  leaves the saved screen in place and labels it offline or failed.
+
+The Favourites row re-reads on focus and reconnect at most once every ten
+seconds, so a boot read is not repeated by an immediate alt-tab.
 
 ## What the viewer sees
 
@@ -60,7 +90,8 @@ after the shelves and shifts the page down.
   (no connection) or `Couldn't refresh — saved copy` (server failure). It stays
   until a later refresh succeeds.
 - Returning online, focusing the window, or coming back from another app
-  triggers the same refresh.
+  triggers the same refresh, and a favourites read if the last one is old
+  enough.
 
 ## Measured baseline before the cached feed
 

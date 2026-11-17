@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
-import { Empty, ErrorNote, Spinner } from './ui'
+import { act, cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { DelayedSpinner, Empty, ErrorNote, SPINNER_DELAY, Spinner } from './ui'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 describe('Spinner', () => {
   it('announces itself and names what is loading', () => {
@@ -18,6 +21,27 @@ describe('Spinner', () => {
 
     expect(screen.getByRole('status')).toBeDefined()
     expect(container.querySelector('.spinner__label')).toBeNull()
+  })
+})
+
+describe('DelayedSpinner', () => {
+  it('stays out of the way while a load is still quick', () => {
+    vi.useFakeTimers()
+    render(<DelayedSpinner label="Loading Beacon" />)
+
+    expect(screen.queryByRole('status')).toBeNull()
+    act(() => vi.advanceTimersByTime(SPINNER_DELAY - 1))
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('appears once the wait is worth acknowledging', () => {
+    vi.useFakeTimers()
+    render(<DelayedSpinner label="Loading Beacon" />)
+
+    act(() => vi.advanceTimersByTime(SPINNER_DELAY))
+
+    expect(screen.getByRole('status')).toBeDefined()
+    expect(screen.getByText('Loading Beacon')).toBeDefined()
   })
 })
 

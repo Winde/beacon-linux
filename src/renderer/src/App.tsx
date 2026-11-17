@@ -13,7 +13,7 @@ import { Player, type PlayerHandle } from './screens/Player'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { NavRail } from './components/NavRail'
 import { UpdateDialog, type UpdatePrompt } from './components/UpdateDialog'
-import { Spinner } from './components/ui'
+import { DelayedSpinner } from './components/ui'
 import { cleanError } from './lib/errors'
 
 export type Route =
@@ -85,6 +85,10 @@ export default function App(): React.JSX.Element {
   /** Orders writes and replies: only the newest one may replace the row. */
   const favouriteSeq = useRef(0)
   const pendingCounts = useRef(new Map<string, number>())
+  /** When the Favourites row was last read, so focus does not duplicate boot. */
+  const favouritesLoadedAt = useRef(0)
+  /** A read is already in flight; focus must not start a second one. */
+  const favouritesLoading = useRef(false)
   // Bumped when the player closes. What is behind it has just learned about
   // progress it did not have when its data was built, and screens stay mounted
   // while the player is open, so nothing else would refresh them.
@@ -194,14 +198,32 @@ export default function App(): React.JSX.Element {
    */
   const loadFavourites = useCallback(async () => {
     const seq = ++favouriteSeq.current
+    favouritesLoading.current = true
     try {
       const data = await window.beacon.favourites.list()
-      if (seq === favouriteSeq.current) setFavourites(data)
+      if (seq === favouriteSeq.current) {
+        setFavourites(data)
+        favouritesLoadedAt.current = Date.now()
+      }
     } catch {
       // A network hiccup must not look like "you have no favourites"; the next
       // screen load reads again.
+    } finally {
+      // A newer load owns the flag; only let the current one clear it.
+      if (seq === favouriteSeq.current) favouritesLoading.current = false
     }
   }, [])
+
+  /**
+   * Another client can change favourites at any time. Focus and reconnect are
+   * the reconciliation points, but a boot read already running, or one just
+   * taken, is not repeated for a quick alt-tab.
+   */
+  const refreshFavourites = useCallback(() => {
+    if (favouritesLoading.current) return
+    if (Date.now() - favouritesLoadedAt.current < 10_000) return
+    void loadFavourites()
+  }, [loadFavourites])
 
   /**
    * Confirm the stored session with the account, after the first screen is
@@ -394,9 +416,14 @@ export default function App(): React.JSX.Element {
   )
 
   const moveFavourites = useCallback((after: FavouritesAnchor) => {
+    // The move is newer than any list already in flight; do not let an older
+    // answer put the row back where it was.
+    const seq = ++favouriteSeq.current
     window.beacon.favourites
       .setPosition(after)
-      .then(setFavourites)
+      .then((data) => {
+        if (seq === favouriteSeq.current) setFavourites(data)
+      })
       .catch(() => {})
   }, [])
   // The rail is only focusable while open, so focus it once it is on screen.
@@ -574,7 +601,7 @@ export default function App(): React.JSX.Element {
   if (!current) {
     return (
       <div className="screen screen--center">
-        <Spinner label="Loading Beacon" />
+        <DelayedSpinner label="Loading Beacon" />
       </div>
     )
   }
@@ -622,6 +649,7 @@ export default function App(): React.JSX.Element {
             onToggleFavourite={signedIn ? toggleFavourite : undefined}
             onMoveFavourites={moveFavourites}
             pendingFavourites={pendingFavourites}
+            onRevalidate={refreshFavourites}
           />
         )
       case 'collection':
