@@ -58,7 +58,7 @@ export function Browse({ onOpen }: BrowseProps): React.JSX.Element | null {
       </header>
 
       {both ? (
-        <div className="tabs" role="tablist">
+        <div className="tabs" role="tablist" data-focus-row>
           {(['series', 'collections'] as const).map((tab) => (
             <button
               key={tab}
@@ -78,7 +78,7 @@ export function Browse({ onOpen }: BrowseProps): React.JSX.Element | null {
 
       <ScreenScroll>
         {items.length ? (
-          <div className="grid">
+          <div className="grid" data-focus-row>
             {items.map((card) => (
               <Tile key={card.slug} card={card} onSelect={onOpen} />
             ))}

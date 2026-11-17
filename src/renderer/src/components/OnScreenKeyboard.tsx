@@ -21,7 +21,7 @@ export function OnScreenKeyboard({
 }: OnScreenKeyboardProps): React.JSX.Element {
   return (
     <div className="keyboard">
-      <div className="keyboard__grid">
+      <div className="keyboard__grid" data-focus-row>
         {KEYS.map((key) => (
           <button
             key={key}
@@ -35,7 +35,7 @@ export function OnScreenKeyboard({
           </button>
         ))}
       </div>
-      <div className="keyboard__actions">
+      <div className="keyboard__actions" data-focus-row>
         <button type="button" className="key" data-focus tabIndex={-1} onClick={() => onChar(' ')}>
           Space
         </button>

@@ -91,7 +91,7 @@ export function Collection({
             {data.isSeries ? 'Series' : 'Collection'} · {total} videos
           </p>
           {onToggleFavourite ? (
-            <div className="button-row">
+            <div className="button-row" data-focus-row>
               <FavouriteButton
                 active={inFavourites}
                 pending={favouritePending}
@@ -103,7 +103,7 @@ export function Collection({
       </header>
 
       {data.seasons.length > 1 ? (
-        <div className="tabs" role="tablist">
+        <div className="tabs" role="tablist" data-focus-row>
           {data.seasons.map((item, index) => (
             <button
               key={item.title}
@@ -122,7 +122,7 @@ export function Collection({
       ) : null}
 
       <ScreenScroll>
-        <div className="grid">
+        <div className="grid" data-focus-row>
           {season?.items.map((card) => (
             <Tile key={card.slug} card={card} onSelect={onOpen} />
           ))}

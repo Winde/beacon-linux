@@ -66,7 +66,7 @@ export function Hero({
         <p className="hero__eyebrow">Featured</p>
         <h1 className="hero__title">{card.title}</h1>
         <p className="hero__sub">{sub.filter(Boolean).join(' · ')}</p>
-        <div className="button-row">
+        <div className="button-row" data-focus-row>
           <button
             type="button"
             className="button button--primary"

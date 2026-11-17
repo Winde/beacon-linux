@@ -12,6 +12,8 @@ type Listener = (element: HTMLElement | null) => void
 
 const FOCUSABLE = '[data-focus]:not([data-focus="false"])'
 const FOCUS_CLASS = 'is-focused'
+/** A horizontal strip of items, e.g. a shelf, a grid line, or a button row. */
+const ROW = '[data-focus-row]'
 
 let current: HTMLElement | null = null
 const listeners = new Set<Listener>()
@@ -133,8 +135,10 @@ function pick(from: HTMLElement, pool: HTMLElement[], direction: Direction): HTM
     const thickness = horizontal ? Math.min(a.height, b.height) : Math.min(a.width, b.width)
     const aligned = overlap > thickness * 0.6
 
-    // Never drift diagonally between rows just because a row ended.
-    if (horizontal && !aligned && secondary > primary) continue
+    // A horizontal press never leaves its row. Drifting diagonally to whatever
+    // sits near the old column is how focus used to land in the middle of the
+    // next shelf; the row-end wrap handles that from its beginning instead.
+    if (horizontal && !aligned) continue
 
     const score = primary + (aligned ? secondary * 0.2 : secondary * 3)
     if (score < bestScore) {
@@ -144,6 +148,51 @@ function pick(from: HTMLElement, pool: HTMLElement[], direction: Direction): HTM
   }
 
   return best
+}
+
+/**
+ * The first item of the next row down.
+ *
+ * A row ends where its last item ends: pressing right there continues on the
+ * next row, entered from its beginning. Keeping the old column instead lands
+ * the viewer in the middle of a row that is shorter or scrolled, so the next
+ * row band is read left to right.
+ *
+ * Only items inside a `data-focus-row` take part. A vertical stack of form
+ * fields is not a row, and a right press at the end of one must stay inert.
+ */
+function firstOfNextRow(from: HTMLElement, pool: HTMLElement[]): HTMLElement | null {
+  if (!from.closest(ROW)) return null
+  const a = layoutBox(from)
+
+  let nearest: Box | null = null
+  const below: { element: HTMLElement; box: Box }[] = []
+  for (const element of pool) {
+    if (element === from || !element.closest(ROW)) continue
+    const box = layoutBox(element)
+    // A row below starts under this item. Comparing tops, not centres, keeps
+    // a taller neighbour in the same row from reading as the next row.
+    if (box.top < a.bottom) continue
+    below.push({ element, box })
+    if (!nearest || box.top + box.height / 2 < nearest.top + nearest.height / 2) {
+      nearest = box
+    }
+  }
+  if (!nearest) return null
+
+  let first: HTMLElement | null = null
+  let firstLeft = Infinity
+  for (const { element, box } of below) {
+    // The nearest band, not a row further down: overlap is what "same row"
+    // means, and it tolerates tall and short items in one band.
+    const overlap = Math.min(nearest.bottom, box.bottom) - Math.max(nearest.top, box.top)
+    if (overlap <= Math.min(nearest.height, box.height) * 0.6) continue
+    if (box.left < firstLeft) {
+      firstLeft = box.left
+      first = element
+    }
+  }
+  return first
 }
 
 /**
@@ -158,9 +207,17 @@ export function move(direction: Direction, scope?: ParentNode): boolean {
     focusFirst(undefined, scope)
     return true
   }
-  const next = pick(current, candidates(scope), direction)
-  if (!next) return false
-  setFocused(next)
+  const pool = candidates(scope)
+  const next = pick(current, pool, direction)
+  if (next) {
+    setFocused(next)
+    return true
+  }
+  // Right at the end of a row carries on to the row below, from its start.
+  // Left at the start is left alone: it is the gesture that opens the rail.
+  const wrap = direction === 'right' ? firstOfNextRow(current, pool) : null
+  if (!wrap) return false
+  setFocused(wrap)
   return true
 }
 

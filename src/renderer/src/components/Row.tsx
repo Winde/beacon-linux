@@ -38,7 +38,7 @@ export function Row({
           {actions ? <div className="row__actions">{actions}</div> : null}
         </div>
       ) : null}
-      <div className="row__track">
+      <div className="row__track" data-focus-row>
         {items.map((card) => (
           <Tile
             key={`${card.kind}:${card.slug}`}

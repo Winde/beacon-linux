@@ -240,7 +240,7 @@ export function Content({
           ) : null}
 
           {!data.locked || series ? (
-            <div className="button-row">
+            <div className="button-row" data-focus-row>
               {!data.locked ? (
                 <>
                   <button

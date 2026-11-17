@@ -161,7 +161,7 @@ export function Search({ onOpen }: SearchProps): React.JSX.Element {
             onSubmit={submit}
           />
           {suggestions.length ? (
-            <div className="search__suggestions">
+            <div className="search__suggestions" data-focus-row>
               {suggestions.map((text) => (
                 <button
                   key={text}

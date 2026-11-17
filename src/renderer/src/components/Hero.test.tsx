@@ -39,6 +39,12 @@ describe('Hero', () => {
     expect(onOpen).not.toHaveBeenCalled()
   })
 
+  it('marks its actions as a focus row so their end wraps to the next row', () => {
+    const { container } = render(<Hero card={card()} onOpen={vi.fn()} onPlay={vi.fn()} />)
+
+    expect(container.querySelector('.button-row')?.hasAttribute('data-focus-row')).toBe(true)
+  })
+
   it('offers Resume for a started video', () => {
     const onPlay = vi.fn()
     render(<Hero card={card({ progress: 0.4 })} onOpen={vi.fn()} onPlay={onPlay} />)

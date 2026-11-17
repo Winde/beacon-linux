@@ -28,6 +28,23 @@ function grid(): HTMLElement[] {
   return tiles
 }
 
+/** A marked strip of tiles: navigation treats its edge as the end of a row. */
+function strip(...tiles: HTMLElement[]): HTMLElement {
+  const element = document.createElement('div')
+  element.dataset.focusRow = ''
+  element.append(...tiles)
+  document.body.append(element)
+  return element
+}
+
+/** One shelf of `count` tiles, 220 apart, starting at `left`. */
+function shelf(top: number, count = 3, left = 0): HTMLElement[] {
+  const tiles: HTMLElement[] = []
+  for (let col = 0; col < count; col++) tiles.push(tile(left + col * 220, top))
+  strip(...tiles)
+  return tiles
+}
+
 beforeEach(() => {
   setFocused(null)
   document.body.innerHTML = ''
@@ -196,13 +213,81 @@ describe('move', () => {
     expect(getFocused()).not.toBe(collapsed)
   })
 
-  it('does not jump to another row when a row ends', () => {
-    const from = tile(0, 0)
-    tile(60, 200)
+  it('does not leave a row while it still has an item to the right', () => {
+    const first = shelf(0)
+    shelf(160)
+
+    setFocused(first[1])
+    expect(move('right')).toBe(true)
+    expect(getFocused()).toBe(first[2])
+  })
+
+  it('continues on the next row from its first item when a row ends', () => {
+    const first = shelf(0)
+    const next = shelf(160)
+
+    setFocused(first[2])
+
+    // The old column is the next row's last item; the row is entered at its start.
+    expect(move('right')).toBe(true)
+    expect(getFocused()).toBe(next[0])
+    expect(getFocused()).not.toBe(next[2])
+  })
+
+  it('does not mistake a taller item in the same row for the next row', () => {
+    // Unstretched tiles: the tall first item's centre sits below the current
+    // item's centre, but it still belongs to the row that just ended.
+    const tall = tile(0, -60, { height: 200 })
+    const from = tile(220, 0, { height: 60 })
+    const next = shelf(260)
+    strip(tall, from)
+
     setFocused(from)
 
+    expect(move('right')).toBe(true)
+    expect(getFocused()).toBe(next[0])
+    expect(getFocused()).not.toBe(tall)
+  })
+
+  it('wraps inside a grid to the first item of the next line', () => {
+    const tiles: HTMLElement[] = []
+    for (let row = 0; row < 2; row++) {
+      for (let col = 0; col < 3; col++) tiles.push(tile(col * 220, row * 160))
+    }
+    strip(...tiles)
+    setFocused(tiles[2])
+
+    expect(move('right')).toBe(true)
+    expect(getFocused()).toBe(tiles[3])
+  })
+
+  it('enters a scrolled row from its beginning, not its first visible item', () => {
+    const first = shelf(0)
+    const scroller = document.createElement('div')
+    scroller.scrollLeft = 440
+    scroller.dataset.focusRow = ''
+    document.body.append(scroller)
+    // The viewport rects show this row scrolled two tiles in; layout space
+    // still knows which tile comes first.
+    const offscreen = tile(-440, 160)
+    const middle = tile(-220, 160)
+    scroller.append(offscreen, middle)
+
+    setFocused(first[2])
+
+    expect(move('right')).toBe(true)
+    expect(getFocused()).toBe(offscreen)
+    expect(getFocused()).not.toBe(middle)
+  })
+
+  it('does not wrap out of a stack that is not a row', () => {
+    const email = tile(0, 0, { width: 400 })
+    const password = tile(0, 80, { width: 400 })
+    setFocused(email)
+
     expect(move('right')).toBe(false)
-    expect(getFocused()).toBe(from)
+    expect(getFocused()).toBe(email)
+    expect(getFocused()).not.toBe(password)
   })
 
   it('stays inside the given scope', () => {

@@ -41,6 +41,12 @@ describe('Row', () => {
     expect(screen.getAllByRole('button')).toHaveLength(3)
   })
 
+  it('marks its track as a focus row so its end wraps to the next row', () => {
+    const { container } = render(<Row title="Row" items={items} onSelect={vi.fn()} />)
+
+    expect(container.querySelector('.row__track')?.hasAttribute('data-focus-row')).toBe(true)
+  })
+
   it('renders actions beside the heading', () => {
     render(
       <Row
