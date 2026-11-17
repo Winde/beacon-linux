@@ -1,6 +1,6 @@
 {
   "name": "beacon-linux",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Unofficial, controller-first Beacon (Critical Role) client for Linux and SteamOS",
   "desktopName": "beacon.desktop",
   "main": "./out/main/index.js",
