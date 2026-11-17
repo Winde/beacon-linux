@@ -5,6 +5,7 @@ name: Release
 # 1. Bump the version, commit, tag, push the tag.
 # 2. Create the release for that tag in the GitHub UI.
 # 3. Actions -> Release -> Run workflow, and type the tag.
+#    Turn dry_run on to build and test without touching the release.
 
 on:
   workflow_dispatch:
@@ -13,6 +14,11 @@ on:
         description: 'Release tag, e.g. v0.1.0 (must already exist)'
         required: true
         type: string
+      dry_run:
+        description: 'Build and verify only; do not touch the release'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -70,47 +76,18 @@ jobs:
       - run: npm run build
 
       - name: Package
-        run: npx electron-builder --linux AppImage deb tar.gz --publish never
+        run: npx electron-builder --linux AppImage --publish never
 
       - uses: actions/upload-artifact@v4
         with:
           name: linux
-          path: |
-            release/*.AppImage
-            release/*.deb
-            release/*.tar.gz
-          if-no-files-found: error
-
-  windows:
-    name: Windows
-    needs: verify
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
-
-      - run: npm run build
-
-      - name: Package
-        run: npx electron-builder --win --publish never
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows
-          path: release/*.exe
+          path: release/*.AppImage
           if-no-files-found: error
 
   publish:
     name: Publish
-    needs: [linux, windows]
+    needs: linux
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -120,9 +97,13 @@ jobs:
 
       - name: Checksums
         working-directory: artifacts
-        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+        run: |
+          set -euo pipefail
+          rm -f SHA256SUMS.txt
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
-      - name: Upload to the release
+      - name: Release exists and matches the tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -133,4 +114,20 @@ jobs:
             echo "::error::No release exists for ${TAG}. Create it in the GitHub UI, then run this again."
             exit 1
           fi
-          gh release upload "$TAG" artifacts/* --clobber
+
+          is_pre="$(gh release view "$TAG" --json isPrerelease -q .isPrerelease)"
+          case "$TAG" in
+            *-*) want=true ;;
+            *)   want=false ;;
+          esac
+          if [ "$is_pre" != "$want" ]; then
+            echo "::error::Release ${TAG} has isPrerelease=${is_pre}, expected ${want}. Tick or untick 'Set as a pre-release' on the release."
+            exit 1
+          fi
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: gh release upload "$TAG" artifacts/* --clobber

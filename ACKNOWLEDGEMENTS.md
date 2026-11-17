@@ -6,9 +6,9 @@
 Copyright (c) 2025-2026 shy.
 
 Reference for the platform shape, not the implementation: an Electron shell, a
-frameless window, a controller-first UI, AppImage distribution and, later,
-Flatpak. VacuumTube wraps YouTube Leanback and drives it with synthetic key
-events; this app has its own screens and spatial navigation.
+frameless window, a controller-first UI and AppImage distribution. VacuumTube
+wraps YouTube Leanback and drives it with synthetic key events; this app has its
+own screens and spatial navigation.
 
 Its controller module was read for Steam Input behaviour — prefer the virtual
 pad, ignore input while unfocused, hold-to-repeat. No source code is included;

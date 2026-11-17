@@ -17,11 +17,11 @@ Full license texts are in [`licenses/`](licenses/).
 
 `licenses/react.txt` covers both React and React DOM.
 
-The app icon (`packaging/flatpak/io.github.Winde.BeaconLinux.svg`, rasterised to
-`build/icon.png`) is Iconoir's `hexagon-dice` glyph placed on a square canvas —
-recoloured, rescaled and padded, with no other changes. It is not derived from
-any Critical Role or Beacon artwork. The renderer also imports `iconoir-react`
-for the search and navigation glyphs; `licenses/iconoir.txt` covers both.
+The app icon (`build/icon.svg`, rasterised to `build/icon.png`) is Iconoir's
+`hexagon-dice` glyph placed on a square canvas — recoloured, rescaled and padded,
+with no other changes. It is not derived from any Critical Role or Beacon
+artwork. The renderer also imports `iconoir-react` for the search and navigation
+glyphs; `licenses/iconoir.txt` covers both.
 
 Electron ships its own notices with the packaged app — `LICENSE.electron.txt` and
 `LICENSES.chromium.html` — which cover Electron itself and Chromium, including

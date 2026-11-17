@@ -1,6 +1,8 @@
 appId: tv.beacon.linux
 productName: Beacon
 copyright: Unofficial client. Not affiliated with Critical Role.
+# The release artifact name; arch is x86_64 for the AppImage.
+artifactName: ${productName}-${version}-${arch}.${ext}
 
 directories:
   buildResources: build
@@ -24,9 +26,11 @@ asar: true
 linux:
   target:
     - AppImage
-    - deb
   category: AudioVideo
   executableName: beacon
+  # The installed .desktop filename, StartupWMClass and Electron's app_id all
+  # come from desktopName in package.json, so window association works.
+  syncDesktopName: true
   synopsis: Unofficial Beacon (Critical Role) client
   desktop:
     entry:
@@ -34,10 +38,3 @@ linux:
       Comment: Unofficial Critical Role streaming client, made for a controller
       Categories: AudioVideo;Video;
       Keywords: critical-role;streaming;tv;
-
-win:
-  target: nsis
-
-nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true

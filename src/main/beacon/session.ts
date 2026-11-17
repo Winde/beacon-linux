@@ -71,7 +71,7 @@ function forgetPlaintext(path: string): void {
 
 /**
  * Tokens are decrypted with the OS keyring when one is usable. Without one
- * (some SteamOS setups, a Flatpak with no secret-service access) nothing is
+ * (some SteamOS setups, or a machine with no keyring at all) nothing is
  * restored: the member signs in again, and the password is never persisted.
  */
 export async function loadSession(): Promise<Session | null> {

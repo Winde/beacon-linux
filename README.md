@@ -122,8 +122,7 @@ subtitle language is remembered for the next video.
 
 ```bash
 npm run build          # compile
-npm run build:win      # Windows installer
-npm run build:linux    # AppImage + .deb
+npm run build:linux    # AppImage (run on Linux or CI)
 ```
 
 ### Test
@@ -142,10 +141,13 @@ use Testing Library (`@testing-library/react`).
 
 Releases are started by hand, not by pushing a tag: tag the commit, create the
 release in the GitHub UI, then run the Release workflow with that tag. It builds
-an AppImage, `.deb` and `.tar.gz` for Linux plus an installer for Windows and
-checksums, and attaches them to that release. If any build fails, nothing is
-uploaded. See [docs/releasing.md](docs/releasing.md) for versioning rules and the
-checklist.
+the Linux AppImage and checksums and attaches them to that release. If the build
+fails, nothing is uploaded. The workflow can also be run with `dry_run` to build
+and test everything without touching the release. See
+[docs/releasing.md](docs/releasing.md) for versioning rules and the checklist.
+
+On a Steam Machine or Deck, see [docs/install-steamos.md](docs/install-steamos.md)
+for the one-time Desktop Mode setup.
 
 ### Dev helpers
 
@@ -159,7 +161,7 @@ second monitor. `BEACON_SHOT_SCRIPT` runs JavaScript before the capture, and
 - [ ] Verify on SteamOS with a real Steam Controller
 - [ ] Steam Input profile shipped with the app
 - [ ] Suspend / resume handling
-- [ ] Flatpak packaging
+- [ ] Update check from inside the app (manual, no silent install)
 - [x] "Next episode" autoplay at the end of an episode
 - [ ] Live-event support (Beacon's waiting room)
 

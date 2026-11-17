@@ -59,9 +59,9 @@ same build works when run directly, and native Linux builds are unaffected.
 - [electron/electron#45732](https://github.com/electron/electron/issues/45732)
 
 A Steam client patch (September 2025) is reported to have fixed it. This only
-matters for testing on Windows; the target platform (SteamOS) is not affected.
-If you hit it, set the game's controller layout to **Gamepad** or disable Steam
-Input for that entry.
+matters when running the app on Windows during development; the target platform
+(SteamOS) is not affected. If you hit it, set the game's controller layout to
+**Gamepad** or disable Steam Input for that entry.
 
 ## Recommended setup
 
@@ -74,8 +74,8 @@ Input for that entry.
 
 ## Packaging notes
 
-- **Flatpak**: gamepad access needs udev. Add `--filesystem=/run/udev:ro` to the
-  Flatpak permissions, or the Gamepad API sees nothing.
+- **AppImage**: no extra permissions are needed; the app reads the gamepad
+  through the normal Gamepad API.
 - **Steam Runtime**: Electron under the Steam Runtime may need `--no-sandbox`.
 - **`uinput`**: Steam Input creates the virtual pad through `/dev/uinput`. On
   systems with systemd 258 the module failed to load, which broke controller

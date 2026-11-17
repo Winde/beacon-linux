@@ -2,6 +2,7 @@
   "name": "beacon-linux",
   "version": "0.1.0",
   "description": "Unofficial, controller-first Beacon (Critical Role) client for Linux and SteamOS",
+  "desktopName": "beacon.desktop",
   "main": "./out/main/index.js",
   "author": "Winde",
   "license": "MIT",
@@ -13,7 +14,6 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "build:win": "npm run build && electron-builder --win",
     "build:linux": "npm run build && electron-builder --linux"
   },
   "devDependencies": {
