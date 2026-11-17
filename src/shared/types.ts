@@ -13,8 +13,8 @@ export interface AuthStatus {
 
 /**
  * Where the main process can keep a session. `plaintext` means Linux selected
- * safeStorage's `basic_text` backend, which only obfuscates; both it and
- * `unavailable` mean nothing is written and the member signs in each launch.
+ * safeStorage's `basic_text` backend: the session is saved, but only
+ * obfuscated. `unavailable` means there is nowhere to keep it.
  */
 export type CredentialStorage = 'keyring' | 'plaintext' | 'unavailable'
 

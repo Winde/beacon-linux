@@ -118,14 +118,14 @@ describe('Login', () => {
     expect(onSkip).toHaveBeenCalled()
   })
 
-  it('warns when the sign-in cannot be kept securely', async () => {
+  it('warns that the fallback storage is only obfuscation', async () => {
     stubSignIn('plaintext')
     render(<Login onSignedIn={vi.fn()} onSkip={vi.fn()} />)
 
-    expect(await screen.findByText(/can't save your sign-in/)).toBeDefined()
+    expect(await screen.findByText(/saved with Electron's fallback encryption/)).toBeDefined()
   })
 
-  it('warns when no keyring is available at all', async () => {
+  it('warns when the sign-in cannot be saved at all', async () => {
     stubSignIn('unavailable')
     render(<Login onSignedIn={vi.fn()} onSkip={vi.fn()} />)
 

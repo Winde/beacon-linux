@@ -70,13 +70,17 @@ function forgetPlaintext(path: string): void {
 }
 
 /**
- * Tokens are decrypted with the OS keyring when one is usable. Without one
- * (some SteamOS setups, or a machine with no keyring at all) nothing is
- * restored: the member signs in again, and the password is never persisted.
+ * Tokens are decrypted with the OS keyring when one is usable. When only
+ * Electron's `basic_text` backend is available (SteamOS Game Mode has no
+ * keyring) the same file is still written: it keeps the member signed in, but
+ * its key is the one baked into Chromium, so it is obfuscation, not protection.
+ * The sign-in screen says so.
  */
-export async function loadSession(): Promise<Session | null> {
+export async function loadSession(
+  platform: NodeJS.Platform = process.platform
+): Promise<Session | null> {
   const path = sessionPath()
-  if ((await credentialStorage()) !== 'keyring') {
+  if ((await credentialStorage(platform)) === 'unavailable') {
     forgetPlaintext(path)
     return null
   }
@@ -94,16 +98,19 @@ export async function loadSession(): Promise<Session | null> {
   }
 }
 
-export async function saveSession(session: Session | null): Promise<void> {
+export async function saveSession(
+  session: Session | null,
+  platform: NodeJS.Platform = process.platform
+): Promise<void> {
   const path = sessionPath()
   if (!session) {
     rmSync(path, { force: true })
     return
   }
-  // No usable keyring: keep the tokens in memory for this run and write
-  // nothing. Any file from an older version goes too, so a credential we
-  // cannot protect does not outlive the decision.
-  if ((await credentialStorage()) !== 'keyring') {
+  // `unavailable` is the only case with nowhere to keep it. On Linux,
+  // `basic_text` still gives a file, and that is what keeps Game Mode signed
+  // in between launches.
+  if ((await credentialStorage(platform)) === 'unavailable') {
     rmSync(path, { force: true })
     return
   }

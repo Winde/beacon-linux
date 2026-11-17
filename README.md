@@ -75,10 +75,11 @@ untouched.
 API calls live in the main process for two reasons: Beacon's CMS only accepts
 `beacon.tv` as a browser origin (so the renderer would be blocked by CORS), and
 tokens stay out of the renderer. The session is encrypted at rest with the OS
-keyring via Electron's `safeStorage`. Where no real keyring is reachable
-(SteamOS Game Mode, or a machine with none at all) nothing is written — the
-tokens live in memory for that run and you sign in again next launch. The
-sign-in screen says so when that is the case.
+keyring via Electron's `safeStorage` when one is reachable. SteamOS Game Mode
+has no keyring, so there it falls back to safeStorage's `basic_text` backend:
+the session is saved and you stay signed in, but the key is one baked into
+Chromium, so the file is obfuscated rather than protected. The sign-in screen
+says which case you are in.
 
 ## Run it
 

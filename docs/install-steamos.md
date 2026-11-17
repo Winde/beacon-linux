@@ -38,12 +38,13 @@ at the same path (`~/Applications/Beacon.AppImage`); the Steam entry keeps
 working because the path does not change. Check the release notes for anything
 that needs doing first.
 
-## Signing in again
+## Staying signed in
 
-SteamOS Game Mode has no reachable keyring, so the session is kept in memory for
-that run only: you sign in again next launch. In Desktop Mode a keyring may be
-available and the session can persist. The sign-in screen says which case you
-are in.
+SteamOS Game Mode has no keyring, so Beacon saves the session with Electron's
+`basic_text` fallback: you stay signed in across launches, but the key is baked
+into Chromium, so it is obfuscation rather than real encryption. In Desktop Mode
+a real keyring may be available and the session is encrypted with it. The
+sign-in screen says which case you are in.
 
 ## If it will not start
 

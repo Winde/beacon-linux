@@ -40,6 +40,13 @@ export function Login({ onSignedIn, onSkip }: LoginProps): React.JSX.Element {
     }
   }
 
+  const storageNote =
+    storage === 'unavailable'
+      ? 'Nothing is kept between launches; your password is never stored.'
+      : storage === 'plaintext'
+        ? 'Your password is never stored — only the sign-in tokens, saved on this device with weaker encryption.'
+        : 'Your password is never stored — only the sign-in tokens.'
+
   return (
     <div className="login">
       <div className="login__panel">
@@ -50,10 +57,17 @@ export function Login({ onSignedIn, onSkip }: LoginProps): React.JSX.Element {
           Use your Beacon member account. Free videos work without signing in.
         </p>
 
-        {storage && storage !== 'keyring' ? (
+        {storage === 'unavailable' ? (
           <p className="login__warning" role="status">
-            No secure keyring is available on this system, so Beacon can't save your sign-in.
-            You'll need to enter your password again after closing the app.
+            Beacon can't save your sign-in on this system. You'll need to enter your
+            password again after closing the app.
+          </p>
+        ) : null}
+        {storage === 'plaintext' ? (
+          <p className="login__warning" role="status">
+            No keyring is available on this system. Your sign-in is saved with Electron's
+            fallback encryption, which is obfuscation rather than real protection: anything
+            that can read your user files can recover it.
           </p>
         ) : null}
 
@@ -115,10 +129,7 @@ export function Login({ onSignedIn, onSkip }: LoginProps): React.JSX.Element {
 
         <p className="login__hint">
           On a Steam Deck, press <kbd>STEAM</kbd> + <kbd>X</kbd> to bring up the on-screen
-          keyboard.{' '}
-          {storage && storage !== 'keyring'
-            ? 'Nothing is kept between launches; your password is never stored.'
-            : 'Your password is never stored — only the sign-in tokens.'}
+          keyboard. {storageNote}
         </p>
       </div>
     </div>

@@ -60,13 +60,22 @@ describe('saveSession and loadSession', () => {
     await expect(loadSession()).resolves.toEqual(session)
   })
 
-  it('writes nothing when only plain storage is available', async () => {
+  it('writes nothing when encryption is unavailable', async () => {
     electron.encryption = false
 
     await saveSession(session)
 
     expect(existsSync(sessionFile())).toBe(false)
     await expect(loadSession()).resolves.toBeNull()
+  })
+
+  it('keeps the session with the basic_text backend', async () => {
+    electron.backend = 'basic_text'
+
+    await saveSession(session, 'linux')
+
+    expect(readFileSync(sessionFile(), 'utf8')).toBe(`enc:${JSON.stringify(session)}`)
+    await expect(loadSession('linux')).resolves.toEqual(session)
   })
 
   it('does not restore a plaintext session left by an older version', async () => {
