@@ -9,7 +9,13 @@ everything in `/home` and do not copy files into `/usr`. What follows lives in
 In Desktop Mode, with Steam running:
 
 ```sh
-curl -LO https://github.com/Winde/beacon-linux/releases/latest/download/install.sh
+curl -fsSL https://github.com/Winde/beacon-linux/releases/latest/download/install.sh | bash
+```
+
+Prefer to read it first:
+
+```sh
+curl -fsSLO https://github.com/Winde/beacon-linux/releases/latest/download/install.sh
 less install.sh
 bash install.sh
 ```

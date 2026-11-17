@@ -93,6 +93,30 @@ npm run dev
 The first launch shows the sign-in screen. Free videos work without an account.
 On a Steam Deck, `STEAM` + `X` opens the on-screen keyboard for the password field.
 
+## Install on SteamOS
+
+In Desktop Mode, with Steam running:
+
+```sh
+curl -fsSL https://github.com/Winde/beacon-linux/releases/latest/download/install.sh | bash
+```
+
+Prefer to read it first:
+
+```sh
+curl -fsSLO https://github.com/Winde/beacon-linux/releases/latest/download/install.sh
+less install.sh
+bash install.sh
+```
+
+The installer downloads and verifies the AppImage, installs it to
+`~/Applications/Beacon.AppImage`, adds a Steam shortcut, and applies the library
+artwork. Re-run it to update. `--no-steam`, `--version vX.Y.Z` and `--uninstall`
+are described in [docs/install-steamos.md](docs/install-steamos.md).
+
+The installer and the artwork are separate release assets; the AppImage stays a
+single self-contained file.
+
 ### Controls
 
 | Action | Gamepad | Keyboard |
