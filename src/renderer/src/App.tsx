@@ -39,9 +39,8 @@ export interface Entry {
  * just walks into the same loop again.
  *
  * When it is not in the stack (an episode reached from search, or a deep link),
- * replace the episode with the collection. Going "up" should leave the viewer
- * at the parent with Back going to where the episode itself came from, rather
- * than keeping an episode underneath that only offers the same jump again.
+ * push the collection on top so Back returns to the episode. That is the usual
+ * "up" behaviour: only the duplicate-parent case collapses history.
  */
 export function upToCollection(stack: Entry[], slug: string, nextId: () => number): Entry[] {
   for (let index = stack.length - 1; index >= 0; index--) {
@@ -51,9 +50,7 @@ export function upToCollection(stack: Entry[], slug: string, nextId: () => numbe
     }
   }
 
-  const entry: Entry = { id: nextId(), route: { name: 'collection', slug } }
-  if (!stack.length) return [entry]
-  return [...stack.slice(0, -1), entry]
+  return [...stack, { id: nextId(), route: { name: 'collection', slug } }]
 }
 
 /**

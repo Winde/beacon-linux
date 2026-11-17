@@ -313,7 +313,7 @@ describe('App up navigation', () => {
     expect(upToCollection(stack, 'campaign-1', () => 99)).toEqual(stack.slice(0, 2))
   })
 
-  it('replaces an episode when its collection is not in history', () => {
+  it('pushes an episode’s collection when it is not in history yet', () => {
     const stack: Entry[] = [
       { id: 0, route: { name: 'search' } },
       { id: 1, route: { name: 'content', slug: 'c1e1' } }
@@ -321,6 +321,7 @@ describe('App up navigation', () => {
 
     expect(upToCollection(stack, 'previously-on', () => 99)).toEqual([
       { id: 0, route: { name: 'search' } },
+      { id: 1, route: { name: 'content', slug: 'c1e1' } },
       { id: 99, route: { name: 'collection', slug: 'previously-on' } }
     ])
   })
