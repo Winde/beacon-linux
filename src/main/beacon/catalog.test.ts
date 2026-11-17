@@ -4,7 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { app } from 'electron'
 import { Catalog } from './catalog'
 import type { BeaconClient } from './client'
-import type { CatalogSnapshot, IndexedVideo } from './catalog-types'
+import {
+  CATALOG_VERSION,
+  type CatalogSnapshot,
+  type IndexedVideo
+} from './catalog-types'
 
 // The index lives under app.getPath('userData'); give each run its own directory.
 vi.mock('electron', async () => {
@@ -141,8 +145,8 @@ function indexFile(): string {
   return join(app.getPath('userData'), 'catalog.json')
 }
 
-function writeSnapshot(snapshot: CatalogSnapshot): void {
-  writeFileSync(indexFile(), JSON.stringify(snapshot))
+function writeSnapshot(snapshot: Omit<CatalogSnapshot, 'version'>): void {
+  writeFileSync(indexFile(), JSON.stringify({ version: CATALOG_VERSION, ...snapshot }))
 }
 
 const STALE = 25 * 3600 * 1000
@@ -365,6 +369,25 @@ describe('Catalog', () => {
       ])
     })
 
+    it('finds a video by the short ottTitle as well as the full title', async () => {
+      const videos = [
+        rawVideo(1, {
+          title: 'C4 E043 | The Water’s Edge',
+          ottTitle: 'The Water’s Edge'
+        })
+      ]
+      const { client } = fakeClient({ videos })
+      const catalog = new Catalog(client)
+      await catalog.ensure()
+
+      expect(catalog.videoBySlug('episode-1')).toMatchObject({
+        title: 'C4 E043 | The Water’s Edge',
+        ottTitle: 'The Water’s Edge'
+      })
+      expect(catalog.localSearch('water').videos.map((v) => v.slug)).toEqual(['episode-1'])
+      expect(catalog.localSearch('c4e43').videos.map((v) => v.slug)).toEqual(['episode-1'])
+    })
+
     it('honours the video limit', async () => {
       const videos = Array.from({ length: 5 }, (_, index) =>
         rawVideo(index + 1, { title: `Campaign 1 episode ${index + 1}` })
@@ -409,6 +432,22 @@ describe('Catalog', () => {
       expect(catalog.suggest('cam', 1)).toEqual(['Campaign 1'])
     })
 
+    it('offers the short ottTitle without losing the full title', async () => {
+      const { client } = fakeClient({
+        videos: [
+          rawVideo(1, {
+            title: 'C4 E043 | The Water’s Edge',
+            ottTitle: 'The Water’s Edge'
+          })
+        ]
+      })
+      const catalog = new Catalog(client)
+      await catalog.ensure()
+
+      expect(catalog.suggest('water')).toEqual(['The Water’s Edge'])
+      expect(catalog.suggest('c4 e043')).toEqual(['C4 E043'])
+    })
+
     it('returns nothing when nothing matches', async () => {
       const catalog = await suggestCatalog()
       expect(catalog.suggest('zzz')).toEqual([])
@@ -422,6 +461,7 @@ describe('Catalog', () => {
       await catalog.ensure()
 
       const saved = JSON.parse(readFileSync(indexFile(), 'utf8')) as CatalogSnapshot
+      expect(saved.version).toBe(CATALOG_VERSION)
       expect(saved.videos).toHaveLength(2)
       expect(saved.builtAt).toBeGreaterThan(0)
     })
@@ -449,6 +489,20 @@ describe('Catalog', () => {
       // A stale index is served immediately; the rebuild happens behind it.
       await catalog.ensure()
       await vi.waitFor(() => expect(catalog.status().videos).toBe(2))
+    })
+
+    it('is rebuilt when it was written by an older catalog', async () => {
+      writeFileSync(
+        indexFile(),
+        JSON.stringify({ builtAt: Date.now(), videos: [indexedVideo(99)], collections: [] })
+      )
+      const { client } = fakeClient({ videos: [rawVideo(1)] })
+      const catalog = new Catalog(client)
+      expect(catalog.status().videos).toBe(0)
+
+      await catalog.ensure()
+
+      expect(catalog.status().videos).toBe(1)
     })
 
     it('is ignored when it cannot be parsed', async () => {

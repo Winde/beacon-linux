@@ -49,6 +49,19 @@ export function episodeCode(text: string): string | null {
 }
 
 /**
+ * The title a card shows: Beacon's editor-set short `ottTitle` when there is
+ * one, otherwise the full `title`. The full title stays in the model for
+ * episode-code parsing and the content page header.
+ */
+export function displayTitle(value: {
+  title?: string | null
+  ottTitle?: string | null
+}): string {
+  const short = value.ottTitle?.trim()
+  return short || value.title?.trim() || ''
+}
+
+/**
  * Cloudflare Images URLs carry a `format=auto` segment that accepts a width,
  * e.g. `.../format=auto,width=480`. Ask for the size we actually render.
  */

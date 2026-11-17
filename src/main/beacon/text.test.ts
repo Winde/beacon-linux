@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { episodeCode, imageUrl, normalize, relevance, type SearchDocument } from './text'
+import { displayTitle, episodeCode, imageUrl, normalize, relevance, type SearchDocument } from './text'
 
 /** Build a search document the same way the catalog index does. */
 function doc(title: string, series = ''): SearchDocument {
@@ -49,6 +49,29 @@ describe('episodeCode', () => {
 
   it('strips leading zeroes so the same episode has one code', () => {
     expect(episodeCode('C4 E0012')).toBe(episodeCode('c4e12'))
+  })
+})
+
+describe('displayTitle', () => {
+  it("prefers Beacon's short ottTitle", () => {
+    expect(displayTitle({ title: 'C4 E043 | The Water’s Edge', ottTitle: 'The Water’s Edge' })).toBe(
+      'The Water’s Edge'
+    )
+  })
+
+  it('falls back to the full title when ottTitle is missing or blank', () => {
+    expect(displayTitle({ title: 'C4 E043 | The Water’s Edge' })).toBe('C4 E043 | The Water’s Edge')
+    expect(displayTitle({ title: 'C4 E043 | The Water’s Edge', ottTitle: null })).toBe(
+      'C4 E043 | The Water’s Edge'
+    )
+    expect(displayTitle({ title: 'C4 E043 | The Water’s Edge', ottTitle: '  ' })).toBe(
+      'C4 E043 | The Water’s Edge'
+    )
+  })
+
+  it('trims and survives an empty record', () => {
+    expect(displayTitle({ title: ' Title ', ottTitle: ' Short ' })).toBe('Short')
+    expect(displayTitle({})).toBe('')
   })
 })
 

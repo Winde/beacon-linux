@@ -17,8 +17,7 @@ import type {
 import { loadSession, saveSession, type Session } from './session'
 import { TtlCache } from './cache'
 import * as Q from './queries'
-import { episodeCode, imageUrl as img } from './text'
-import { chooseUpNext } from './upnext'
+import { displayTitle, episodeCode, imageUrl as img } from './text'
 import type { IndexedCollection, IndexedVideo } from './catalog-types'
 import { WatchMarkStore, type WatchMark } from './watchmarks'
 import { accountKey } from './account'
@@ -69,6 +68,8 @@ interface CmsThumb {
 interface CmsCard {
   id: string
   title: string
+  /** The editor's short, display-oriented title; falls back to `title`. */
+  ottTitle?: string | null
   duration?: number | null
   slug: string
   contentType?: string | null
@@ -107,6 +108,7 @@ interface BlockContent {
   __typename?: string
   id: string
   title?: string
+  ottTitle?: string | null
   slug: string
   duration?: number | null
   contentType?: string | null
@@ -493,7 +495,7 @@ export class BeaconClient {
       kind: 'video',
       id: c.id,
       slug: c.slug,
-      title: c.title,
+      title: displayTitle(c),
       subtitle: c.primaryCollection?.name ?? '',
       image: img(c.thumbnail?.sizes?.landscape?.url, 480),
       image2x: img(c.thumbnail?.sizes?.landscape2x?.url, 480),
@@ -509,7 +511,7 @@ export class BeaconClient {
       kind: 'video',
       id: v.id,
       slug: v.slug,
-      title: v.title,
+      title: displayTitle(v),
       subtitle: v.series?.name ?? '',
       image: img(v.image, 480),
       image2x: img(v.image2x, 480),
@@ -1127,14 +1129,17 @@ export class BeaconClient {
    *
    * Beacon answers `fetchSeries(...) { next }` with the next item in its own
    * order, which skips trailers filed inside a series and resolves two-part
-   * episodes. It does not promise the candidate belongs to the same run, so the
-   * answer goes through chooseUpNext, which is where "never chain to something
-   * unrelated" lives.
+   * episodes. The app treats that answer as the next episode, so we do too.
+   *
+   * `autoplayDisabled` is the series editor's switch: the card is still an
+   * offer, but the player must not advance without a click.
    */
   async nextEpisode(request: NextEpisodeRequest): Promise<NextEpisode | null> {
     if (!request.isSeries || !request.collectionId) return null
 
-    const r = await this.gql<{ fetchSeries?: { next?: CmsCard | null } }>(Q.SERIES, {
+    const r = await this.gql<{
+      fetchSeries?: { next?: CmsCard | null; autoplayDisabled?: boolean | null }
+    }>(Q.SERIES, {
       collection: request.collectionId,
       content: request.contentId,
       limit: 1
@@ -1143,23 +1148,13 @@ export class BeaconClient {
     const candidate = r?.fetchSeries?.next
     if (!candidate) return null
 
-    const level = await this.userLevel()
-    return chooseUpNext(
-      {
-        collectionId: request.collectionId,
-        isSeries: request.isSeries,
-        episodeNumber: request.episodeNumber
-      },
-      {
-        slug: candidate.slug,
-        title: candidate.title,
-        image: img(candidate.thumbnail?.sizes?.landscape?.url, 480),
-        minutes: minutes(candidate.duration),
-        locked: (candidate.contentTier?.planLevel ?? 0) > level,
-        episodeNumber: candidate.episodeNumber ?? null,
-        collectionId: candidate.primaryCollection?.id ?? ''
-      }
-    )
+    return {
+      slug: candidate.slug,
+      title: displayTitle(candidate),
+      image: img(candidate.thumbnail?.sizes?.landscape?.url, 480),
+      minutes: minutes(candidate.duration),
+      autoplayDisabled: Boolean(r?.fetchSeries?.autoplayDisabled)
+    }
   }
 
   /**

@@ -11,6 +11,8 @@ export interface IndexedVideo {
   id: string
   slug: string
   title: string
+  /** Editor-set short title for cards; absent in snapshots built before it. */
+  ottTitle?: string | null
   /** ms */
   duration: number | null
   type: string | null
@@ -37,7 +39,14 @@ export interface IndexedCollection {
   portrait: string | null
 }
 
+/**
+ * Bumped when the stored shape changes; a cache without the current version is
+ * rebuilt rather than read.
+ */
+export const CATALOG_VERSION = 2
+
 export interface CatalogSnapshot {
+  version: number
   builtAt: number
   videos: IndexedVideo[]
   collections: IndexedCollection[]

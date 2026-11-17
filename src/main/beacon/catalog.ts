@@ -3,8 +3,13 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { IndexStatus } from '@shared/types'
 import { ALL_COLLECTIONS, COLLECTIONS, PLAYABLE, SEARCH } from './queries'
-import type { CatalogSnapshot, IndexedCollection, IndexedVideo } from './catalog-types'
-import { episodeCode, normalize, relevance } from './text'
+import {
+  CATALOG_VERSION,
+  type CatalogSnapshot,
+  type IndexedCollection,
+  type IndexedVideo
+} from './catalog-types'
+import { displayTitle, episodeCode, normalize, relevance } from './text'
 import type { BeaconClient, CatalogLike } from './client'
 
 const INDEX_HOURS = 24
@@ -30,7 +35,7 @@ function indexPath(): string {
 function loadSnapshot(): CatalogSnapshot | null {
   try {
     const parsed = JSON.parse(readFileSync(indexPath(), 'utf8')) as CatalogSnapshot
-    if (!parsed.videos?.length) return null
+    if (parsed.version !== CATALOG_VERSION || !parsed.videos?.length) return null
     return parsed
   } catch {
     return null
@@ -52,6 +57,7 @@ function rawVideo(c: Record<string, any>): IndexedVideo {
     id: c.id,
     slug: c.slug,
     title: c.title,
+    ottTitle: c.ottTitle ?? null,
     duration: c.duration ?? null,
     type: c.contentType ?? null,
     tier: c.contentTier?.name ?? null,
@@ -128,12 +134,19 @@ export class Catalog implements CatalogLike {
     }
     this.videosBySeries = bySeries
 
-    this.searchableVideos = snapshot.videos.map((v) => ({
-      ...v,
-      norm: normalize(v.title),
-      tokens: normalize(`${v.title} ${v.series?.name ?? ''}`).split(' ').filter(Boolean),
-      code: episodeCode(v.title)
-    }))
+    this.searchableVideos = snapshot.videos.map((v) => {
+      // The editor's short title is what the tile shows, so it has to be
+      // searchable too; the full title keeps the episode code findable.
+      const display = displayTitle(v)
+      return {
+        ...v,
+        norm: normalize(`${v.title} ${display}`),
+        tokens: normalize(`${v.title} ${display} ${v.series?.name ?? ''}`)
+          .split(' ')
+          .filter(Boolean),
+        code: episodeCode(v.title)
+      }
+    })
     this.searchableCollections = snapshot.collections.map((c) => ({
       ...c,
       norm: normalize(c.name),
@@ -218,7 +231,12 @@ export class Catalog implements CatalogLike {
       }
     }
 
-    const snapshot: CatalogSnapshot = { builtAt: Date.now(), videos, collections }
+    const snapshot: CatalogSnapshot = {
+      version: CATALOG_VERSION,
+      builtAt: Date.now(),
+      videos,
+      collections
+    }
     this.set(snapshot)
     saveSnapshot(snapshot)
   }
@@ -325,10 +343,9 @@ export class Catalog implements CatalogLike {
     }
     for (const v of this.searchableVideos) {
       if (out.length >= limit) break
-      const part = v.title
-        .split('|')
-        .map((s) => s.trim())
-        .find((p) => normalize(p).includes(q))
+      const part = [displayTitle(v), v.title]
+        .flatMap((title) => title.split('|').map((piece) => piece.trim()))
+        .find((piece) => piece && normalize(piece).includes(q))
       if (part) add(part)
     }
     return out.slice(0, limit)

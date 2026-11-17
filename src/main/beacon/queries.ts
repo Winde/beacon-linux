@@ -5,7 +5,7 @@ export const PLAYABLE = ['video', 'videoPodcast']
 /** Shared shape for anything that renders as a tile. */
 const CARD = `
   fragment Card on Content {
-    id title duration slug contentType episodeNumber releaseDate
+    id title ottTitle duration slug contentType episodeNumber releaseDate
     contentTier { name planLevel }
     primaryCollection { id name slug isSeries }
     thumbnail { sizes { landscape { url } landscape2x { url } } }
@@ -53,6 +53,7 @@ export const SERIES = `
   query Series($collection: String!, $season: String, $content: String, $limit: Int) {
     fetchSeries(collection: $collection, season: $season, content: $content, limit: $limit) {
       series
+      autoplayDisabled
       docs { content { ...Card } }
       collection { id name slug isSeries series { id seasonNumber } }
       next { ...Card }
@@ -149,7 +150,7 @@ export const HOME_BLOCKS = `
 
   fragment BlockCard on Content {
     __typename
-    id title slug duration contentType episodeNumber releaseDate
+    id title ottTitle slug duration contentType episodeNumber releaseDate
     contentTier { name planLevel }
     primaryCollection { id name slug isSeries }
     thumbnail { sizes { landscape { url } landscape2x { url } } }

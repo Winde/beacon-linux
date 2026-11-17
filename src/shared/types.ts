@@ -160,6 +160,8 @@ export interface NextEpisode {
   image: string | null
   /** series only */
   minutes?: number | null
+  /** the series editor disabled automatic playback; the card stays manual */
+  autoplayDisabled: boolean
 }
 
 /** What the player knows about the video that is ending. */
@@ -167,7 +169,6 @@ export interface NextEpisodeRequest {
   contentId: string
   collectionId: string
   isSeries: boolean
-  episodeNumber: number | null
 }
 
 export interface SearchData {

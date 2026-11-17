@@ -92,7 +92,8 @@ const partTwo: NextEpisode = {
   slug: 'c3-e121-a-new-age-begins-part-2',
   title: 'C3 E121 | A New Age Begins | Part 2',
   image: null,
-  minutes: 240
+  minutes: 240,
+  autoplayDisabled: false
 }
 
 function stubEpisode(
@@ -400,8 +401,7 @@ describe('Player', () => {
       expect(request).toHaveBeenCalledWith({
         contentId: 'c3-e121',
         collectionId: 'c3',
-        isSeries: true,
-        episodeNumber: 121
+        isSeries: true
       })
     )
 
@@ -464,6 +464,44 @@ describe('Player', () => {
     })
 
     expect(onPlayNext).toHaveBeenCalledWith('c3-e121-a-new-age-begins-part-2')
+  })
+
+  it('leaves a disabled next episode for a click', async () => {
+    stubEpisode({}, { ...partTwo, autoplayDisabled: true })
+    const onPlayNext = vi.fn()
+    const ref = createRef<PlayerHandle>()
+    const { container } = render(
+      <Player ref={ref} slug="c3-e121" onClose={vi.fn()} onPlayNext={onPlayNext} />
+    )
+    await screen.findByText('C3 E121 | A New Age Begins | Part 1')
+    playTo(container, 590)
+    await vi.waitFor(() => expect(screen.queryByText('Up next')).not.toBeNull())
+
+    expect(screen.getByText(/Play next/)).toBeDefined()
+    expect(screen.queryByText(/Playing in/)).toBeNull()
+
+    const video = container.querySelector('video') as HTMLVideoElement
+    act(() => {
+      video.dispatchEvent(new Event('ended'))
+    })
+    expect(onPlayNext).not.toHaveBeenCalled()
+
+    act(() => void ref.current?.handle('accept'))
+    expect(onPlayNext).toHaveBeenCalledWith('c3-e121-a-new-age-begins-part-2')
+  })
+
+  it('asks for next for a series without an episode number', async () => {
+    const request = stubEpisode({ episodeNumber: null })
+    render(<Player slug="c3-e121" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+    await screen.findByText('C3 E121 | A New Age Begins | Part 1')
+
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith({
+        contentId: 'c3-e121',
+        collectionId: 'c3',
+        isSeries: true
+      })
+    )
   })
 
   it('asks nothing for a video in a collection folder', async () => {

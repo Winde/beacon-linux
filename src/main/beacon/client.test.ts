@@ -366,6 +366,41 @@ describe('home', () => {
     expect(home.hero[0].image).toBe('https://images.example/collection/format=auto,width=1280')
   })
 
+  it('shows ottTitle on tiles, falling back to the full title', async () => {
+    routeCms(
+      homeRoutes({
+        [Q.HOME_BLOCKS]: () => ({
+          MemberHomePage: {
+            pageContent: [
+              {
+                __typename: 'LatestCarousel',
+                id: 'latest-block',
+                title: 'Latest Videos',
+                content: [
+                  blockContent({
+                    id: 'l1',
+                    slug: 'short',
+                    title: 'C4 E043 | The Water’s Edge',
+                    ottTitle: 'The Water’s Edge'
+                  }),
+                  blockContent({ id: 'l2', slug: 'full', title: 'Only Title' })
+                ]
+              }
+            ]
+          }
+        })
+      })
+    )
+    const client = new BeaconClient()
+
+    const home = await client.home()
+
+    expect(home.rows[0].items.map((item) => item.title)).toEqual([
+      'The Water’s Edge',
+      'Only Title'
+    ])
+  })
+
   it('drops a block excluded for the platform we identify as', async () => {
     routeCms(
       homeRoutes({
@@ -971,18 +1006,17 @@ describe('play', () => {
 })
 
 describe('nextEpisode', () => {
-  function routes(next: Card | null) {
+  function routes(next: Card | null, autoplayDisabled = false) {
     return {
       [Q.ME]: () => MEMBER,
-      [Q.SERIES]: () => ({ fetchSeries: { next } })
+      [Q.SERIES]: () => ({ fetchSeries: { next, autoplayDisabled } })
     }
   }
 
   const request = {
     contentId: 'e5',
     collectionId: 's1',
-    isSeries: true,
-    episodeNumber: 5
+    isSeries: true
   }
 
   it('offers the next episode of the series', async () => {
@@ -995,7 +1029,45 @@ describe('nextEpisode', () => {
       slug: 'c1e6',
       title: 'Campaign 1 Episode 6',
       image: 'https://images.example/landscape/format=auto,width=480',
-      minutes: 55
+      minutes: 55,
+      autoplayDisabled: false
+    })
+  })
+
+  it('shows ottTitle on the next-episode card', async () => {
+    routeCms(
+      routes(
+        cmsCard({
+          id: 'e6',
+          slug: 'c1e6',
+          title: 'C4 E006 | A Long Full Title',
+          ottTitle: 'A Long Full Title',
+          episodeNumber: 6
+        })
+      )
+    )
+    const client = new BeaconClient()
+
+    await expect(client.nextEpisode(request)).resolves.toMatchObject({
+      title: 'A Long Full Title'
+    })
+  })
+
+  it('reports a series whose editor disabled autoplay', async () => {
+    routeCms(
+      routes(
+        cmsCard({ id: 'e6', slug: 'c1e6', title: 'Campaign 1 Episode 6', episodeNumber: 6 }),
+        true
+      )
+    )
+    const client = new BeaconClient()
+
+    await expect(client.nextEpisode(request)).resolves.toEqual({
+      slug: 'c1e6',
+      title: 'Campaign 1 Episode 6',
+      image: 'https://images.example/landscape/format=auto,width=480',
+      minutes: 55,
+      autoplayDisabled: true
     })
   })
 
@@ -1009,10 +1081,13 @@ describe('nextEpisode', () => {
     expect(net.fetch).not.toHaveBeenCalled()
   })
 
-  it('refuses an episode the account cannot watch', async () => {
+  it('offers a locked next episode, like Beacon', async () => {
     routeCms(
       routes(
         cmsCard({
+          id: 'e6',
+          slug: 'c1e6',
+          title: 'Campaign 1 Episode 6',
           episodeNumber: 6,
           contentTier: { name: 'Exandria', planLevel: 3 }
         })
@@ -1020,15 +1095,52 @@ describe('nextEpisode', () => {
     )
     const client = new BeaconClient()
 
-    await expect(client.nextEpisode(request)).resolves.toBeNull()
+    await expect(client.nextEpisode(request)).resolves.toEqual({
+      slug: 'c1e6',
+      title: 'Campaign 1 Episode 6',
+      image: 'https://images.example/landscape/format=auto,width=480',
+      minutes: 55,
+      autoplayDisabled: false
+    })
   })
 
-  it('stops where the numbering restarts', async () => {
-    // The pointer crosses into another miniseries at a season boundary.
-    routeCms(routes(cmsCard({ episodeNumber: 1 })))
+  it('trusts the pointer when the numbering restarts', async () => {
+    // Kymal E2 -> Calamity E1: the app offers it, so we do too.
+    routeCms(
+      routes(
+        cmsCard({
+          id: 'calamity-e1',
+          slug: 'calamity-e1',
+          title: 'Calamity E1',
+          episodeNumber: 1
+        })
+      )
+    )
     const client = new BeaconClient()
 
-    await expect(client.nextEpisode(request)).resolves.toBeNull()
+    await expect(client.nextEpisode(request)).resolves.toMatchObject({ slug: 'calamity-e1' })
+  })
+
+  it('offers a next episode from another collection', async () => {
+    routeCms(
+      routes(
+        cmsCard({
+          id: 'c2e1',
+          slug: 'c2e1',
+          title: 'Another Show E1',
+          episodeNumber: 1,
+          primaryCollection: {
+            id: 'c2',
+            name: 'Another Show',
+            slug: 'another-show',
+            isSeries: true
+          }
+        })
+      )
+    )
+    const client = new BeaconClient()
+
+    await expect(client.nextEpisode(request)).resolves.toMatchObject({ slug: 'c2e1' })
   })
 
   it('returns null when the pointer has no next item', async () => {

@@ -318,14 +318,13 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
   // alongside playback, so the card is ready long before the ending and a
   // failure costs nothing: the video simply ends where it ends.
   useEffect(() => {
-    if (!data?.collection?.isSeries || data.episodeNumber == null) return
+    if (!data?.collection?.isSeries) return
     let cancelled = false
     window.beacon.playback
       .next({
         contentId: data.id,
         collectionId: data.collection.id,
-        isSeries: data.collection.isSeries,
-        episodeNumber: data.episodeNumber
+        isSeries: data.collection.isSeries
       })
       .then((episode) => {
         if (!cancelled) setUpNext(episode)
@@ -340,12 +339,13 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
 
   // Playback decides when the episode is over, not the countdown: timeupdate
   // ticks at about 4 Hz and could miss the last frame. The card is a picture of
-  // the remaining time, the element's own `ended` is the trigger.
+  // the remaining time, the element's own `ended` is the trigger. A series the
+  // editor marked autoplay-disabled keeps the card, but waits for a click.
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
     const onEnded = (): void => {
-      if (upNext && !upNextDismissed) onPlayNext(upNext.slug)
+      if (upNext && !upNextDismissed && !upNext.autoplayDisabled) onPlayNext(upNext.slug)
     }
     video.addEventListener('ended', onEnded)
     return () => video.removeEventListener('ended', onEnded)
@@ -889,6 +889,7 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
     upNext && !upNextDismissed && panel === null && duration > 0 && remaining <= UPNEXT_WINDOW
       ? upNext
       : null
+  const upNextCounting = offer !== null && !offer.autoplayDisabled
 
   const focused = (id: BarId): string => (focusBar && barFocus === id ? ' is-focused' : '')
 
@@ -1155,23 +1156,29 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
               <span className="player__upnext-title">{offer.title}</span>
               <span className="player__upnext-meta">
                 {offer.minutes ? `${offer.minutes} min · ` : ''}
-                {upNextSeconds > 0 ? `Playing in ${upNextSeconds}s` : 'Playing now'}
+                {offer.autoplayDisabled
+                  ? 'Play next'
+                  : upNextSeconds > 0
+                    ? `Playing in ${upNextSeconds}s`
+                    : 'Playing now'}
               </span>
             </span>
           </button>
-          <div className="player__upnext-timer" aria-hidden>
-            <div
-              className="player__upnext-fill"
-              style={{ width: `${(remaining / UPNEXT_WINDOW) * 100}%` }}
-            />
-          </div>
+          {upNextCounting ? (
+            <div className="player__upnext-timer" aria-hidden>
+              <div
+                className="player__upnext-fill"
+                style={{ width: `${(remaining / UPNEXT_WINDOW) * 100}%` }}
+              />
+            </div>
+          ) : null}
           <button
             type="button"
             className="player__upnext-cancel"
             tabIndex={-1}
             onClick={() => setUpNextDismissed(true)}
           >
-            Keep watching
+            {offer.autoplayDisabled ? 'Dismiss' : 'Keep watching'}
           </button>
         </div>
       ) : null}
