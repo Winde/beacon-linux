@@ -12,6 +12,8 @@ interface ContentProps {
   slug: string
   onOpen: (card: Card) => void
   onPlay: (slug: string, startAt?: number) => void
+  /** Open the sign-in screen; used when the video is locked to guests. */
+  onSignIn?: () => void
   /** Bumped when playback ends or a watch mark lands; older data is stale. */
   refreshKey?: number
   /** Lets screens behind this one drop their cached progress too. */
@@ -34,6 +36,7 @@ export function Content({
   slug,
   onOpen,
   onPlay,
+  onSignIn,
   refreshKey = 0,
   onWatchedChanged
 }: ContentProps): React.JSX.Element | null {
@@ -44,6 +47,8 @@ export function Content({
     { keepData: true }
   )
   const placed = useRef(false)
+  const wasLocked = useRef(false)
+  const wasSignIn = useRef(false)
   // The toggle shows its result before the CMS has answered. The next read
   // replaces it, so this is a head start, not a second source of truth.
   const [watchedNow, setWatchedNow] = useState<boolean | null>(null)
@@ -63,11 +68,27 @@ export function Content({
   }, [slug])
 
   useEffect(() => {
-    if (!data || placed.current) return
-    placed.current = true
-    // Play is the primary action. The summary's See More sits above it in the
-    // header but must not take the first focus on entry.
-    focusFirst('[data-testid="play"]')
+    if (!data) return
+    if (!placed.current) {
+      placed.current = true
+      // Play is the primary action. A guest gets the sign-in button; the
+      // summary's See More must not take the first focus on entry.
+      focusFirst(
+        data.signInNeeded
+          ? '[data-testid="signin"]'
+          : data.locked
+            ? '[data-focus]'
+            : '[data-testid="play"]'
+      )
+    } else if (wasLocked.current && !data.locked) {
+      // The account just unlocked this page: put focus on the new Play button.
+      focusFirst('[data-testid="play"]')
+    } else if (wasSignIn.current && !data.signInNeeded) {
+      // Signed in, but the tier still excludes it; the sign-in button is gone.
+      focusFirst('[data-focus]')
+    }
+    wasLocked.current = data.locked
+    wasSignIn.current = data.signInNeeded
   }, [data])
 
   if (loading) {
@@ -149,11 +170,25 @@ export function Content({
           ) : null}
 
           {data.locked ? (
-            <p className="page-head__locked">
-              {data.signInNeeded
-                ? 'Sign in with a Beacon account to watch this.'
-                : 'Your membership level does not include this video.'}
-            </p>
+            <div className="page-head__locked">
+              <p>
+                {data.signInNeeded
+                  ? 'Sign in with a Beacon account to watch this.'
+                  : 'Your membership level does not include this video.'}
+              </p>
+              {data.signInNeeded && onSignIn ? (
+                <button
+                  type="button"
+                  className="button button--primary"
+                  data-focus
+                  data-testid="signin"
+                  tabIndex={-1}
+                  onClick={onSignIn}
+                >
+                  Sign in
+                </button>
+              ) : null}
+            </div>
           ) : null}
 
           {!data.locked ? (

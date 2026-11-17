@@ -176,12 +176,17 @@ describe('Content', () => {
     expect(screen.queryByTestId('watch-toggle')).toBeNull()
   })
 
-  it('explains that a locked video needs a sign-in', async () => {
+  it('offers sign-in for a locked video', async () => {
+    const onSignIn = vi.fn()
     stubContent(contentData({ locked: true, signInNeeded: true }))
-    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
+    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} onSignIn={onSignIn} />)
 
     expect(await screen.findByText('Sign in with a Beacon account to watch this.')).toBeDefined()
     expect(screen.queryByTestId('play')).toBeNull()
+    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('[data-testid="signin"]'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect(onSignIn).toHaveBeenCalled()
   })
 
   it('explains that a locked video needs a higher tier', async () => {

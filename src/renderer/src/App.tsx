@@ -82,6 +82,10 @@ export default function App(): React.JSX.Element {
 
   const playCard = useCallback((card: Card) => play(card.slug), [play])
 
+  const openLogin = useCallback(() => {
+    push({ name: 'login' })
+  }, [push])
+
   // A watch mark changes the same data the player does: badges, resume points
   // and the rows behind this screen all described the moment before it.
   const watchedChanged = useCallback(() => {
@@ -320,6 +324,14 @@ export default function App(): React.JSX.Element {
 
   const current = stack[stack.length - 1]
 
+  // A login opened from a locked page sits on top of it. After signing in, go
+  // back to that page (and refresh it) rather than dropping the viewer on Home.
+  const loginReturn =
+    stack.length > 1 && stack[stack.length - 1].route.name === 'login'
+      ? stack[stack.length - 2].route.name
+      : null
+  const returnsToScreen = loginReturn === 'content' || loginReturn === 'collection'
+
   if (!current) {
     return (
       <div className="boot">
@@ -337,9 +349,16 @@ export default function App(): React.JSX.Element {
               setSignedIn(true)
               // The session now names the account, so swap in its favourites.
               void loadFavourites()
-              reset({ name: 'home' })
+              // A locked page underneath was waiting for this account: refresh
+              // it and stay there instead of dropping the viewer on Home.
+              setProgressVersion((version) => version + 1)
+              if (returnsToScreen) back()
+              else reset({ name: 'home' })
             }}
-            onSkip={() => reset({ name: 'home' })}
+            onSkip={() => {
+              if (returnsToScreen) back()
+              else reset({ name: 'home' })
+            }}
           />
         )
       case 'home':
@@ -372,6 +391,7 @@ export default function App(): React.JSX.Element {
             slug={route.slug}
             onOpen={openCard}
             onPlay={play}
+            onSignIn={openLogin}
             refreshKey={progressVersion}
             onWatchedChanged={watchedChanged}
           />
