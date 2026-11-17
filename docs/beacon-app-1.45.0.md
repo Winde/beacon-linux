@@ -58,6 +58,10 @@ Confirmed against the app, no change needed:
 - The request header names `x-platform`, `x-supports-drm` and
   `x-has-waiting-room` all exist in the app.
 - `fetchSeries` takes the collection **id** and `content: <id>` to return `next`.
+- **The live schema can be introspected.** The standard `IntrospectionQuery`
+  answers on the same endpoint (no auth needed) with 9,843 types, every
+  `Content` field and the full `search` argument list. Use that for field
+  questions; the APK is still needed for documents and client behaviour.
 
 ## 3. Where we differ
 
@@ -93,8 +97,24 @@ Beacon-engineer reading their logs would expect from a native client.
 This matters beyond manners: home blocks carry `excludedPlatforms { ios
 android web }`, and content can be flagged app-only (`appOnly` prompts). A
 `web` client can legitimately be shown different home content than the app.
-We have not changed this blind — test `android` against the live API with a
-signed-in account and compare home/`GetContentPage` results before switching.
+
+**Tested live (2026-11-17), and it makes no difference today.** Every document
+the client sends — `meMember`, `GetMemberHomePage`, `search`,
+`collectionSearch`, a 1000-item `Collections` listing, `continueWatching`,
+`userCollectionFavourites`, and `Contents`/`Contents.media`/`fetchSeries` for
+four recent items — came back byte-identical under `x-platform: web` and
+`x-platform: android`, signed in and signed out. The locked answer for a
+Member-tier item is also identical: access is decided by the bearer token, not
+the platform header.
+
+The editorial home is the same too, signed in or not. All five live blocks
+have `excludedPlatforms` false for every platform, and all 1,759 content docs
+have an empty `Content.excludedPlatforms`, so the server never varies these
+responses by `x-platform`; only the client's own filtering would, and that is
+also unchanged. `Content.excludedPlatforms` does carry an `ott` flag, but
+nothing is flagged today. Sending `android` would be more honest in Beacon's
+logs; staying on `web` changes nothing. `x-supports-drm: false` still matters:
+it is what keeps the stream plain HLS.
 
 ### 3.3 There is a real favourites system
 
@@ -203,7 +223,7 @@ fallback — a block failure shows an error instead of a different home.
 
 `GetContentPage` requests, besides what we already fetch:
 
-- `ottTitle` — a separate title used by TV layouts (our tiles use `title`);
+- `ottTitle` — a second, display-oriented title (see the table below);
 - `publishedAt`, `contentVisibleAt`, `msUntilVisible`, `secondsAfterAvailable`,
   `continuedSummary`, `comingSoonTagDate` — scheduling / "coming soon";
 - `contentLivestream { currentStream, player, main { ... on MuxAsset { playbackUrl } | on Video { ... } }, fallback { ... } }`
@@ -220,6 +240,27 @@ contentType, duration and the three media unions plus
 `currentProgress`. Worth copying as our media-only query — it is smaller
 than our `MEDIA` + `LOOKUP` pair and gives us livestream/podcast sources.
 
+**Live check (2026-11-17, Member account, all 1,759 content docs).** Which of
+these are worth asking for:
+
+| Field | Reality | Use? |
+|---|---|---|
+| `ottTitle` | Non-null on all 1,759 docs; differs from `title` on 1,156. Strips series/episode prefixes (`C4 E043 \| The Water's Edge` → `The Water's Edge`) and sometimes adds the show (`Abubakar Salim \| Shirts off Sam's Back`). | **Yes** — card/hero/up-next title, `title` as fallback. Keep `title` for the catalog index and episode-code parsing; an editor's `ottTitle` is occasionally wrong (`Comics!` on an unrelated Weird Kids episode). |
+| `continuedSummary` | 142 of 300 recent docs; about 1,086 characters against a 125-character `description`. It is the rest of the page body (credits, sponsors, health note), not a one-line synopsis. | **Yes** — append it below `description` on the content page. |
+| `contentVisibleAt`, `msUntilVisible` | `contentVisibleAt` set on 43 docs, all past except the CMS test doc `coming-soon-test` (visible 2035). Search still returns not-yet-visible docs. | **Yes** — treat a future `contentVisibleAt` as "not playable yet". |
+| `comingSoonTagDate` | The card badge date, 15 minutes before `contentVisibleAt` (e.g. 01:45 for a 02:00 release); all in the past right now. | **Yes** — "Coming soon" badge / premiere label, paired with the guard above. |
+| `contentLivestream` | Present on every doc, but `currentStream`, `main` and `fallback` are null on everything sampled; `enableMonitoring: true` and a JW `player` URL are always set. No `livestream` docs exist today. | **Only for live.** Presence is not a signal; use `contentType: livestream` + `currentStream`. When live, read `main`/`fallback` `MuxAsset.playbackUrl`. |
+| `contentPodcast` | 990 `videoPodcast` docs also have `contentVideo`; 93 `podcast` docs are audio-only (`audio` HLS + podcast `player`). | **Later** — only needed for audio playback. |
+| `freeContent` | Empty `[]` on every sample, Free and Member tier alike. | **No, for now.** |
+| `tags` | 8 of 300 recent docs. | **No, for now.** |
+| `thumbnail.sizes.square` / `portrait`, `podcastThumbnail` | Square and portrait exist on all 1,759 docs. | Only for a square grid or audio row; TV stays on `landscape`/`landscape2x`. |
+| `primaryCollection.podcastFeed` | Present (an external `members.beacon.tv` feed URL). | **No** — that is podcast-app plumbing, not playback. |
+| `video.player`, `video.playlistUrl` | `player` is the JW library URL, not a stream; `playlistUrl` is null on samples. | **No** — keep `video` + `videoData`. |
+| `isTrailer`, `ottIsHero` | `false` on all 1,759 docs. | **No** — unused CMS fields. |
+| `rating`, `popularity` | Not star ratings: engagement counters (`rating` up to 2,027, `popularity` up to 46,474). | **As sort keys only** (`sort: "-popularity"`, `"-rating"`); never render them as a score. |
+| `secondsAfterAvailable` | `-1` on every doc. | Live sync only. |
+| `Content.excludedPlatforms` | Empty on all 1,759 docs (it also carries an `ott` flag). | Not yet. |
+
 Pre-roll exists as a content flag, not a setting on the video:
 `Videos(where: { prerollVideo: { equals: true } })` returns the pre-roll
 item(s). We ignore pre-roll today.
@@ -229,16 +270,37 @@ item(s). We ignore pre-roll today.
 `GetEpisodesList` adds `autoplayDisabled` next to `series`, and `next`
 returns `ottTitle`, `contentType`, `contentTier`, `thumbnail.square`,
 `episodeNumber`, `updatedAt`. `autoplayDisabled` is per series and is the
-editor's switch: our player always autoplays the next episode, so we are
-overriding a setting Beacon exposes.
+editor's switch: the app always renders its `NextEpisodeCard`, but only starts
+the five-second countdown when the flag is false. A click still plays the next
+item. We now read the flag from `fetchSeries`, suppress automatic advance when
+it is true, and leave the card as a manual offer.
+
+The app also trusts `next` as-is: it does not check the candidate's collection
+or episode number. Our player now does the same.
 
 ### 3.8 Search has filters we do not expose
 
 `GetContentSearch` takes `searchTerm`, `category`, `collection`, `sort`,
 `contentTier`, `contentTypes`, `page`, `limit` and `hideFromLatest`. We use
-search term, collection, sort, types, page and limit. `hideFromLatest` and
-`category` are how the app keeps "latest" rows clean; `contentTier` lets a
-free member filter.
+search term, collection, sort, types, page and limit.
+
+The live `search` field also accepts `collections: [String]`,
+`collectionMatch`, `tag`, `season`, `idsToRemove`, `featured`, `previewDate`
+and `preview`. Those are editorial/plumbing except where noted below.
+
+**Tested live (2026-11-17, 1,759 docs, 1,283 playable).** All the string
+filters take the **CMS id**, not the slug or the name — a slug returns zero
+results, an id returns the right set:
+
+| Filter | What it does | Use? |
+|---|---|---|
+| `category: <id>` | Exact category, editorial included. Playable counts: Critical Role 526, Beacon Exclusives and Early Access 105, Midst 62, Candela Obscura 26 (Behind the Scenes 7, Darrington Press 3, Programming Schedule 2 are editorial-only). | **Yes** — the best new filter; a Browse/Search category selector. `Content.category` gives each item its label. |
+| `hideFromLatest: true` | 1,283 → 1,130 playable. 586 docs are flagged overall (372 editorial, 94 `videoPodcast`, 61 `podcast`, 59 `video`), including trailers and one-off panels. Default is `false`; cooldown episodes are **not** flagged. | **Yes, but only for "Latest" rows.** Never on the catalog index or a text search — it would hide real matches. |
+| `contentTier: <id>` | Free 209 / Member 1,550, an exact partition. | Optional — a "Free to watch" filter or row for free members; our lock handling already covers playback. |
+| `sort` | Any field works. `-popularity` and `-rating` produce genuinely different, sensible orders (recent C4 episodes / highest-rated C4 episodes), though main and Cooldown versions sit next to each other. | **Worth exposing** as a "Popular" / "Top rated" sort — with cooldown de-duplication. |
+| `featured: true` | 608 playable docs. | Fallback only if the Featured block is missing. |
+| `tag: <id>` | Works, but sparse and id-only (e.g. Ashley Johnson 257 docs). | Not yet. |
+| `collections`, `collectionMatch`, `season`, `idsToRemove`, `previewDate`, `preview` | Editorial/plumbing; `fetchSeries` already covers seasons. | No. |
 
 ### 3.9 Live events
 
@@ -271,8 +333,17 @@ our screens behave.
   collections use `portrait`/`landscape`, while heroes use
   `landscape2x`. We already request `landscape` + `landscape2x`; square is
   the app's grid shape.
-- **`ottTitle`** is what the app's TV-ish layouts display; keep using
-  `title` is fine, but a title may exist only in `ottTitle` for some items.
+- **`ottTitle`** is the app's card/hero title, not a TV-only field: non-null on
+  all 1,759 docs and different from `title` on 1,156. It drops the series and
+  episode prefix (`C4 E043 | The Water's Edge` → `The Water's Edge`, `S4 E2 |
+  Kyoto, Nara Osaka: Oh My! | AWNP` → `Kyoto, Nara Osaka: Oh My!`) and adds a
+  show suffix where the short name would be ambiguous (`Abubakar Salim |
+  Shirts off Sam's Back`). Use it for tiles, the hero and up-next, with `title`
+  as the fallback; keep the raw `title` for the catalog index and
+  `episodeCode()` parsing, and on the content page, where the longer title
+  carries the episode number. It is editor-maintained, so it has mistakes: two
+  unrelated items both carry `Comics!`, and a trailer currently reuses a whole
+  backstage-pass `ottTitle`.
 - **`preview`**: both page queries take `draft: $preview`; the app passes a
   preview flag for editors. We hard-code `draft: false`, which is right for
   members.
@@ -287,12 +358,14 @@ our screens behave.
 
 ## 5. Suggested order of work
 
-1. **Try `x-platform: android`** with a signed-in session and diff home and
-   content responses against `web`. Cheap, and it may unlock app-only blocks.
+1. ~~Try `x-platform: android`~~ — done, and no change: every document is
+   byte-identical under `web` and `android`, signed in or out, and no block or
+   content item is excluded per platform today. Nothing to unlock; see 3.2.
 2. ~~Adopt favourites for collections/series~~ — done: the client now reads
    `userCollectionFavourites` and writes through
    `toggleCollectionFavouriteEndpoint`, and the local watchlist is gone.
-3. **Respect `autoplayDisabled`** from `fetchSeries`.
+3. ~~Respect `autoplayDisabled`~~ — done: the series query returns it, the
+   player disables automatic advance while keeping the manual next card.
 4. **Move media loading to a `RefetchMedia`-shaped query** and add the
    `contentLivestream` / `contentPodcast` unions, so live and podcast items
    can play at all.
@@ -302,12 +375,22 @@ our screens behave.
    any read that would show the result.
 6. **PKCE sign-in** — the largest change, but it removes password handling
    entirely and matches the official client.
-7. Later: block-driven home, ratings, pre-roll, live-event clock.
+7. **Small wins verified above, in order of cost:**
+   - display `ottTitle` (fall back to `title`) on tiles, the hero and up-next;
+   - append `continuedSummary` under `description` on the content page;
+   - skip `contentVisibleAt > now` in cards and playback (the CMS test doc is
+     searchable today and cannot play), and show `comingSoonTagDate` as the
+     "Coming soon" badge;
+   - add a category selector built on `search(category: <id>)`, and
+     `hideFromLatest: true` only for Latest-style rows;
+   - expose `-popularity` / `-rating` sorts (de-duplicating Cooldown versions).
+8. Later: ratings, pre-roll, live-event clock.
 
 ## 6. Still open
 
-- Header values as sent by the app (`x-platform`, `x-supports-drm`) — built
-  at runtime, not string literals. Needs a request capture or a live test.
+- The exact `x-platform` / `x-supports-drm` *values* the app builds are still
+  not in the bundle, but the live test shows the server does not vary its
+  answers by `x-platform`; only DRM is left to check.
 - Whether `tv.beacon.ott` (Android TV) uses the same OAuth flow, a device
   code, or a QR hand-off. This XAPK is the phone app.
 - Download/offline playback: not present in this bundle.

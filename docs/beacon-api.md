@@ -18,12 +18,16 @@ Headers:
 | Header | Value | Notes |
 |---|---|---|
 | `content-type` | `application/json` | |
-| `x-platform` | `web` | |
+| `x-platform` | `web` | Accepted, but the CMS does not vary its answers by it: `web` and `android` returned byte-identical documents (home, content, media, series, search, collections, progress, favourites) signed in and out. See [beacon-app-1.45.0.md](beacon-app-1.45.0.md) 3.2. |
 | `x-supports-drm` | `false` | **`false` returns plain HLS, no DRM.** `true` returns Widevine. |
 | `x-has-waiting-room` | `true` | live-event waiting room |
 | `authorization` | `Bearer <access_token>` | optional; required for member content |
 
 Verified live: `query { __typename }` → `{"data":{"__typename":"Query"}}` (HTTP 200, no auth).
+
+**Introspection is enabled.** The standard `IntrospectionQuery` answers on the
+same endpoint without auth: 9,843 types, all `Content` fields and the complete
+`search` argument list. Use it to check a field before adding it to a document.
 
 **CORS / origin.** The backend only accepts `https://beacon.tv` as a browser origin,
 so a page running in a normal browser tab cannot call it. Requests from a non-browser
@@ -113,6 +117,27 @@ query Content($slug: String!) {
 `contentVideo.video.video` is the **HLS master playlist URL** (JW Player). It is
 `null` when the account's tier is too low for that item.
 
+For the page itself, request three more fields (verified live on all 1,759
+content docs):
+
+- `ottTitle` — the display title the app puts on cards: non-null everywhere,
+  different from `title` on 1,156 docs, with series/episode prefixes stripped
+  (`C4 E043 | The Water's Edge` → `The Water's Edge`). Show it on tiles, heroes
+  and up-next, falling back to `title`; keep `title` for the catalog index,
+  episode-code parsing and the content header, where the long form is useful.
+- `continuedSummary` — the rest of the page body. `description` is a
+  ~125-character blurb; on 142 of 300 recent docs `continuedSummary` adds the
+  credits/sponsor text (~1 KB). Append it under `description` on the detail
+  page.
+- `contentVisibleAt` / `msUntilVisible` / `comingSoonTagDate` — scheduling.
+  `search` and `Contents` still return a doc whose `contentVisibleAt` is in the
+  future (the CMS `coming-soon-test` doc is visible in 2035), so treat a future
+  value as not playable, and use `comingSoonTagDate` (15 minutes before
+  visibility) for a "Coming soon" badge.
+
+`secondsAfterAvailable` is `-1` on every doc and only matters during a live
+event.
+
 `videoData` is a JSON string containing the JW Player playlist, including caption
 tracks: `playlist[0].tracks[]` with `{ kind, label, file }` where `kind` is
 `captions` or `subtitles`.
@@ -148,8 +173,16 @@ query Series($collection: String!, $season: String, $content: String, $limit: In
 ### Search
 
 ```graphql
-query Search($q: String, $sort: String, $types: [String], $collection: String, $page: Int, $limit: Int) {
-  search(search: $q, sort: $sort, contentTypes: $types, collection: $collection, page: $page, limit: $limit) {
+query Search(
+  $q: String, $sort: String, $types: [String], $collection: String,
+  $category: String, $contentTier: String, $hideFromLatest: Boolean,
+  $page: Int, $limit: Int
+) {
+  search(
+    search: $q, sort: $sort, contentTypes: $types, collection: $collection,
+    category: $category, contentTier: $contentTier,
+    hideFromLatest: $hideFromLatest, page: $page, limit: $limit
+  ) {
     totalPages totalDocs page docs { ...Card }
   }
 }
@@ -157,6 +190,25 @@ query Search($q: String, $sort: String, $types: [String], $collection: String, $
 
 `types: ["video", "videoPodcast"]` for playable items. `sort: "-releaseDate"`.
 Beacon's own search only matches whole words — a local index is worth building.
+
+Other arguments the live field accepts: `collections: [String]`,
+`collectionMatch`, `tag`, `season`, `idsToRemove`, `featured`, `previewDate`,
+`preview`.
+
+Verified live (2026-11-17, 1,759 docs / 1,283 playable):
+
+- `category`, `contentTier` and `tag` take the **CMS id**, not a slug or a name
+  (a slug returns zero). Categories: Critical Role 526 playable, Beacon
+  Exclusives and Early Access 105, Midst 62, Candela Obscura 26; Behind the
+  Scenes, Darrington Press and Programming Schedule are editorial-only.
+  `Content.category` labels an item.
+- `hideFromLatest: true` drops 153 playable docs (1,283 → 1,130). 586 docs are
+  flagged overall — trailers, one-off panels, editorial — but not Cooldown
+  versions. Use it for "Latest" shelves, not for text search or the catalog.
+- `contentTier` partitions exactly: Free 209, Member 1,550.
+- `sort` accepts any field; `-popularity` and `-rating` give sensible
+  "Popular"/"Top rated" orders (with Cooldown and main versions adjacent).
+- `featured: true` returns 608 playable docs.
 
 ### Collections
 
@@ -320,4 +372,6 @@ the document.
   the timing rules still need a live event to confirm.
 - Downloads / offline playback (mobile app only, per Beacon's release notes).
 - The values the official app sends for `x-platform` and `x-supports-drm`
-  (built at runtime, not string literals in the bundle).
+  (built at runtime, not string literals). The server's answers do not vary by
+  `x-platform` — a live `web`/`android` diff is identical — so only the DRM
+  value still matters.
