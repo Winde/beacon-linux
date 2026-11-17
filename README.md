@@ -41,13 +41,24 @@ HLS from JW Player — no Widevine. That makes a native client straightforward. 
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
+### Home
+
+Home is Beacon's own editorial page: `MemberHomePage.pageContent` supplies the
+hero and the shelves — Featured, Continue watching, Watch by Series, Latest
+Videos — in the order the editors set. Blocks the client cannot use on a TV
+(articles, audio for now) are filtered out, `excludedPlatforms` is honoured per
+block, and a block the client has no fragment for is skipped without taking the
+page down.
+
 ### Favourites
 
 Favourites are Beacon's, not ours. Series and collections can be favourited
 from the hero on Home or from their own page, and a **Favourites** row appears
-on Home just below *Continue watching*. The arrows in that row's heading move
-it up or down; that position is the only part kept on the device
-(`preferences.json`), because it is a layout choice and not account data.
+on Home just below *Continue watching* by default. The arrows in that row's
+heading move it among the shelves; the row remembers which shelf it follows
+(`preferences.json`), so editorial changes to the home do not shift it. That
+anchor is the only part kept on the device, because it is a layout choice and
+not account data.
 
 The list itself comes from `userCollectionFavourites` and is written back with
 `toggleCollectionFavouriteEndpoint`, so it is the same list beacon.tv and the

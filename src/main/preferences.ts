@@ -1,39 +1,42 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import type { FavouritesAnchor } from '@shared/types'
 
 interface StoredPreferences {
-  rowsAbove: number | null
+  favouritesAfter?: unknown
+}
+
+const ANCHORS_MAX = 64
+
+function isFavouritesAnchor(value: unknown): value is FavouritesAnchor {
+  return typeof value === 'string' && value.length > 0 && value.length <= ANCHORS_MAX
 }
 
 /**
  * The bit of Home layout that is ours rather than Beacon's. Favourites live in
- * the member's account; only where their row sits is remembered on this device.
+ * the member's account; only which shelf their row follows is remembered here.
  */
 export class PreferencesStore {
   constructor(private readonly path: () => string) {}
 
-  rowsAbove(): number | null {
+  favouritesAfter(): FavouritesAnchor | null {
     try {
-      const parsed = JSON.parse(readFileSync(this.path(), 'utf8')) as Partial<StoredPreferences>
-      return typeof parsed.rowsAbove === 'number' &&
-        Number.isInteger(parsed.rowsAbove) &&
-        parsed.rowsAbove >= 0
-        ? parsed.rowsAbove
-        : null
+      const parsed = JSON.parse(readFileSync(this.path(), 'utf8')) as StoredPreferences
+      return isFavouritesAnchor(parsed.favouritesAfter) ? parsed.favouritesAfter : null
     } catch {
       // No file yet, or one that is damaged. The default place is still fine.
       return null
     }
   }
 
-  setRowsAbove(rowsAbove: number): number | null {
-    const value = Number.isFinite(rowsAbove) && rowsAbove >= 0 ? Math.floor(rowsAbove) : null
+  setFavouritesAfter(after: FavouritesAnchor): FavouritesAnchor {
+    const value: FavouritesAnchor = isFavouritesAnchor(after) ? after : 'top'
     try {
       const target = this.path()
       mkdirSync(dirname(target), { recursive: true })
       // Write beside the target and swap it in, so a crash cannot leave half a file.
       const temporary = `${target}.tmp`
-      writeFileSync(temporary, JSON.stringify({ rowsAbove: value }), { mode: 0o600 })
+      writeFileSync(temporary, JSON.stringify({ favouritesAfter: value }), { mode: 0o600 })
       renameSync(temporary, target)
     } catch {
       // Losing the row's place is not worth crashing over; it holds this run.

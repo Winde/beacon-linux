@@ -85,6 +85,14 @@ function cmsCollection(overrides: Card = {}): Card {
   }
 }
 
+function blockContent(overrides: Card = {}): Record<string, any> {
+  return { __typename: 'Content', ...cmsCard(overrides) }
+}
+
+function blockCollection(overrides: Card = {}): Record<string, any> {
+  return { __typename: 'Collection', ...cmsCollection(overrides) }
+}
+
 function indexedVideo(n: number, overrides: Partial<IndexedVideo> = {}): IndexedVideo {
   return {
     id: `e${n}`,
@@ -127,6 +135,7 @@ function fakeCatalog(options: {
   const collections = options.collections ?? []
   return {
     ensure: async () => undefined,
+    refresh: async () => undefined,
     videoBySlug: (slug) => videos.find((video) => video.slug === slug) ?? null,
     collectionBySlug: (slug) => collections.find((collection) => collection.slug === slug) ?? null,
     videoById: (id) => videos.find((video) => video.id === id) ?? null,
@@ -137,12 +146,22 @@ function fakeCatalog(options: {
   }
 }
 
+function cmsCallsTo(query: string): number {
+  return net.fetch.mock.calls.filter((call) => {
+    const body = (call[1] as { body?: string } | undefined)?.body
+    return body ? (JSON.parse(body) as { query?: string }).query === query : false
+  }).length
+}
+
 function homeRoutes(overrides: Routes = {}): Routes {
   return {
     [Q.ME]: () => MEMBER,
     [Q.CONTINUE_WATCHING]: () => ({ continueWatching: { docs: [] } }),
-    [Q.SEARCH]: () => ({ search: { docs: [] } }),
-    [Q.COLLECTIONS]: () => ({ collectionSearch: { docs: [] } }),
+    [Q.HOME_BLOCKS]: () => ({
+      MemberHomePage: {
+        pageContent: [{ __typename: 'ContinueWatchingV2', id: 'cw-block', limit: 5 }]
+      }
+    }),
     ...overrides
   }
 }
@@ -266,7 +285,7 @@ describe('auth', () => {
 })
 
 describe('home', () => {
-  it('assembles the rows from the CMS', async () => {
+  it('renders the shelves in the order the home document gives', async () => {
     routeCms(
       homeRoutes({
         [Q.CONTINUE_WATCHING]: () => ({
@@ -277,15 +296,52 @@ describe('home', () => {
             ]
           }
         }),
-        [Q.SEARCH]: () => ({
-          search: { docs: [cmsCard({ id: 'r1', slug: 'recent', title: 'Recent', duration: 3_000_000 })] }
-        }),
-        [Q.COLLECTIONS]: () => ({
-          collectionSearch: {
-            docs: [
-              cmsCollection({ id: 's1', slug: 'campaign-1', name: 'Campaign 1', isSeries: true }),
-              cmsCollection({ id: 'c1', slug: 'one-shots', name: 'One Shots', isSeries: false, itemCount: 4 }),
-              cmsCollection({ id: 'c2', slug: 'empty', name: 'Empty', isSeries: false, itemCount: 0 })
+        [Q.HOME_BLOCKS]: () => ({
+          MemberHomePage: {
+            pageContent: [
+              {
+                __typename: 'RedesignHeroCarousel',
+                id: 'hero-block',
+                items: [
+                  {
+                    item: {
+                      value: blockCollection({
+                        id: 'hc',
+                        slug: 'hero-collection',
+                        name: 'Hero Collection'
+                      })
+                    }
+                  }
+                ]
+              },
+              {
+                __typename: 'FeaturedCarousel',
+                id: 'featured-block',
+                title: 'Featured',
+                content: [
+                  blockContent({
+                    id: 'f1',
+                    slug: 'featured-1',
+                    title: 'Featured One',
+                    duration: 3_000_000
+                  }),
+                  blockContent({ id: 'art', slug: 'article', contentType: 'editorial' })
+                ]
+              },
+              { __typename: 'ContinueWatchingV2', id: 'cw-block', limit: 5 },
+              {
+                __typename: 'SeriesCarousel',
+                id: 'series-block',
+                title: 'Watch by Series',
+                content: [blockCollection({ id: 's1', slug: 'campaign-1', name: 'Campaign 1' })]
+              },
+              {
+                __typename: 'LatestCarousel',
+                id: 'latest-block',
+                title: 'Latest Videos',
+                content: [blockContent({ id: 'l1', slug: 'latest-1' })]
+              },
+              { __typename: 'ReadCarousel', id: 'read-block' }
             ]
           }
         })
@@ -295,18 +351,74 @@ describe('home', () => {
 
     const home = await client.home()
 
-    expect(home.rows.map((row) => row.title)).toEqual([
-      'Continue watching',
-      'Recently added',
-      'Series',
-      'Collections'
+    expect(home.rows.map((row) => [row.id, row.kind, row.title])).toEqual([
+      ['featured-block', 'featured', 'Featured'],
+      ['cw-block', 'continue', 'Continue watching'],
+      ['series-block', 'series', 'Watch by Series'],
+      ['latest-block', 'latest', 'Latest Videos']
     ])
-    expect(home.rows[0].items.map((item) => item.slug)).toEqual(['cw1'])
-    expect(home.rows[0].items[0].progress).toBe(0.4)
-    expect(home.rows[3].items.map((item) => item.slug)).toEqual(['one-shots'])
+    expect(home.rows[0].items.map((item) => item.slug)).toEqual(['featured-1'])
+    expect(home.rows[0].items[0].minutes).toBe(50)
+    expect(home.rows[1].items.map((item) => item.slug)).toEqual(['cw1'])
+    expect(home.rows[1].items[0].progress).toBe(0.4)
     expect(home.rows[2].items[0]).toMatchObject({ kind: 'series', count: 10 })
-    expect(home.rows[1].items[0].minutes).toBe(50)
-    expect(home.rows[1].items[0].image).toBe('https://images.example/landscape/format=auto,width=480')
+    expect(home.hero.map((card) => card.slug)).toEqual(['hero-collection'])
+    expect(home.hero[0].image).toBe('https://images.example/collection/format=auto,width=1280')
+  })
+
+  it('drops a block excluded for the platform we identify as', async () => {
+    routeCms(
+      homeRoutes({
+        [Q.HOME_BLOCKS]: () => ({
+          MemberHomePage: {
+            pageContent: [
+              {
+                __typename: 'FeaturedCarousel',
+                id: 'featured-block',
+                title: 'Featured',
+                excludedPlatforms: { ios: false, android: false, web: true },
+                content: [blockContent({ slug: 'web-hidden' })]
+              },
+              {
+                __typename: 'LatestCarousel',
+                id: 'latest-block',
+                title: 'Latest Videos',
+                excludedPlatforms: { ios: false, android: false, web: false },
+                content: [blockContent({ slug: 'kept' })]
+              }
+            ]
+          }
+        })
+      })
+    )
+    const client = new BeaconClient()
+
+    const home = await client.home()
+
+    expect(home.rows.map((row) => row.id)).toEqual(['latest-block'])
+    expect(home.rows[0].items.map((item) => item.slug)).toEqual(['kept'])
+  })
+
+  it('takes the Continue watching limit from its block', async () => {
+    const docs = Array.from({ length: 8 }, (_, index) => ({
+      videoProgress: 40,
+      content: cmsCard({ id: `cw${index}`, slug: `cw${index}` })
+    }))
+    routeCms(
+      homeRoutes({
+        [Q.CONTINUE_WATCHING]: () => ({ continueWatching: { docs } }),
+        [Q.HOME_BLOCKS]: () => ({
+          MemberHomePage: {
+            pageContent: [{ __typename: 'ContinueWatchingV2', id: 'cw-block', limit: 3 }]
+          }
+        })
+      })
+    )
+    const client = new BeaconClient()
+
+    const home = await client.home()
+
+    expect(home.rows[0].items).toHaveLength(3)
   })
 
   it('omits finished rows and empty sections', async () => {
@@ -325,9 +437,6 @@ describe('home', () => {
   })
 
   it('hides an episode watched past 92%, though the player would still resume it', async () => {
-    // Home calls 92% done; content() keeps a resume point up to 95% (see the
-    // content tests), so an episode at 93% drops off the row yet reopens at its
-    // timestamp when reached another way.
     routeCms(
       homeRoutes({
         [Q.CONTINUE_WATCHING]: () => ({
@@ -341,7 +450,7 @@ describe('home', () => {
 
     const home = await client.home()
 
-    expect(home.rows.find((row) => row.title === 'Continue watching')).toBeUndefined()
+    expect(home.rows.find((row) => row.kind === 'continue')).toBeUndefined()
   })
 
   it('measures the tail in time, so a long episode stays in the row', async () => {
@@ -381,18 +490,25 @@ describe('home', () => {
 
     await client.home()
 
-    const asked = net.fetch.mock.calls.map((call) => String(call[0]))
-    expect(asked).toHaveLength(2)
+    expect(cmsCallsTo(Q.HOME_BLOCKS)).toBe(1)
+    expect(cmsCallsTo(Q.CONTINUE_WATCHING)).toBe(0)
   })
 
   it('locks items above the account tier', async () => {
     routeCms(
       homeRoutes({
-        [Q.SEARCH]: () => ({
-          search: {
-            docs: [
-              cmsCard({ slug: 'free', contentTier: { name: 'Apprentice', planLevel: 1 } }),
-              cmsCard({ slug: 'paid', contentTier: { name: 'Exandria', planLevel: 3 } })
+        [Q.HOME_BLOCKS]: () => ({
+          MemberHomePage: {
+            pageContent: [
+              {
+                __typename: 'LatestCarousel',
+                id: 'latest-block',
+                title: 'Latest Videos',
+                content: [
+                  blockContent({ slug: 'free', contentTier: { name: 'Apprentice', planLevel: 1 } }),
+                  blockContent({ slug: 'paid', contentTier: { name: 'Exandria', planLevel: 3 } })
+                ]
+              }
             ]
           }
         })
@@ -408,34 +524,77 @@ describe('home', () => {
     ])
   })
 
-  it('builds the hero from long videos, capped at five', async () => {
-    const docs = Array.from({ length: 7 }, (_, index) =>
-      cmsCard({ slug: `recent-${index}`, duration: 2_400_000 })
+  it('caps the hero block at eight and asks for hero-size art', async () => {
+    const items = Array.from({ length: 9 }, (_, index) => ({
+      item: {
+        value: blockCollection({ id: `hc${index}`, slug: `hero-${index}`, name: `Hero ${index}` })
+      }
+    }))
+    routeCms(
+      homeRoutes({
+        [Q.HOME_BLOCKS]: () => ({
+          MemberHomePage: {
+            pageContent: [{ __typename: 'RedesignHeroCarousel', id: 'hero-block', items }]
+          }
+        })
+      })
     )
-    routeCms(homeRoutes({ [Q.SEARCH]: () => ({ search: { docs } }) }))
+    const client = new BeaconClient()
+
+    const home = await client.home()
+
+    expect(home.hero).toHaveLength(8)
+    expect(home.hero[0].image).toBe('https://images.example/collection/format=auto,width=1280')
+    expect(home.hero[0].image2x).toBe(
+      'https://images.example/collection-wide/format=auto,width=1280'
+    )
+  })
+
+  it('falls back to the first video shelf for the hero', async () => {
+    const content = Array.from({ length: 7 }, (_, index) =>
+      blockContent({ id: `l${index}`, slug: `latest-${index}` })
+    )
+    routeCms(
+      homeRoutes({
+        [Q.HOME_BLOCKS]: () => ({
+          MemberHomePage: {
+            pageContent: [
+              { __typename: 'LatestCarousel', id: 'latest-block', title: 'Latest Videos', content }
+            ]
+          }
+        })
+      })
+    )
     const client = new BeaconClient()
 
     const home = await client.home()
 
     expect(home.hero.map((card) => card.slug)).toEqual([
-      'recent-0',
-      'recent-1',
-      'recent-2',
-      'recent-3',
-      'recent-4'
+      'latest-0',
+      'latest-1',
+      'latest-2',
+      'latest-3',
+      'latest-4'
     ])
     expect(home.hero[0].image).toBe('https://images.example/landscape/format=auto,width=1280')
-    expect(home.hero[0].image2x).toBe('https://images.example/wide/format=auto,width=1280')
   })
 
-  it('falls back to any recent video for the hero', async () => {
-    const docs = [cmsCard({ slug: 'short-1', duration: 300_000 }), cmsCard({ slug: 'short-2', duration: 60_000 })]
-    routeCms(homeRoutes({ [Q.SEARCH]: () => ({ search: { docs } }) }))
+  it('ignores block kinds it has no fragment for', async () => {
+    routeCms(
+      homeRoutes({
+        [Q.HOME_BLOCKS]: () => ({
+          MemberHomePage: {
+            pageContent: [
+              { __typename: 'ReadCarousel', id: 'read-block' },
+              { __typename: 'ListenCarousel', id: 'listen-block' }
+            ]
+          }
+        })
+      })
+    )
     const client = new BeaconClient()
 
-    const home = await client.home()
-
-    expect(home.hero.map((card) => card.slug)).toEqual(['short-1', 'short-2'])
+    await expect(client.home()).resolves.toEqual({ hero: [], rows: [] })
   })
 })
 
@@ -991,6 +1150,36 @@ describe('watch state', () => {
     })
   })
 
+  it('refreshes the catalog when a block names a collection it has not seen', async () => {
+    const collections: IndexedCollection[] = []
+    const catalog = fakeCatalog({ collections })
+    catalog.refresh = vi.fn(async () => {
+      collections.push({
+        id: 'new1',
+        slug: 'new-series',
+        name: 'New Series',
+        isSeries: true,
+        itemCount: 2,
+        released: null,
+        image: null,
+        image2x: null,
+        portrait: null
+      })
+    })
+    routeCms({
+      [Q.ME]: () => MEMBER,
+      [Q.SERIES]: () => ({ fetchSeries: { docs: [], collection: { series: [] } } }),
+      [Q.PROGRESS_FOR]: () => ({ getProgressForContent: { timeMap: [] } })
+    })
+    const client = new BeaconClient()
+    client.catalog = catalog
+
+    const data = await client.collection('new-series')
+
+    expect(catalog.refresh).toHaveBeenCalledOnce()
+    expect(data).toMatchObject({ title: 'New Series', isSeries: true })
+  })
+
   it('marks an episode watched at its full runtime', async () => {
     let event: Record<string, any> | null = null
     let removed: string | null = null
@@ -1313,8 +1502,17 @@ describe('caching', () => {
   it('serves a second Home from memory', async () => {
     routeCms(
       homeRoutes({
-        [Q.SEARCH]: () => ({
-          search: { docs: [cmsCard({ id: 'r1', slug: 'recent', title: 'Recent' })] }
+        [Q.HOME_BLOCKS]: () => ({
+          MemberHomePage: {
+            pageContent: [
+              {
+                __typename: 'LatestCarousel',
+                id: 'latest-block',
+                title: 'Latest Videos',
+                content: [blockContent({ id: 'r1', slug: 'recent', title: 'Recent' })]
+              }
+            ]
+          }
         })
       })
     )
@@ -1323,9 +1521,8 @@ describe('caching', () => {
     await client.home()
     await client.home()
 
+    expect(cmsCalls(Q.HOME_BLOCKS)).toBe(1)
     expect(cmsCalls(Q.CONTINUE_WATCHING)).toBe(1)
-    expect(cmsCalls(Q.SEARCH)).toBe(1)
-    expect(cmsCalls(Q.COLLECTIONS)).toBe(1)
   })
 
   it('shares one Home request between concurrent callers', async () => {
@@ -1334,19 +1531,21 @@ describe('caching', () => {
 
     await Promise.all([client.home(), client.home()])
 
+    expect(cmsCalls(Q.HOME_BLOCKS)).toBe(1)
     expect(cmsCalls(Q.CONTINUE_WATCHING)).toBe(1)
   })
 
-  it('does not remember an empty home after a CMS failure', async () => {
+  it('does not hide a CMS failure as an empty home', async () => {
     net.fetch.mockRejectedValue(new Error('offline'))
     const client = new BeaconClient()
-    await expect(client.home()).resolves.toEqual({ hero: [], rows: [] })
+
+    await expect(client.home()).rejects.toThrow('offline')
 
     net.fetch.mockReset()
     routeCms(homeRoutes())
     await client.home()
 
-    expect(cmsCalls(Q.SEARCH)).toBe(1)
+    expect(cmsCalls(Q.HOME_BLOCKS)).toBe(1)
   })
 
   it('reads Home only after a progress report that was still on its way', async () => {
@@ -1456,8 +1655,17 @@ describe('caching', () => {
   it('drops every cache when the account changes', async () => {
     routeCms(
       homeRoutes({
-        [Q.SEARCH]: () => ({
-          search: { docs: [cmsCard({ id: 'r1', slug: 'recent', title: 'Recent' })] }
+        [Q.HOME_BLOCKS]: () => ({
+          MemberHomePage: {
+            pageContent: [
+              {
+                __typename: 'LatestCarousel',
+                id: 'latest-block',
+                title: 'Latest Videos',
+                content: [blockContent({ id: 'r1', slug: 'recent', title: 'Recent' })]
+              }
+            ]
+          }
         })
       })
     )
@@ -1467,7 +1675,7 @@ describe('caching', () => {
     await client.signOut()
     await client.home()
 
-    expect(cmsCalls(Q.SEARCH)).toBe(2)
+    expect(cmsCalls(Q.HOME_BLOCKS)).toBe(2)
   })
 
   it('reuses the level that the boot status already learned', async () => {

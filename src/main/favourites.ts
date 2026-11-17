@@ -1,4 +1,4 @@
-import type { Card, FavouriteItem, FavouritesData } from '@shared/types'
+import type { Card, FavouriteItem, FavouritesAnchor, FavouritesData } from '@shared/types'
 import type { CatalogLike } from './beacon/client'
 import type { IndexedCollection } from './beacon/catalog-types'
 import { imageUrl } from './beacon/text'
@@ -27,8 +27,8 @@ function itemFromCollection(collection: IndexedCollection): FavouriteItem {
  * Beacon's favourites, hydrated for Home.
  *
  * The account is the source of truth: read the member's collections, then ask
- * the local catalog to name each one. Nothing is written here except where the
- * row sits, and signing out simply leaves nothing to show.
+ * the local catalog to name each one. Nothing is written here except which
+ * shelf their row follows, and signing out simply leaves nothing to show.
  */
 export class FavouritesService {
   /** The last answer, so the row's arrows need no new round trip. */
@@ -41,10 +41,10 @@ export class FavouritesService {
   ) {}
 
   async list(): Promise<FavouritesData> {
-    const rowsAbove = this.preferences.rowsAbove()
-    if (!(await this.api.accountEmail())) return this.snapshot([], rowsAbove)
+    const after = this.preferences.favouritesAfter()
+    if (!(await this.api.accountEmail())) return this.snapshot([], after)
     const ids = await this.api.favouriteCollectionIds().catch(() => [])
-    if (!ids.length) return this.snapshot([], rowsAbove)
+    if (!ids.length) return this.snapshot([], after)
     // Cold boots have the catalog on disk; this only waits the first time.
     await this.catalog.ensure().catch(() => {})
     const items: FavouriteItem[] = []
@@ -55,15 +55,15 @@ export class FavouritesService {
       // stable for this run rather than making it flicker.
       else if (this.shown.has(id)) items.push(this.shown.get(id)!)
     }
-    return this.snapshot(items, rowsAbove)
+    return this.snapshot(items, after)
   }
 
   /** Favourites are collections only: an episode has no favourite of its own. */
   async add(card: Card): Promise<FavouritesData> {
-    const rowsAbove = this.preferences.rowsAbove()
-    if (!card || card.kind !== 'series') return this.snapshot([...this.shown.values()], rowsAbove)
+    const after = this.preferences.favouritesAfter()
+    if (!card || card.kind !== 'series') return this.snapshot([...this.shown.values()], after)
     const id = card.id ?? (await this.idForSlug(card.slug))
-    if (!id) return this.snapshot([...this.shown.values()], rowsAbove)
+    if (!id) return this.snapshot([...this.shown.values()], after)
     await this.api.setCollectionFavourite(id, true)
     // No list read follows the write: the row was already read, and a second
     // read can trail the write and make the just-favourited series disappear.
@@ -82,24 +82,24 @@ export class FavouritesService {
             count: card.count ?? null
           }
     )
-    return this.snapshot(items, rowsAbove)
+    return this.snapshot(items, after)
   }
 
   async remove(slug: string): Promise<FavouritesData> {
     const id = await this.idForSlug(slug)
-    const rowsAbove = this.preferences.rowsAbove()
-    if (!id) return this.snapshot([...this.shown.values()], rowsAbove)
+    const after = this.preferences.favouritesAfter()
+    if (!id) return this.snapshot([...this.shown.values()], after)
     await this.api.setCollectionFavourite(id, false)
     return this.snapshot(
       [...this.shown.values()].filter((item) => item.id !== id),
-      rowsAbove
+      after
     )
   }
 
   /** Moving the row is local, so it must not re-read the account. */
-  setPosition(rowsAbove: number): FavouritesData {
-    const value = this.preferences.setRowsAbove(rowsAbove)
-    return { items: [...this.shown.values()], rowsAbove: value }
+  setPosition(after: FavouritesAnchor): FavouritesData {
+    const value = this.preferences.setFavouritesAfter(after)
+    return { items: [...this.shown.values()], after: value }
   }
 
   private async idForSlug(slug: string): Promise<string | null> {
@@ -108,9 +108,9 @@ export class FavouritesService {
     return this.catalog.collectionBySlug(slug)?.id ?? null
   }
 
-  private snapshot(items: FavouriteItem[], rowsAbove: number | null): FavouritesData {
+  private snapshot(items: FavouriteItem[], after: FavouritesAnchor | null): FavouritesData {
     this.shown.clear()
     for (const item of items) this.shown.set(item.id, item)
-    return { items, rowsAbove }
+    return { items, after }
   }
 }

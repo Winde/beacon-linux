@@ -223,8 +223,7 @@ export class Catalog implements CatalogLike {
     saveSnapshot(snapshot)
   }
 
-  async ensure(): Promise<void> {
-    const stale = !this.snapshot || Date.now() - this.snapshot.builtAt > INDEX_HOURS * 3600 * 1000
+  async ensure(): Promise<void> {    const stale = !this.snapshot || Date.now() - this.snapshot.builtAt > INDEX_HOURS * 3600 * 1000
     if (stale && !this.building) {
       this.building = this.build()
         .catch((err: Error) => {
@@ -236,6 +235,24 @@ export class Catalog implements CatalogLike {
         })
     }
     if (this.snapshot) return
+    await this.building
+  }
+
+  /**
+   * Rebuild now, even when the snapshot is fresh. Used when a page names a
+   * collection the index has not seen — the home blocks are editorial and can
+   * feature something newer than the last index.
+   */
+  async refresh(): Promise<void> {
+    if (this.building) await this.building.catch(() => {})
+    this.building = this.build()
+      .catch((err: Error) => {
+        console.warn('[catalog] refresh failed:', err.message)
+        if (!this.snapshot) throw err
+      })
+      .finally(() => {
+        this.building = null
+      })
     await this.building
   }
 

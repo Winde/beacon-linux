@@ -97,6 +97,71 @@ export const CONTINUE_WATCHING = `
   ${CARD}
 `
 
+/**
+ * The member home as Beacon's editors arrange it. Only the blocks this client
+ * can render are described; any other block still arrives with a __typename and
+ * no fields, and is skipped.
+ */
+export const HOME_BLOCKS = `
+  query HomeBlocks {
+    MemberHomePage: MemberHomepage {
+      pageContent {
+        __typename
+        ... on RedesignHeroCarousel {
+          id
+          items {
+            item {
+              relationTo
+              value {
+                ... on Content { ...BlockCard }
+                ... on Collection { ...BlockCollection }
+              }
+            }
+          }
+          excludedPlatforms { ios android web }
+        }
+        ... on FeaturedCarousel {
+          id
+          title
+          content { ...BlockCard }
+          excludedPlatforms { ios android web }
+        }
+        ... on ContinueWatchingV2 {
+          id
+          limit
+          excludedPlatforms { ios android web }
+        }
+        ... on SeriesCarousel {
+          id
+          title
+          content { ...BlockCollection }
+          excludedPlatforms { ios android web }
+        }
+        ... on LatestCarousel {
+          id
+          title
+          content { ...BlockCard }
+          excludedPlatforms { ios android web }
+        }
+      }
+    }
+  }
+
+  fragment BlockCard on Content {
+    __typename
+    id title slug duration contentType episodeNumber releaseDate
+    contentTier { name planLevel }
+    primaryCollection { id name slug isSeries }
+    thumbnail { sizes { landscape { url } landscape2x { url } } }
+  }
+
+  fragment BlockCollection on Collection {
+    __typename
+    id name slug itemCount
+    thumbnail { sizes { portrait { url } landscape { url } landscape2x { url } } }
+  }
+`
+
 /** Every collection this member has favourited, one page at a time. */
 export const FAVOURITE_COLLECTIONS = `
   query FavouriteCollections($limit: Int, $page: Int) {

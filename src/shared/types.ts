@@ -40,10 +40,22 @@ export interface Card {
   watched?: boolean
 }
 
+/** What a shelf is for; the server id below is its identity. */
+export type HomeRowKind = 'continue' | 'featured' | 'series' | 'latest' | 'favourites'
+
 export interface Row {
   title: string
   items: Card[]
 }
+
+/** A Home shelf carries the block id Beacon gave it, and our own for Favourites. */
+export interface HomeRow extends Row {
+  id: string
+  kind: HomeRowKind
+}
+
+/** `top`, or the id of the block the Favourites row follows. */
+export type FavouritesAnchor = string
 
 /**
  * One favourited series/collection, hydrated for the row. Beacon stores the
@@ -62,16 +74,13 @@ export interface FavouriteItem {
 
 export interface FavouritesData {
   items: FavouriteItem[]
-  /**
-   * Where the Favourites row sits on Home: the number of other rows above it.
-   * null keeps the default, just below Continue watching.
-   */
-  rowsAbove: number | null
+  /** null keeps the default: after Continue watching, else at the top. */
+  after: FavouritesAnchor | null
 }
 
 export interface HomeData {
   hero: Card[]
-  rows: Row[]
+  rows: HomeRow[]
 }
 
 export interface Season {
@@ -204,8 +213,8 @@ export interface BeaconApi {
     list(): Promise<FavouritesData>
     add(card: Card): Promise<FavouritesData>
     remove(slug: string): Promise<FavouritesData>
-    /** Persist the Favourites row's place: the number of Home rows above it. */
-    setPosition(rowsAbove: number): Promise<FavouritesData>
+    /** Persist where the Favourites row sits, relative to a named shelf. */
+    setPosition(after: FavouritesAnchor): Promise<FavouritesData>
   }
   playback: {
     open(slug: string): Promise<PlaybackData | null>

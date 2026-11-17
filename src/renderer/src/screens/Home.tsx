@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavArrowDown, NavArrowUp } from 'iconoir-react'
-import type { Card, FavouriteItem, Row as RowData } from '@shared/types'
+import type {
+  Card,
+  FavouriteItem,
+  FavouritesAnchor,
+  HomeRow
+} from '@shared/types'
 import { isFavourite, toCard } from '@shared/favourites'
 import { useAsync } from '../lib/useAsync'
 import { backdropUrl, preloadAll } from '../lib/images'
@@ -11,12 +16,7 @@ import { ScreenScroll } from '../components/ScreenScroll'
 import { ErrorNote, Spinner } from '../components/ui'
 
 const FAVOURITES_ROW = 'Favourites'
-const CONTINUE_ROW = 'Continue watching'
 const NO_FAVOURITES: FavouriteItem[] = []
-
-interface HomeRow extends RowData {
-  favourites?: boolean
-}
 
 interface HomeProps {
   onOpen: (card: Card) => void
@@ -25,24 +25,21 @@ interface HomeProps {
   refreshKey?: number
   /** Favourited series, in the account's order. Empty means no row is shown. */
   favourites?: FavouriteItem[]
-  /** Rows above the Favourites row; null means just below Continue watching. */
-  rowsAbove?: number | null
+  /** Which shelf the Favourites row follows; null keeps the default. */
+  favouritesAfter?: FavouritesAnchor | null
   onToggleFavourite?: (card: Card) => void
-  /** Persist a new place for the Favourites row (rows above it). */
-  onMoveFavourites?: (rowsAbove: number) => void
+  /** Persist where the Favourites row now sits. */
+  onMoveFavourites?: (after: FavouritesAnchor) => void
   /** Slugs whose favourite write is still in flight. */
   pendingFavourites?: ReadonlySet<string>
 }
-
-const clamp = (value: number, min: number, max: number): number =>
-  Math.min(Math.max(value, min), max)
 
 export function Home({
   onOpen,
   onPlay,
   refreshKey = 0,
   favourites = NO_FAVOURITES,
-  rowsAbove = null,
+  favouritesAfter = null,
   onToggleFavourite,
   onMoveFavourites,
   pendingFavourites
@@ -59,22 +56,37 @@ export function Home({
   const [preview, setPreview] = useState<Card | null>(null)
   const placed = useRef(false)
 
-  // Home builds its shelves ad hoc, but the Favourites row is ours: it slots in
-  // below Continue watching until the player moves it somewhere else.
+  // Home ships its shelves in editorial order. Favourites is ours, so it is
+  // dropped in after a named shelf rather than at an index that would drift
+  // when Beacon adds or removes a block.
   const rows = useMemo<HomeRow[]>(() => {
-    if (!data || !favourites.length) return data?.rows ?? []
-    const defaultAt = Math.max(0, data.rows.findIndex((row) => row.title === CONTINUE_ROW) + 1)
-    const at = clamp(rowsAbove ?? defaultAt, 0, data.rows.length)
+    const base = data?.rows ?? []
+    if (!favourites.length) return base
+    // Default is just below Continue watching; a stale anchor (the block was
+    // deleted, or an editor recreated it) falls back to that same place.
+    const preferred = base.find((row) => row.kind === 'continue')?.id ?? 'top'
+    const chosen = favouritesAfter ?? preferred
+    const anchor =
+      chosen === 'top' || base.some((row) => row.id === chosen) ? chosen : preferred
+    const at = anchor === 'top' ? 0 : base.findIndex((row) => row.id === anchor) + 1
     return [
-      ...data.rows.slice(0, at),
-      { title: FAVOURITES_ROW, items: favourites.map(toCard), favourites: true },
-      ...data.rows.slice(at)
+      ...base.slice(0, at),
+      { id: 'favourites', kind: 'favourites', title: FAVOURITES_ROW, items: favourites.map(toCard) },
+      ...base.slice(at)
     ]
-  }, [data, favourites, rowsAbove])
+  }, [data, favourites, favouritesAfter])
 
-  // The row's place among the real shelves, which is what the arrows move.
-  const favouritesAt = rows.findIndex((row) => row.favourites)
-  const lastAt = data?.rows.length ?? 0
+  const favouritesAt = rows.findIndex((row) => row.kind === 'favourites')
+
+  const move = (direction: 'up' | 'down'): void => {
+    const at = favouritesAt
+    const target = direction === 'up' ? at - 1 : at + 1
+    if (at < 0 || target < 0 || target >= rows.length) return
+    const next = [...rows]
+    ;[next[at], next[target]] = [next[target], next[at]]
+    // The anchor is the block the row now follows, not a position.
+    onMoveFavourites?.(next[target - 1]?.id ?? 'top')
+  }
 
   useEffect(() => {
     if (!data) return
@@ -129,9 +141,9 @@ export function Home({
       <ScreenScroll>
         <div className="rows">
           {rows.map((row) =>
-            row.favourites ? (
+            row.kind === 'favourites' ? (
               <Row
-                key="favourites"
+                key={row.id}
                 title={row.title}
                 items={row.items}
                 onSelect={onOpen}
@@ -148,7 +160,7 @@ export function Home({
                         title="Move up"
                         aria-label="Move Favourites up"
                         disabled={favouritesAt <= 0}
-                        onClick={() => onMoveFavourites(Math.max(0, favouritesAt - 1))}
+                        onClick={() => move('up')}
                       >
                         <NavArrowUp width={18} height={18} strokeWidth={1.8} aria-hidden />
                       </button>
@@ -160,8 +172,8 @@ export function Home({
                         tabIndex={-1}
                         title="Move down"
                         aria-label="Move Favourites down"
-                        disabled={favouritesAt < 0 || favouritesAt >= lastAt}
-                        onClick={() => onMoveFavourites(Math.min(lastAt, favouritesAt + 1))}
+                        disabled={favouritesAt < 0 || favouritesAt >= rows.length - 1}
+                        onClick={() => move('down')}
                       >
                         <NavArrowDown width={18} height={18} strokeWidth={1.8} aria-hidden />
                       </button>
@@ -171,7 +183,7 @@ export function Home({
               />
             ) : (
               <Row
-                key={row.title}
+                key={row.id}
                 title={row.title}
                 items={row.items}
                 onSelect={onOpen}

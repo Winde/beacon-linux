@@ -6,6 +6,7 @@ import type {
   CollectionData,
   ContentData,
   HomeData,
+  HomeRow,
   NextEpisode,
   NextEpisodeRequest,
   PlaybackData,
@@ -30,6 +31,11 @@ const LEVEL_TTL = 10 * 60 * 1000
 /** How long a screen may wait for a progress report before reading anyway. */
 const REPORT_WAIT = 5_000
 
+/** Must match the `x-platform` header sent with every request. */
+const PLATFORM = 'web'
+/** The content types this client can open today. */
+const VIDEO_TYPES = new Set(['video', 'videoPodcast'])
+
 export class BeaconError extends Error {
   status?: number
   rejected?: boolean
@@ -38,6 +44,7 @@ export class BeaconError extends Error {
 /** The parts of the catalog index this client needs. */
 export interface CatalogLike {
   ensure(): Promise<void>
+  refresh(): Promise<void>
   videoBySlug(slug: string): IndexedVideo | null
   collectionBySlug(slug: string): IndexedCollection | null
   videoById(id: string): IndexedVideo | null
@@ -83,6 +90,56 @@ interface CmsCollection {
   itemCount?: number | null
   releaseDate?: string | null
   thumbnail?: CmsThumb | null
+}
+
+/** A home block as it arrives from Beacon; only some types carry fields. */
+interface PlatformExclusions {
+  ios?: boolean
+  android?: boolean
+  web?: boolean
+}
+
+interface BlockContent {
+  __typename?: string
+  id: string
+  title?: string
+  slug: string
+  duration?: number | null
+  contentType?: string | null
+  episodeNumber?: number | null
+  releaseDate?: string | null
+  contentTier?: { name?: string; planLevel?: number } | null
+  primaryCollection?: { id: string; name: string; slug: string; isSeries?: boolean } | null
+  thumbnail?: CmsThumb | null
+}
+
+interface BlockCollection {
+  __typename?: string
+  id: string
+  name: string
+  slug: string
+  itemCount?: number | null
+  thumbnail?: CmsThumb | null
+}
+
+interface HomeBlock {
+  __typename?: string
+  id?: string
+  title?: string
+  limit?: number | null
+  content?: (BlockContent | BlockCollection)[]
+  items?: { item?: { value?: BlockContent | BlockCollection } }[]
+  excludedPlatforms?: PlatformExclusions | null
+}
+
+interface ContinueWatchingDoc {
+  videoProgress?: number
+  videoProgressSeconds?: number
+  content?: CmsCard
+}
+
+interface ContinueWatchingResult {
+  continueWatching?: { docs?: ContinueWatchingDoc[] }
 }
 
 const minutes = (ms?: number | null): number | null =>
@@ -366,7 +423,7 @@ export class BeaconClient {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-platform': 'web',
+          'x-platform': PLATFORM,
           'x-supports-drm': 'false',
           'x-has-waiting-room': 'true',
           ...(token ? { authorization: `Bearer ${token}` } : {})
@@ -534,82 +591,159 @@ export class BeaconClient {
     const level = await this.userLevel()
     this.catalog?.ensure().catch(() => {})
 
-    const [cw, recent, collections] = await Promise.all([
+    const [page, cw] = await Promise.all([
+      this.gql<{ MemberHomePage?: { pageContent?: HomeBlock[] } }>(Q.HOME_BLOCKS),
       signed
-        ? this.gql<{
-            continueWatching?: {
-              docs?: { videoProgress?: number; videoProgressSeconds?: number; content?: CmsCard }[]
-            }
-          }>(Q.CONTINUE_WATCHING, { limit: 30 }).catch(() => null)
-        : Promise.resolve(null),
-      this.gql<{ search?: { docs?: CmsCard[] } }>(Q.SEARCH, {
-        types: Q.PLAYABLE,
-        sort: '-releaseDate',
-        page: 1,
-        limit: 24
-      }).catch(() => null),
-      this.gql<{ collectionSearch?: { docs?: CmsCollection[] } }>(Q.COLLECTIONS, {
-        page: 1,
-        limit: 30
-      }).catch(() => null)
+        ? this.gql<ContinueWatchingResult>(Q.CONTINUE_WATCHING, { limit: 50 }).catch(() => null)
+        : Promise.resolve(null)
     ])
 
-    const rows: Row[] = []
+    const rows: HomeRow[] = []
+    let hero: Card[] = []
 
-    const watching = (cw?.continueWatching?.docs ?? []).filter((d) => d.content)
-    if (watching.length) {      const { email, marks } = await this.watchMarks()
-      const states = new Map(
-        watching.map((d) => {
-          const content = d.content!
-          return [
-            content.id,
-            this.effectiveWatch(
-              content.id,
-              content.duration,
-              Math.min(1, (d.videoProgress ?? 0) / 100),
-              d.videoProgressSeconds,
-              email,
-              marks
-            )
-          ] as const
-        })
-      )
-      // A cleared episode sits at one second, which Beacon may still list as
-      // started. Neither a mark nor that residue belongs in this row.
-      const unfinished = watching.filter((d) => {
-        const state = states.get(d.content!.id)!
-        return !state.watched && state.progress > 0.01
-      })
-      if (unfinished.length) {
-        rows.push({
-          title: 'Continue watching',
-          items: unfinished.map((d) => this.videoCard(d.content!, level, states.get(d.content!.id)))
-        })
+    for (const block of page.MemberHomePage?.pageContent ?? []) {
+      if (!this.blockVisible(block)) continue
+
+      switch (block.__typename) {
+        case 'RedesignHeroCarousel':
+          hero = (block.items ?? [])
+            .map((entry) => entry.item?.value)
+            .filter((value): value is BlockContent | BlockCollection => Boolean(value))
+            .map((value) => this.blockCard(value, level))
+            .filter((card): card is Card => card !== null)
+            .map((card) => this.heroSized(card))
+            .slice(0, 8)
+          break
+
+        case 'ContinueWatchingV2': {
+          if (!cw) break
+          const limit = Math.max(1, Math.min(50, block.limit ?? 20))
+          const row = await this.continueWatchingRow(cw, level, limit, block.id)
+          if (row) rows.push(row)
+          break
+        }
+
+        case 'FeaturedCarousel':
+        case 'LatestCarousel': {
+          const kind = block.__typename === 'FeaturedCarousel' ? 'featured' : 'latest'
+          const items = this.blockCards(block.content, level)
+          if (items.length) {
+            rows.push({
+              id: block.id ?? kind,
+              kind,
+              title: block.title || (kind === 'featured' ? 'Featured' : 'Latest'),
+              items
+            })
+          }
+          break
+        }
+
+        case 'SeriesCarousel': {
+          const items = (block.content ?? [])
+            .filter((value): value is BlockCollection => 'name' in value)
+            .map((value) => this.seriesCard(value))
+          if (items.length) {
+            rows.push({
+              id: block.id ?? 'series',
+              kind: 'series',
+              title: block.title || 'Series',
+              items
+            })
+          }
+          break
+        }
       }
     }
 
-    const recentDocs = recent?.search?.docs ?? []
-    if (recentDocs.length) {
-      rows.push({
-        title: 'Recently added',
-        items: recentDocs.map((c) => this.videoCard(c, level))
-      })
+    // A hero block can be missing or hold only kinds we cannot open; the first
+    // video shelf is a serviceable stand-in.
+    if (!hero.length) {
+      const source =
+        rows.find((row) => row.kind === 'featured') ?? rows.find((row) => row.kind === 'latest')
+      hero = (source?.items ?? [])
+        .filter((card) => card.kind === 'video')
+        .slice(0, 5)
+        .map((card) => this.heroSized(card))
     }
 
-    const allCollections = collections?.collectionSearch?.docs ?? []
-    const series = allCollections.filter((c) => c.isSeries)
-    const other = allCollections.filter((c) => !c.isSeries && (c.itemCount ?? 0) > 0)
-    if (series.length) rows.push({ title: 'Series', items: series.map((c) => this.seriesCard(c)) })
-    if (other.length) rows.push({ title: 'Collections', items: other.map((c) => this.seriesCard(c)) })
+    return { hero, rows: rows.filter((row) => row.items.length) }
+  }
 
-    const heroSource = recentDocs.filter((c) => (c.duration ?? 0) >= 20 * 60 * 1000)
-    const hero = (heroSource.length ? heroSource : recentDocs).slice(0, 5).map((c) => ({
-      ...this.videoCard(c, level),
-      image: img(c.thumbnail?.sizes?.landscape?.url, 1280),
-      image2x: img(c.thumbnail?.sizes?.landscape2x?.url, 1280)
-    }))
+  /** Blocks excluded for the platform we identify as are not rendered at all. */
+  private blockVisible(block: HomeBlock): boolean {
+    return !block.excludedPlatforms?.[PLATFORM]
+  }
 
-    return { hero, rows: rows.filter((r) => r.items.length) }
+  private blockCards(
+    values: (BlockContent | BlockCollection)[] | undefined,
+    level: number
+  ): Card[] {
+    return (values ?? [])
+      .map((value) => this.blockCard(value, level))
+      .filter((card): card is Card => card !== null)
+  }
+
+  /** A block item, or null when it is a kind this TV client cannot open. */
+  private blockCard(value: BlockContent | BlockCollection, level: number): Card | null {
+    if ('name' in value) return this.seriesCard(value)
+    return VIDEO_TYPES.has(value.contentType ?? '')
+      ? this.videoCard(value as CmsCard, level)
+      : null
+  }
+
+  /** The hero asks for its own image size; a tile's is too soft full-bleed. */
+  private heroSized(card: Card): Card {
+    return {
+      ...card,
+      image: img(card.image, 1280),
+      image2x: img(card.image2x, 1280)
+    }
+  }
+
+  private async continueWatchingRow(
+    cw: ContinueWatchingResult,
+    level: number,
+    limit: number,
+    blockId?: string
+  ): Promise<HomeRow | null> {
+    const watching = (cw.continueWatching?.docs ?? [])
+      .filter((doc) => doc.content)
+      .slice(0, limit)
+    if (!watching.length) return null
+
+    const { email, marks } = await this.watchMarks()
+    const states = new Map(
+      watching.map((doc) => {
+        const content = doc.content!
+        return [
+          content.id,
+          this.effectiveWatch(
+            content.id,
+            content.duration,
+            Math.min(1, (doc.videoProgress ?? 0) / 100),
+            doc.videoProgressSeconds,
+            email,
+            marks
+          )
+        ] as const
+      })
+    )
+    // A cleared episode sits at one second, which Beacon may still list as
+    // started. Neither a mark nor that residue belongs in this row.
+    const unfinished = watching.filter((doc) => {
+      const state = states.get(doc.content!.id)!
+      return !state.watched && state.progress > 0.01
+    })
+    if (!unfinished.length) return null
+
+    return {
+      id: blockId ?? 'continue',
+      kind: 'continue',
+      title: 'Continue watching',
+      items: unfinished.map((doc) =>
+        this.videoCard(doc.content!, level, states.get(doc.content!.id))
+      )
+    }
   }
 
   async collection(slug: string): Promise<CollectionData> {
@@ -620,7 +754,12 @@ export class BeaconClient {
 
   private async buildCollection(slug: string): Promise<CollectionData> {
     await this.catalog?.ensure().catch(() => {})
-    const known = this.catalog?.collectionBySlug(slug) ?? null
+    let known = this.catalog?.collectionBySlug(slug) ?? null
+    // A home block can feature a collection newer than the catalog snapshot.
+    if (!known) {
+      await this.catalog?.refresh().catch(() => {})
+      known = this.catalog?.collectionBySlug(slug) ?? null
+    }
     if (!known) throw new Error('Series not found.')
     const level = await this.userLevel()
     const { email, marks } = await this.watchMarks()

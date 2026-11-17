@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Card, FavouritesData } from '@shared/types'
+import type { Card, FavouritesAnchor, FavouritesData } from '@shared/types'
 import { isFavourite, optimisticItem } from '@shared/favourites'
 import { useInput } from './input/useInput'
 import { focusFirst, getFocused, move, setFocused } from './nav/focus'
@@ -32,7 +32,7 @@ function openRailElement(): HTMLElement | null {
   return document.querySelector<HTMLElement>('.rail.is-open')
 }
 
-const EMPTY_FAVOURITES: FavouritesData = { items: [], rowsAbove: null }
+const EMPTY_FAVOURITES: FavouritesData = { items: [], after: null }
 
 export default function App(): React.JSX.Element {
   const [stack, setStack] = useState<Entry[]>([])
@@ -206,8 +206,8 @@ export default function App(): React.JSX.Element {
     [favourites.items, signedIn, trackPending, loadFavourites]
   )
 
-  const moveFavourites = useCallback((rowsAbove: number) => {
-    window.beacon.favourites.setPosition(rowsAbove).then(setFavourites).catch(() => {})
+  const moveFavourites = useCallback((after: FavouritesAnchor) => {
+    window.beacon.favourites.setPosition(after).then(setFavourites).catch(() => {})
   }, [])
   // The rail is only focusable while open, so focus it once it is on screen.
   // Queried directly rather than through focusFirst(): that helper skips
@@ -349,7 +349,7 @@ export default function App(): React.JSX.Element {
             onPlay={playCard}
             refreshKey={progressVersion}
             favourites={favourites.items}
-            rowsAbove={favourites.rowsAbove}
+            favouritesAfter={favourites.after}
             onToggleFavourite={signedIn ? toggleFavourite : undefined}
             onMoveFavourites={moveFavourites}
             pendingFavourites={pendingFavourites}

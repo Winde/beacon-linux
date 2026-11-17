@@ -169,6 +169,13 @@ rows (For You, Watch/Listen/Read carousels, categories) and its hero is our
 own pick. If we want the real home, `MemberHomePage.pageContent` is the
 query, and the block shapes are all in the appendix.
 
+**Update (2026-11-17):** the client now renders the block home. The hero,
+Featured, Continue watching, Watch by Series and Latest Videos come from
+`pageContent` in editorial order, keyed by each block's CMS `id`;
+`excludedPlatforms` is honoured and editorial/audio items are filtered out
+until those screens exist. The old search-based builder is gone, not kept as a
+fallback — a block failure shows an error instead of a different home.
+
 ### 3.6 Content page fields we do not ask for
 
 `GetContentPage` requests, besides what we already fetch:

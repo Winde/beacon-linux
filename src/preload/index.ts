@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BeaconApi, Card, NextEpisodeRequest, ProgressReport } from '@shared/types'
+import type { BeaconApi, Card, FavouritesAnchor, NextEpisodeRequest, ProgressReport } from '@shared/types'
 
 const api: BeaconApi = {
   auth: {
@@ -20,7 +20,7 @@ const api: BeaconApi = {
     list: () => ipcRenderer.invoke('favourites:list'),
     add: (card: Card) => ipcRenderer.invoke('favourites:add', card),
     remove: (slug: string) => ipcRenderer.invoke('favourites:remove', slug),
-    setPosition: (rowsAbove: number) => ipcRenderer.invoke('favourites:setPosition', rowsAbove)
+    setPosition: (after: FavouritesAnchor) => ipcRenderer.invoke('favourites:setPosition', after)
   },
   playback: {
     open: (slug: string) => ipcRenderer.invoke('playback:open', slug),

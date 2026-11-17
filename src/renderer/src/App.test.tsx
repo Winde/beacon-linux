@@ -59,9 +59,9 @@ function stubApp({
   remove: ReturnType<typeof vi.fn>
 } {
   const signOut = vi.fn(() => Promise.resolve())
-  const list = vi.fn(() => Promise.resolve({ items, rowsAbove: null }))
-  const addFn = vi.fn(add ?? (() => Promise.resolve({ items, rowsAbove: null })))
-  const remove = vi.fn(removeImpl ?? (() => Promise.resolve({ items: [], rowsAbove: null })))
+  const list = vi.fn(() => Promise.resolve({ items, after: null }))
+  const addFn = vi.fn(add ?? (() => Promise.resolve({ items, after: null })))
+  const remove = vi.fn(removeImpl ?? (() => Promise.resolve({ items: [], after: null })))
 
   vi.stubGlobal('beacon', {
     auth: {
@@ -154,7 +154,7 @@ describe('App favourites', () => {
     expect(screen.getByTestId('hero-favourite').querySelector('.button__spinner')).not.toBeNull()
     expect(add).toHaveBeenCalledWith(SERIES)
 
-    settle({ items: [favourite('campaign-1', 'Campaign 1')], rowsAbove: null })
+    settle({ items: [favourite('campaign-1', 'Campaign 1')], after: null })
 
     await waitFor(() =>
       expect(screen.getByTestId('hero-favourite').getAttribute('aria-busy')).toBe('false')
@@ -200,7 +200,7 @@ describe('App favourites', () => {
     expect(screen.getByTestId('hero-favourite').getAttribute('aria-busy')).toBe('true')
     expect(remove).toHaveBeenCalledWith('campaign-1')
 
-    settle({ items: [], rowsAbove: null })
+    settle({ items: [], after: null })
     await waitFor(() =>
       expect(screen.getByTestId('hero-favourite').getAttribute('aria-busy')).toBe('false')
     )

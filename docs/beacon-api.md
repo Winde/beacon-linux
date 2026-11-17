@@ -268,10 +268,32 @@ Observed in the official app; see [beacon-app-1.45.0.md](beacon-app-1.45.0.md).
 
 ### Home page
 
-beacon.tv's member home page is a single large query (`MemberHomePage.pageContent`),
-a list of blocks whose shapes vary. Blocks contain arrays under keys like `items`,
-`carouselContent`, `latestCarouselContent`, `collections`, `content`,
-`interestsCollections`, and items are either `Content` (video) or `Collection` (series).
+beacon.tv's member home page is a single query (`MemberHomePage.pageContent`),
+a list of blocks in editorial order. Each block has a stable CMS `id` and
+`excludedPlatforms { ios android web }`; the booleans mean "hide here", and the
+server does not filter them by `x-platform` — the client must. The endpoint
+answers without an account, so guests get the same editorial page.
+
+Live block types (all eight), in the order seen on 2026-11-17:
+
+```
+RedesignHeroCarousel, FeaturedCarousel, ContinueWatchingV2, SeriesCarousel,
+ReadCarousel, LatestCarousel, HeroCarousel, ListenCarousel
+```
+
+- `RedesignHeroCarousel` and `HeroCarousel` mix `Content` and `Collection`
+  items through `items[].item.value`; the rest use `content` (`carouselContent`).
+- `ContinueWatchingV2` carries only `limit` (5 today) and a colour. The items
+  still come from `continueWatching`.
+- `FeaturedCarousel` can mix `video`, `videoPodcast` and `editorial` items;
+  `LatestCarousel` is video; `SeriesCarousel` is Collections.
+- `ReadCarousel` is `editorial` (articles) and `ListenCarousel` is `podcast`
+  (audio). A TV client that cannot show those should drop the items, not the
+  whole row.
+
+Blocks whose type is not described in the query still arrive with a
+`__typename` and no fields, so an unknown block is skipped rather than breaking
+the document.
 
 ## 4. Media
 

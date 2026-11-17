@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Card } from '@shared/types'
+import type { Card, FavouritesAnchor } from '@shared/types'
 import type { CatalogLike } from './beacon/client'
 import type { FavouritesApi } from './favourites'
 import { FavouritesService } from './favourites'
@@ -41,8 +41,8 @@ function harness(options: { email?: string | null; ids?: string[] } = {}) {
     suggest: vi.fn(() => [])
   } as unknown as CatalogLike
   const preferences = {
-    rowsAbove: vi.fn(() => null),
-    setRowsAbove: vi.fn((value: number) => value)
+    favouritesAfter: vi.fn(() => null),
+    setFavouritesAfter: vi.fn((value: FavouritesAnchor) => value)
   } as unknown as PreferencesStore
   const service = new FavouritesService(api, catalog, preferences)
   return { service, api, catalog, preferences }
@@ -64,7 +64,7 @@ describe('FavouritesService', () => {
   it('shows nothing when nobody is signed in', async () => {
     const { service, api } = harness({ email: null })
 
-    await expect(service.list()).resolves.toEqual({ items: [], rowsAbove: null })
+    await expect(service.list()).resolves.toEqual({ items: [], after: null })
     expect(api.favouriteCollectionIds).not.toHaveBeenCalled()
   })
 
@@ -89,7 +89,7 @@ describe('FavouritesService', () => {
   it('skips a favourite whose collection is no longer in the catalog', async () => {
     const { service } = harness({ ids: ['gone'] })
 
-    await expect(service.list()).resolves.toEqual({ items: [], rowsAbove: null })
+    await expect(service.list()).resolves.toEqual({ items: [], after: null })
   })
 
   it('favourites a series and answers without re-reading the account', async () => {
@@ -131,10 +131,10 @@ describe('FavouritesService', () => {
   it('moves the row without asking the account again', () => {
     const { service, api, preferences } = harness()
 
-    const data = service.setPosition(3)
+    const data = service.setPosition('featured')
 
-    expect(preferences.setRowsAbove).toHaveBeenCalledWith(3)
+    expect(preferences.setFavouritesAfter).toHaveBeenCalledWith('featured')
     expect(api.favouriteCollectionIds).not.toHaveBeenCalled()
-    expect(data.rowsAbove).toBe(3)
+    expect(data.after).toBe('featured')
   })
 })

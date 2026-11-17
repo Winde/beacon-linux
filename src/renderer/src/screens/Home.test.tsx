@@ -38,7 +38,7 @@ function card(slug: string, title: string, overrides: Partial<Card> = {}): Card 
 function homeData(overrides: Partial<HomeData> = {}): HomeData {
   return {
     hero: [card('feat-1', 'Featured One'), card('feat-2', 'Featured Two')],
-    rows: [{ title: 'Recently added', items: [card('a', 'Episode a'), card('b', 'Episode b')] }],
+    rows: [{ id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a'), card('b', 'Episode b')] }],
     ...overrides
   }
 }
@@ -135,8 +135,8 @@ describe('Home', () => {
     stubHome(
       homeData({
         rows: [
-          { title: 'Continue watching', items: [card('cw', 'Watching')] },
-          { title: 'Recently added', items: [card('a', 'Episode a')] }
+          { id: 'cw', kind: 'continue', title: 'Continue watching', items: [card('cw', 'Watching')] },
+          { id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a')] }
         ]
       })
     )
@@ -152,7 +152,7 @@ describe('Home', () => {
   it('puts the favourites first when there is nothing to continue', async () => {
     stubHome(
       homeData({
-        rows: [{ title: 'Recently added', items: [card('a', 'Episode a')] }]
+        rows: [{ id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a')] }]
       })
     )
     render(
@@ -167,8 +167,8 @@ describe('Home', () => {
     stubHome(
       homeData({
         rows: [
-          { title: 'Continue watching', items: [card('cw', 'Watching')] },
-          { title: 'Recently added', items: [card('a', 'Episode a')] }
+          { id: 'cw', kind: 'continue', title: 'Continue watching', items: [card('cw', 'Watching')] },
+          { id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a')] }
         ]
       })
     )
@@ -177,7 +177,7 @@ describe('Home', () => {
         onOpen={vi.fn()}
         onPlay={vi.fn()}
         favourites={[favourite('w1', 'Saved One')]}
-        rowsAbove={2}
+        favouritesAfter="recent"
       />
     )
 
@@ -198,8 +198,8 @@ describe('Home', () => {
     stubHome(
       homeData({
         rows: [
-          { title: 'Continue watching', items: [card('cw', 'Watching')] },
-          { title: 'Recently added', items: [card('a', 'Episode a')] }
+          { id: 'cw', kind: 'continue', title: 'Continue watching', items: [card('cw', 'Watching')] },
+          { id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a')] }
         ]
       })
     )
@@ -215,18 +215,18 @@ describe('Home', () => {
     await screen.findByRole('heading', { name: 'Favourites' })
 
     fireEvent.click(screen.getByTestId('favourites-up'))
-    expect(onMoveFavourites).toHaveBeenLastCalledWith(0)
+    expect(onMoveFavourites).toHaveBeenLastCalledWith('top')
 
     fireEvent.click(screen.getByTestId('favourites-down'))
-    expect(onMoveFavourites).toHaveBeenLastCalledWith(2)
+    expect(onMoveFavourites).toHaveBeenLastCalledWith('recent')
   })
 
   it('disables the arrows at the ends of the shelves', async () => {
     stubHome(
       homeData({
         rows: [
-          { title: 'Continue watching', items: [card('cw', 'Watching')] },
-          { title: 'Recently added', items: [card('a', 'Episode a')] }
+          { id: 'cw', kind: 'continue', title: 'Continue watching', items: [card('cw', 'Watching')] },
+          { id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a')] }
         ]
       })
     )
@@ -235,7 +235,7 @@ describe('Home', () => {
         onOpen={vi.fn()}
         onPlay={vi.fn()}
         favourites={[favourite('w1', 'Saved One')]}
-        rowsAbove={0}
+        favouritesAfter="top"
         onMoveFavourites={vi.fn()}
       />
     )
@@ -249,7 +249,7 @@ describe('Home', () => {
         onOpen={vi.fn()}
         onPlay={vi.fn()}
         favourites={[favourite('w1', 'Saved One')]}
-        rowsAbove={2}
+        favouritesAfter="recent"
         onMoveFavourites={vi.fn()}
       />
     )
@@ -284,8 +284,8 @@ describe('Home', () => {
     const before = homeData()
     const after = homeData({
       rows: [
-        { title: 'Continue watching', items: [card('watched', 'Just Watched')] },
-        { title: 'Recently added', items: [card('a', 'Episode a')] }
+        { id: 'cw', kind: 'continue', title: 'Continue watching', items: [card('watched', 'Just Watched')] },
+        { id: 'recent', kind: 'latest', title: 'Recently added', items: [card('a', 'Episode a')] }
       ]
     })
     const home = vi.fn().mockResolvedValueOnce(before).mockResolvedValueOnce(after)
