@@ -91,7 +91,10 @@ npm run dev
 ```
 
 The first launch shows the sign-in screen. Free videos work without an account.
-On a Steam Deck, `STEAM` + `X` opens the on-screen keyboard for the password field.
+The window opens fullscreen and zooms the page to the display, so a TV shows the
+same layout at its own resolution rather than a scaled-up, pixelated one; `F11`
+leaves fullscreen. On a Steam Deck, `STEAM` + `X` opens the on-screen keyboard
+for the password field.
 
 ## Install on SteamOS
 

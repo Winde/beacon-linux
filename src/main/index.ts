@@ -1,8 +1,13 @@
-import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, powerMonitor, screen, shell } from 'electron'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { client, registerIpc } from './ipc'
+import { useSimpleInputMethod } from './linux-env'
+import { pageZoom } from './window-scale'
+
+// Before Chromium creates its input method and GTK loads a module by name.
+useSimpleInputMethod(process.env)
 
 const isDev = !app.isPackaged
 
@@ -53,6 +58,17 @@ function captureIfRequested(window: BrowserWindow): void {
   })
 }
 
+/**
+ * Zoom the page so a screen keeps the size it was drawn at, whatever the
+ * display is. Gamescope would otherwise scale a small window up to the
+ * television, which is what made the app look zoomed in and pixelated.
+ */
+function fitPageToWindow(window: BrowserWindow): void {
+  const [width, height] = window.getContentSize()
+  if (width < 1 || height < 1) return
+  window.webContents.setZoomFactor(pageZoom(width, height))
+}
+
 function createWindow(): void {
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   // The one document this window may show. A page-initiated navigation away
@@ -62,10 +78,14 @@ function createWindow(): void {
   ).href
 
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    // A television is the target. Gamescope scales a smaller window up to the
+    // display, so open fullscreen at the display's own resolution; F11 leaves
+    // fullscreen on a desktop.
+    width: screen.getPrimaryDisplay().workAreaSize.width,
+    height: screen.getPrimaryDisplay().workAreaSize.height,
     minWidth: 960,
     minHeight: 540,
+    fullscreen: true,
     show: false,
     backgroundColor: '#08090c',
     autoHideMenuBar: true,
@@ -76,6 +96,15 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false
     }
+  })
+
+  fitPageToWindow(mainWindow)
+  // Fullscreen changes the window size, and a reload can reset the zoom.
+  mainWindow.on('resize', () => {
+    if (mainWindow) fitPageToWindow(mainWindow)
+  })
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (mainWindow) fitPageToWindow(mainWindow)
   })
 
   mainWindow.once('ready-to-show', () => {

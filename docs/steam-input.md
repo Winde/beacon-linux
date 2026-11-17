@@ -45,9 +45,35 @@ code path covers both.
 4. **Input stops when the window loses focus.** The Steam overlay and alt-tab
    must not move focus behind the player's back, and held buttons must not stick.
 5. **Real `<input>` elements for text.** Steam's on-screen keyboard (`STEAM` + `X`)
-   types into whatever has DOM focus, so the login form works without a keyboard.
+   types into whatever has DOM focus, so the login form works without a
+   keyboard. The app runs with the GTK simple context: see
+   [Text input in Game Mode](#text-input-in-game-mode).
 6. **Keyboard parity.** Every action also has a key, so the app is usable in
    Desktop Mode and in a dev environment with no pad attached.
+7. **Fullscreen at the display's own resolution.** Gamescope scales a smaller
+   window up to the television, which is what turned the sign-in screen into a
+   blurry, zoomed-in picture. The window opens fullscreen and the page is
+   zoomed to the 1280x800 size it was drawn at, so text and artwork are drawn
+   at the real pixel size on a 1080p or 4K set.
+
+## Text input in Game Mode
+
+Typing in the login fields with the Steam keyboard doubled every character.
+Chromium builds its Linux text input on `GtkIMContext`, and in Game Mode Steam
+sets `GTK_IM_MODULE=Steam`. That module commits the on-screen keyboard's text
+while the keyboard's own key events are also delivered, so a real `<input>`
+received each character twice.
+
+The app therefore asks GTK for the simple context
+(`GTK_IM_MODULE=gtk-im-context-simple`), which has only the key-event path.
+The full module id matters: GTK ignores a `simple` shorthand and quietly falls
+back to the desktop's own module. The keyboard still types; it just no longer
+opens by itself when a field takes focus, so the sign-in screen says to press
+`STEAM` + `X`. Only Steam's module is replaced: a desktop session's `ibus`
+types normally, and a module the player picked themselves (fcitx, xim, ...)
+is left alone. See
+[HeroicGamesLauncher#4250](https://github.com/Heroic-Games-Launcher/HeroicGamesLauncher/issues/4250)
+and [SteamOS#1039](https://github.com/ValveSoftware/SteamOS/issues/1039).
 
 ## Known Electron problem
 
