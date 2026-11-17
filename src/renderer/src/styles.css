@@ -7,7 +7,7 @@
   --accent-ink: #1b1206;
   --line: rgba(255, 255, 255, 0.08);
   --radius: 14px;
-  --tile-w: 300px;
+  --tile-w: 280px;
   --gutter: 56px;
 }
 
@@ -259,10 +259,13 @@ kbd {
 
 .hero {
   position: relative;
-  /* Sized for a 1080p TV: the backdrop stays cinematic but the pinned header
-   * leaves room for two-plus shelves below it. */
-  height: clamp(320px, 42vh, 480px);
-  min-height: 320px;
+  /* The hero owns a fixed share of the screen so the shelves below get a
+   * predictable amount: 30% at the 800px design height (window-scale.ts keeps
+   * that height on any 16:9 display), still cinematic on taller windows up to
+   * 420px. The old 320px floor is what pinned it at 42% and left one shelf and
+   * a slice of the next on screen. */
+  height: clamp(232px, 30vh, 420px);
+  min-height: 232px;
   display: flex;
   align-items: flex-end;
   /* The blurred stand-in is scaled past the hero box; without clipping its
@@ -312,12 +315,12 @@ kbd {
 
 .hero__body {
   position: relative;
-  padding: 0 var(--gutter) 40px;
+  padding: 0 var(--gutter) 26px;
   max-width: 720px;
 }
 
 .hero__eyebrow {
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   text-transform: uppercase;
   letter-spacing: 0.18em;
   font-size: 0.78rem;
@@ -326,8 +329,8 @@ kbd {
 }
 
 .hero__title {
-  margin: 0 0 12px;
-  font-size: clamp(1.7rem, 2.9vw, 2.6rem);
+  margin: 0 0 8px;
+  font-size: clamp(1.55rem, 2.5vw, 2.25rem);
   line-height: 1.12;
   text-wrap: balance;
   display: -webkit-box;
@@ -337,7 +340,7 @@ kbd {
 }
 
 .hero__sub {
-  margin: 0 0 22px;
+  margin: 0 0 14px;
   color: var(--muted);
   font-size: 1.02rem;
 }
@@ -347,24 +350,26 @@ kbd {
 .rows {
   /* Clear of the pinned header: a shelf with no heading has no title margin to
    * hold its artwork away from the hero above it. */
-  padding: 14px 0 0;
+  padding: 10px 0 0;
 }
 
 .row {
-  margin-bottom: 30px;
+  /* Tight enough that the second shelf's art lands inside the scroller under a
+   * 30% hero, loose enough to separate the shelves. */
+  margin-bottom: 20px;
 }
 
 .row__head {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 0 0 12px;
+  margin: 0 0 8px;
   padding: 0 var(--gutter);
 }
 
 .row__title {
   margin: 0;
-  font-size: 1.18rem;
+  font-size: 1.1rem;
   font-weight: 650;
   letter-spacing: 0.01em;
 }
@@ -401,7 +406,9 @@ kbd {
 .row__track {
   display: flex;
   gap: 18px;
-  padding: 14px var(--gutter);
+  /* 12px is the floor: a focused tile swells 1.035 and draws a 3px ring with a
+   * 3px offset, so less padding clips its top at the scroller edge. */
+  padding: 12px var(--gutter);
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -422,7 +429,7 @@ kbd {
   width: var(--tile-w);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   padding: 0;
   border: 0;
   background: none;
@@ -637,17 +644,23 @@ kbd {
 
 .page-head {
   position: relative;
-  min-height: 340px;
+  /* A series head holds a title, one meta line and a button: 240px stays
+   * cinematic without the empty band the old 340px reserved. Episode pages
+   * raise the floor only as far as their own content needs. */
+  min-height: 240px;
   display: flex;
   align-items: flex-end;
-  margin-bottom: 28px;
+  margin-bottom: 18px;
   /* Same guard as .hero: the art and shade are absolutely positioned, and a
    * page head must never paint over the chips or grid below it. */
   overflow: hidden;
 }
 
+/* The episode head carries an eyebrow, title, meta, a two-line synopsis and the
+ * actions. It is a floor, not a fixed height, so it grows to about 333px with
+ * that content instead of reserving 420 and squeezing the shelves. */
 .page-head--tall {
-  min-height: 420px;
+  min-height: 320px;
 }
 
 .page-head__bg {
@@ -668,7 +681,7 @@ kbd {
 
 .page-head__body {
   position: relative;
-  padding: 0 var(--gutter) 36px;
+  padding: 0 var(--gutter) 24px;
   max-width: 780px;
 }
 
@@ -738,11 +751,11 @@ kbd {
   white-space: pre-line;
 }
 
-/* The app's collapsed state: three lines of description, then See More. */
+/* The app's collapsed state: two lines of description, then See More. */
 .page-head__desc.is-clamped {
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   overflow: hidden;
 }
 
@@ -795,7 +808,7 @@ kbd {
   gap: 10px;
   /* Top padding is room for the focus ring: the row scrolls horizontally, so
    * its vertical overflow is clipped at the padding edge. */
-  padding: 10px var(--gutter) 18px;
+  padding: 10px var(--gutter) 12px;
   overflow-x: auto;
   scrollbar-width: none;
   /* Above the page head's art, whatever happens to its stacking. */
