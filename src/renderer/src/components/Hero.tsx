@@ -1,15 +1,17 @@
 import type { Card } from '@shared/types'
 import { backdropUrl, useBackdrop } from '../lib/images'
-import { WatchlistButton } from './WatchlistButton'
+import { FavouriteButton } from './FavouriteButton'
 
 interface HeroProps {
   card: Card
   /** Open the card's own page (series/collection) or its details (video). */
   onOpen: (card: Card) => void
   onPlay: (card: Card) => void
-  /** Omit to hide the watchlist control (e.g. a preview used outside Home). */
-  onToggleWatchlist?: (card: Card) => void
-  inWatchlist?: boolean
+  /** Omit to hide the favourite control (e.g. a preview used outside Home). */
+  onToggleFavourite?: (card: Card) => void
+  inFavourites?: boolean
+  /** The favourite write for this card is still in flight. */
+  favouritePending?: boolean
 }
 
 /**
@@ -22,8 +24,9 @@ export function Hero({
   card,
   onOpen,
   onPlay,
-  onToggleWatchlist,
-  inWatchlist = false
+  onToggleFavourite,
+  inFavourites = false,
+  favouritePending = false
 }: HeroProps): React.JSX.Element {
   const isVideo = card.kind === 'video'
   const playable = isVideo && !card.locked
@@ -74,11 +77,13 @@ export function Hero({
           >
             {!isVideo ? 'Browse' : card.locked ? 'Details' : resuming ? 'Resume' : 'Play'}
           </button>
-          {onToggleWatchlist ? (
-            <WatchlistButton
-              active={inWatchlist}
-              onToggle={() => onToggleWatchlist(card)}
-              testId="hero-watchlist"
+          {/* Favourites are collections: a video hero has nothing to save. */}
+          {onToggleFavourite && !isVideo ? (
+            <FavouriteButton
+              active={inFavourites}
+              pending={favouritePending}
+              onToggle={() => onToggleFavourite(card)}
+              testId="hero-favourite"
             />
           ) : null}
         </div>

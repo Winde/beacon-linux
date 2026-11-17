@@ -10,6 +10,9 @@ const glue = vi.hoisted(() => ({
     status: vi.fn(),
     signIn: vi.fn(),
     signOut: vi.fn(),
+    accountEmail: vi.fn(() => Promise.resolve('member@example.com')),
+    favouriteCollectionIds: vi.fn(() => Promise.resolve([])),
+    setCollectionFavourite: vi.fn(() => Promise.resolve(true)),
     home: vi.fn(),
     collection: vi.fn(),
     content: vi.fn(),
@@ -23,6 +26,7 @@ const glue = vi.hoisted(() => ({
 }))
 
 vi.mock('electron', () => ({
+  app: { getPath: () => 'C:/tmp/beacon-linux-test' },
   ipcMain: {
     handle: (channel: string, handler: (...args: any[]) => any) => {
       glue.handlers.set(channel, handler)

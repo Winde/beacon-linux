@@ -5,7 +5,7 @@ import { focusFirst } from '../nav/focus'
 import { backdropUrl } from '../lib/images'
 import { Tile } from '../components/Tile'
 import { ScreenScroll } from '../components/ScreenScroll'
-import { WatchlistButton } from '../components/WatchlistButton'
+import { FavouriteButton } from '../components/FavouriteButton'
 import { ErrorNote, Spinner } from '../components/ui'
 
 interface CollectionProps {
@@ -13,17 +13,20 @@ interface CollectionProps {
   onOpen: (card: Card) => void
   /** Bumped when playback ends or a watch mark lands; card progress is stale. */
   refreshKey?: number
-  /** Show the watchlist control, and whether this series/collection is saved. */
-  onToggleWatchlist?: (card: Card) => void
-  inWatchlist?: boolean
+  /** Show the favourite control, and whether this series is already favourited. */
+  onToggleFavourite?: (card: Card) => void
+  inFavourites?: boolean
+  /** The favourite write for this series is still in flight. */
+  favouritePending?: boolean
 }
 
 export function Collection({
   slug,
   onOpen,
   refreshKey = 0,
-  onToggleWatchlist,
-  inWatchlist = false
+  onToggleFavourite,
+  inFavourites = false,
+  favouritePending = false
 }: CollectionProps): React.JSX.Element | null {
   const { data, error, loading } = useAsync(
     () => window.beacon.catalog.collection(slug),
@@ -36,7 +39,7 @@ export function Collection({
     if (!data || placed.current) return
     placed.current = true
     // Browsing is the point of this screen: put focus on the seasons or the
-    // first episode, not on the header's watchlist control.
+    // first episode, not on the header's favourite control.
     focusFirst(data.seasons.length > 1 ? '.tab' : '.grid [data-focus]')
   }, [data])
 
@@ -58,7 +61,7 @@ export function Collection({
 
   const season = data.seasons[Math.min(seasonIndex, data.seasons.length - 1)]
   const total = data.seasons.reduce((count, item) => count + item.items.length, 0)
-  const saved: Card = {
+  const favourite: Card = {
     kind: 'series',
     id: data.id,
     slug: data.slug,
@@ -78,11 +81,12 @@ export function Collection({
           <p className="page-head__sub">
             {data.isSeries ? 'Series' : 'Collection'} · {total} videos
           </p>
-          {onToggleWatchlist ? (
+          {onToggleFavourite ? (
             <div className="button-row">
-              <WatchlistButton
-                active={inWatchlist}
-                onToggle={() => onToggleWatchlist(saved)}
+              <FavouriteButton
+                active={inFavourites}
+                pending={favouritePending}
+                onToggle={() => onToggleFavourite(favourite)}
               />
             </div>
           ) : null}

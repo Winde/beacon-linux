@@ -16,13 +16,11 @@ const api: BeaconApi = {
     suggest: (query: string) => ipcRenderer.invoke('catalog:suggest', query),
     indexStatus: () => ipcRenderer.invoke('catalog:indexStatus')
   },
-  watchlist: {
-    list: () => ipcRenderer.invoke('watchlist:list'),
-    add: (card: Card) => ipcRenderer.invoke('watchlist:add', card),
-    remove: (kind: Card['kind'], slug: string) =>
-      ipcRenderer.invoke('watchlist:remove', kind, slug),
-    setPosition: (rowsAbove: number) => ipcRenderer.invoke('watchlist:setPosition', rowsAbove),
-    clear: () => ipcRenderer.invoke('watchlist:clear')
+  favourites: {
+    list: () => ipcRenderer.invoke('favourites:list'),
+    add: (card: Card) => ipcRenderer.invoke('favourites:add', card),
+    remove: (slug: string) => ipcRenderer.invoke('favourites:remove', slug),
+    setPosition: (rowsAbove: number) => ipcRenderer.invoke('favourites:setPosition', rowsAbove)
   },
   playback: {
     open: (slug: string) => ipcRenderer.invoke('playback:open', slug),

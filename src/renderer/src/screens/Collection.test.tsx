@@ -118,20 +118,20 @@ describe('Collection', () => {
     expect(focusFirst).toHaveBeenCalledWith('.tab')
   })
 
-  it('adds the whole series to the watchlist', async () => {
-    const onToggleWatchlist = vi.fn()
+  it('favourites the whole series', async () => {
+    const onToggleFavourite = vi.fn()
     stubCollection(collectionData())
     render(
       <Collection
         slug="campaign-1"
         onOpen={vi.fn()}
-        onToggleWatchlist={onToggleWatchlist}
+        onToggleFavourite={onToggleFavourite}
       />
     )
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Add to watchlist' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Add to favourites' }))
 
-    expect(onToggleWatchlist).toHaveBeenCalledWith({
+    expect(onToggleFavourite).toHaveBeenCalledWith({
       kind: 'series',
       id: 's1',
       slug: 'campaign-1',
@@ -142,19 +142,27 @@ describe('Collection', () => {
     })
   })
 
-  it('offers to remove a saved series', async () => {
+  it('offers to remove a favourited series', async () => {
     stubCollection(collectionData())
     render(
       <Collection
         slug="campaign-1"
         onOpen={vi.fn()}
-        onToggleWatchlist={vi.fn()}
-        inWatchlist
+        onToggleFavourite={vi.fn()}
+        inFavourites
       />
     )
 
-    const toggle = await screen.findByRole('button', { name: 'Remove from watchlist' })
+    const toggle = await screen.findByRole('button', { name: 'Remove from favourites' })
     expect(toggle.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('hides the favourite control when signed out', async () => {
+    stubCollection(collectionData())
+    render(<Collection slug="campaign-1" onOpen={vi.fn()} />)
+
+    await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })
+    expect(screen.queryByRole('button', { name: 'Add to favourites' })).toBeNull()
   })
 
   it('reloads when a watch mark changes progress', async () => {

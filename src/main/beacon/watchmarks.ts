@@ -21,7 +21,7 @@ function defaultPath(): string | null {
   }
 }
 
-/** The same keying the watchlist uses: the sign-in address, lowercased. */
+/** Keyed like the other per-account files: the sign-in address, lowercased. */
 export function accountKey(email: string | null | undefined): string {
   const address = (email ?? '').trim().toLowerCase()
   return address || 'guest'

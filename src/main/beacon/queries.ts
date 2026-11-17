@@ -97,6 +97,36 @@ export const CONTINUE_WATCHING = `
   ${CARD}
 `
 
+/** Every collection this member has favourited, one page at a time. */
+export const FAVOURITE_COLLECTIONS = `
+  query FavouriteCollections($limit: Int, $page: Int) {
+    userCollectionFavourites(limit: $limit, page: $page) {
+      totalPages totalDocs page
+      docs { id name }
+    }
+  }
+`
+
+export const IS_COLLECTION_FAVOURITE = `
+  query IsCollectionFavourite($id: String!) {
+    isCollectionFavourite: hasCollectionFavourited(id: $id)
+  }
+`
+
+/**
+ * The field is an endpoint name, not the alias: Beacon renamed it without
+ * renaming the mutation, and the alias keeps our call sites readable.
+ */
+export const TOGGLE_COLLECTION_FAVOURITE = `
+  mutation ToggleCollectionFavourite($id: String!) {
+    toggleCollectionFavourite: toggleCollectionFavouriteEndpoint(id: $id) {
+      success
+      reason
+      isFavourite
+    }
+  }
+`
+
 /** The id and runtime a watch-state write needs, found by slug. */
 export const LOOKUP = `
   query Lookup($slug: String!) {

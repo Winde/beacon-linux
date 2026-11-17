@@ -197,7 +197,7 @@ describe('Catalog', () => {
     })
   })
 
-  it('finds entries by the ids the watchlist persists', async () => {
+  it('finds entries by the ids the favourites store', async () => {
     const { client } = fakeClient({
       videos: [rawVideo(1)],
       collections: [

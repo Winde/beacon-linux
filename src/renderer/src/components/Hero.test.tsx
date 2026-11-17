@@ -79,43 +79,62 @@ describe('Hero', () => {
     expect(onPlay).not.toHaveBeenCalled()
   })
 
-  it('adds the card to the watchlist from the hero', () => {
-    const data = card()
-    const onToggleWatchlist = vi.fn()
+  it('favourites a series from the hero', () => {
+    const data = card({ kind: 'series', subtitle: undefined, minutes: null, count: 12 })
+    const onToggleFavourite = vi.fn()
     render(
       <Hero
         card={data}
         onOpen={vi.fn()}
         onPlay={vi.fn()}
-        onToggleWatchlist={onToggleWatchlist}
+        onToggleFavourite={onToggleFavourite}
       />
     )
 
-    fireEvent.click(screen.getByTestId('hero-watchlist'))
+    fireEvent.click(screen.getByTestId('hero-favourite'))
 
-    expect(onToggleWatchlist).toHaveBeenCalledWith(data)
+    expect(onToggleFavourite).toHaveBeenCalledWith(data)
   })
 
-  it('offers removal when the card is already saved', () => {
+  it('offers removal when the series is already favourited', () => {
+    render(
+      <Hero
+        card={card({ kind: 'series', subtitle: undefined, minutes: null })}
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+        onToggleFavourite={vi.fn()}
+        inFavourites
+      />
+    )
+
+    const toggle = screen.getByTestId('hero-favourite')
+    expect(toggle.textContent).toBe('Remove from favourites')
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('never offers a favourite on an episode', () => {
     render(
       <Hero
         card={card()}
         onOpen={vi.fn()}
         onPlay={vi.fn()}
-        onToggleWatchlist={vi.fn()}
-        inWatchlist
+        onToggleFavourite={vi.fn()}
       />
     )
 
-    const toggle = screen.getByTestId('hero-watchlist')
-    expect(toggle.textContent).toBe('Remove from watchlist')
-    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.queryByTestId('hero-favourite')).toBeNull()
   })
 
-  it('hides the watchlist control when the app does not offer one', () => {
-    render(<Hero card={card()} onOpen={vi.fn()} onPlay={vi.fn()} />)
+  it('hides the favourite control when the app does not offer one', () => {
+    render(
+      <Hero
+        card={card({ kind: 'series', subtitle: undefined, minutes: null })}
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+      />
+    )
 
-    expect(screen.queryByTestId('hero-watchlist')).toBeNull()
+    expect(screen.queryByTestId('hero-favourite')).toBeNull()
   })
 
   it('omits the subtitle parts a category does not have', () => {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Card, WatchlistData } from '@shared/types'
-import { isWatchlisted } from '@shared/watchlist'
+import type { Card, FavouritesData } from '@shared/types'
+import { isFavourite, optimisticItem } from '@shared/favourites'
 import { useInput } from './input/useInput'
 import { focusFirst, getFocused, move, setFocused } from './nav/focus'
 import { Home } from './screens/Home'
@@ -9,7 +9,6 @@ import { Collection } from './screens/Collection'
 import { Content } from './screens/Content'
 import { Search } from './screens/Search'
 import { Player, type PlayerHandle } from './screens/Player'
-import { ConfirmDialog } from './components/ConfirmDialog'
 import { NavRail } from './components/NavRail'
 import { Spinner } from './components/ui'
 
@@ -33,7 +32,7 @@ function openRailElement(): HTMLElement | null {
   return document.querySelector<HTMLElement>('.rail.is-open')
 }
 
-const EMPTY_WATCHLIST: WatchlistData = { items: [], rowsAbove: null }
+const EMPTY_FAVOURITES: FavouritesData = { items: [], rowsAbove: null }
 
 export default function App(): React.JSX.Element {
   const [stack, setStack] = useState<Entry[]>([])
@@ -45,10 +44,12 @@ export default function App(): React.JSX.Element {
   const railReturn = useRef<HTMLElement | null>(null)
   /** Whether the rail should offer Sign out; guests have no account to leave. */
   const [signedIn, setSignedIn] = useState(false)
-  const [watchlist, setWatchlist] = useState<WatchlistData>(EMPTY_WATCHLIST)
-  /** Signing out while a non-empty watchlist exists asks what to do with it. */
-  const [signOutPrompt, setSignOutPrompt] = useState(false)
-  const dialogReturn = useRef<HTMLElement | null>(null)
+  const [favourites, setFavourites] = useState<FavouritesData>(EMPTY_FAVOURITES)
+  /** Slugs with a favourite write in flight, so the button can show a spinner. */
+  const [pendingFavourites, setPendingFavourites] = useState<ReadonlySet<string>>(new Set())
+  /** Orders writes and replies: only the newest one may replace the row. */
+  const favouriteSeq = useRef(0)
+  const pendingCounts = useRef(new Map<string, number>())
   // Bumped when the player closes. What is behind it has just learned about
   // progress it did not have when its data was built, and screens stay mounted
   // while the player is open, so nothing else would refresh them.
@@ -128,23 +129,34 @@ export default function App(): React.JSX.Element {
   }, [reset])
 
   /**
-   * Reload the list for whoever is signed in now. The API never sees this; the
-   * main process only files it under the account's address.
+   * Read the account's favourites. Signed out, there is nothing to read: the
+   * list lives in Beacon, not on this device. Any write still in flight belongs
+   * to the session being replaced, so its answer is ignored from here on.
    */
-  const loadWatchlist = useCallback(async () => {
+  const loadFavourites = useCallback(async () => {
+    const seq = ++favouriteSeq.current
     try {
-      setWatchlist(await window.beacon.watchlist.list())
+      const data = await window.beacon.favourites.list()
+      if (seq === favouriteSeq.current) setFavourites(data)
     } catch {
-      // A local list that cannot be read is empty for this run, not deleted.
+      // A network hiccup must not look like "you have no favourites"; the next
+      // screen load reads again.
     }
+  }, [])
+
+  const trackPending = useCallback((slug: string, delta: number) => {
+    const counts = pendingCounts.current
+    const next = Math.max(0, (counts.get(slug) ?? 0) + delta)
+    if (next > 0) counts.set(slug, next)
+    else counts.delete(slug)
+    setPendingFavourites(new Set(counts.keys()))
   }, [])
 
   // Signing out clears the stored session, the cached rows and the prefilled
   // address, so a shared Deck does not hand the next person the last account.
-  // The watchlist is not a credential and is only deleted when asked for.
+  // Favourites belong to the account and are left alone.
   const signOut = useCallback(async () => {
     setRailOpen(false)
-    setSignOutPrompt(false)
     await window.beacon.auth.signOut().catch(() => {})
     try {
       window.localStorage.removeItem('beacon.email')
@@ -153,52 +165,50 @@ export default function App(): React.JSX.Element {
     }
     setSignedIn(false)
     reset({ name: 'login' })
-    // Show the guest list, not the account's, if free videos are picked next.
-    void loadWatchlist()
-  }, [loadWatchlist, reset])
+    pendingCounts.current.clear()
+    setPendingFavourites(new Set())
+    // There is no guest list to fall back to; this empties the row.
+    void loadFavourites()
+  }, [loadFavourites, reset])
 
   const requestSignOut = useCallback(() => {
-    if (!watchlist.items.length) {
-      void signOut()
-      return
-    }
-    dialogReturn.current = getFocused()
-    setSignOutPrompt(true)
-  }, [signOut, watchlist.items.length])
-
-  const cancelSignOut = useCallback(() => {
-    setSignOutPrompt(false)
-    const previous = dialogReturn.current
-    if (previous?.isConnected) setFocused(previous)
-    else focusFirst()
-  }, [])
-
-  const deleteWatchlistAndSignOut = useCallback(async () => {
-    setSignOutPrompt(false)
-    // Clear before signing out: the main process files the list under the
-    // address in the session that is about to be dropped.
-    await window.beacon.watchlist
-      .clear()
-      .then(setWatchlist)
-      .catch(() => {})
-    await signOut()
+    void signOut()
   }, [signOut])
 
-  const toggleWatchlist = useCallback(
+  const toggleFavourite = useCallback(
     (card: Card) => {
-      const saved = isWatchlisted(watchlist.items, card.kind, card.slug)
+      if (!signedIn || card.kind !== 'series') return
+      const saved = isFavourite(favourites.items, card.slug)
+      // Change what is on screen now: the button and the row must not wait for
+      // a round trip. The account's answer replaces this when it arrives.
+      setFavourites((current) => {
+        const items = current.items.filter((item) => item.slug !== card.slug)
+        if (saved) return { ...current, items }
+        const item = optimisticItem(card)
+        return item ? { ...current, items: [item, ...items] } : current
+      })
+      const seq = ++favouriteSeq.current
+      trackPending(card.slug, 1)
       const update = saved
-        ? window.beacon.watchlist.remove(card.kind, card.slug)
-        : window.beacon.watchlist.add(card)
-      update.then(setWatchlist).catch(() => {})
+        ? window.beacon.favourites.remove(card.slug)
+        : window.beacon.favourites.add(card)
+      update
+        .then((next) => {
+          if (seq === favouriteSeq.current) setFavourites(next)
+        })
+        .catch(() => {
+          // The write failed, so the optimistic state was a lie. Re-read the
+          // account rather than guessing what to undo.
+          if (seq === favouriteSeq.current) void loadFavourites()
+        })
+        .finally(() => trackPending(card.slug, -1))
     },
-    [watchlist.items]
+    [favourites.items, signedIn, trackPending, loadFavourites]
   )
 
-  const moveWatchlist = useCallback((rowsAbove: number) => {
-    window.beacon.watchlist.setPosition(rowsAbove).then(setWatchlist).catch(() => {})
+  const moveFavourites = useCallback((rowsAbove: number) => {
+    window.beacon.favourites.setPosition(rowsAbove).then(setFavourites).catch(() => {})
   }, [])
-
   // The rail is only focusable while open, so focus it once it is on screen.
   // Queried directly rather than through focusFirst(): that helper skips
   // elements whose computed visibility is hidden, which is exactly what the
@@ -218,12 +228,12 @@ export default function App(): React.JSX.Element {
           window.beacon.app.initialSlug()
         ])
         // Read the list only after status(): a rejected token signs the member
-        // out inside status(), and the local list must follow the account that
+        // out inside status(), and the favourites must follow the account that
         // is actually active, not the one whose tokens just failed.
-        const list = await window.beacon.watchlist.list().catch(() => EMPTY_WATCHLIST)
+        const list = await window.beacon.favourites.list().catch(() => EMPTY_FAVOURITES)
         if (cancelled) return
         setSignedIn(status.signedIn)
-        setWatchlist(list)
+        setFavourites(list)
         const home: Route = status.signedIn ? { name: 'home' } : { name: 'login' }
         if (slug) {
           setStack([
@@ -246,21 +256,6 @@ export default function App(): React.JSX.Element {
   useInput((action) => {
     if (player) {
       playerRef.current?.handle(action)
-      return
-    }
-
-    // The dialog is modal: nothing behind it may take a move or a press.
-    if (signOutPrompt) {
-      if (action === 'up' || action === 'down' || action === 'left' || action === 'right') {
-        move(action, document.querySelector<HTMLElement>('.dialog') ?? undefined)
-        return
-      }
-      if (action === 'accept') {
-        const active = document.activeElement as HTMLElement | null
-        active?.click()
-        return
-      }
-      if (action === 'back') cancelSignOut()
       return
     }
 
@@ -340,8 +335,8 @@ export default function App(): React.JSX.Element {
           <Login
             onSignedIn={() => {
               setSignedIn(true)
-              // The session now names the account, so swap in its list.
-              void loadWatchlist()
+              // The session now names the account, so swap in its favourites.
+              void loadFavourites()
               reset({ name: 'home' })
             }}
             onSkip={() => reset({ name: 'home' })}
@@ -353,10 +348,11 @@ export default function App(): React.JSX.Element {
             onOpen={openCard}
             onPlay={playCard}
             refreshKey={progressVersion}
-            watchlist={watchlist.items}
-            rowsAbove={watchlist.rowsAbove}
-            onToggleWatchlist={toggleWatchlist}
-            onMoveWatchlist={moveWatchlist}
+            favourites={favourites.items}
+            rowsAbove={favourites.rowsAbove}
+            onToggleFavourite={signedIn ? toggleFavourite : undefined}
+            onMoveFavourites={moveFavourites}
+            pendingFavourites={pendingFavourites}
           />
         )
       case 'collection':
@@ -365,8 +361,9 @@ export default function App(): React.JSX.Element {
             slug={route.slug}
             onOpen={openCard}
             refreshKey={progressVersion}
-            onToggleWatchlist={toggleWatchlist}
-            inWatchlist={isWatchlisted(watchlist.items, 'series', route.slug)}
+            onToggleFavourite={signedIn ? toggleFavourite : undefined}
+            inFavourites={isFavourite(favourites.items, route.slug)}
+            favouritePending={pendingFavourites.has(route.slug)}
           />
         )
       case 'content':
@@ -377,8 +374,6 @@ export default function App(): React.JSX.Element {
             onPlay={play}
             refreshKey={progressVersion}
             onWatchedChanged={watchedChanged}
-            onToggleWatchlist={toggleWatchlist}
-            inWatchlist={isWatchlisted(watchlist.items, 'video', route.slug)}
           />
         )
       case 'search':
@@ -406,28 +401,6 @@ export default function App(): React.JSX.Element {
           {renderRoute(entry.route)}
         </div>
       ))}
-
-      {signOutPrompt ? (
-        <ConfirmDialog
-          title="Delete your watchlist?"
-          message="Your watchlist is kept on this device, not in your Beacon account. You can keep it for next time, or delete it now."
-          actions={[
-            {
-              label: 'Keep and sign out',
-              onSelect: signOut,
-              variant: 'primary',
-              testId: 'keep-watchlist'
-            },
-            {
-              label: 'Delete and sign out',
-              onSelect: deleteWatchlistAndSignOut,
-              variant: 'danger',
-              testId: 'delete-watchlist'
-            },
-            { label: 'Cancel', onSelect: cancelSignOut, testId: 'cancel-signout' }
-          ]}
-        />
-      ) : null}
 
       {player ? (
         <Player

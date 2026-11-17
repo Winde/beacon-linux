@@ -105,7 +105,7 @@ export class Catalog implements CatalogLike {
     this.snapshot = snapshot
     this.videosBySlug = new Map(snapshot.videos.map((v) => [v.slug, v]))
     this.collectionsBySlug = new Map(snapshot.collections.map((c) => [c.slug, c]))
-    // The watchlist persists ids, so it can be rehydrated from here.
+    // Favourites store ids, so they can be rehydrated from here.
     this.videosById = new Map(snapshot.videos.map((v) => [v.id, v]))
     this.collectionsById = new Map(snapshot.collections.map((c) => [c.id, c]))
 

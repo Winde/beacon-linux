@@ -14,7 +14,7 @@ does for YouTube.
 
 ## Status
 
-Working end to end: sign-in, home, series, episode pages, search, watchlist, and
+Working end to end: sign-in, home, series, episode pages, search, favourites, and
 video playback with resume and progress sync. Controller navigation is in place
 but has only been exercised with a keyboard so far.
 
@@ -31,7 +31,7 @@ HLS from JW Player — no Widevine. That makes a native client straightforward. 
 │  main process                                                          │
 │    BeaconClient   Memberful OAuth, GraphQL, watch progress             │
 │    Catalog        local index of ~1,300 videos, fuzzy search           │
-│    watchlist.ts   per-account local watchlist and row position         │
+│    favourites.ts  Beacon favourites, hydrated from the catalog         │
 │    hls.ts         master playlist reordered best-first                 │
 │                          │ IPC                                          │
 │  renderer (React)        ▼                                             │
@@ -41,24 +41,25 @@ HLS from JW Player — no Widevine. That makes a native client straightforward. 
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Watchlist
+### Favourites
 
-Beacon has no watchlist, so this one lives on the device. Episodes, series and
-collections can be saved from the hero on Home or from their own page, and a
-**Watchlist** row appears on Home just below *Continue watching*. The arrows in
-that row's heading move it up or down; the position, like the list, is
-remembered per account.
+Favourites are Beacon's, not ours. Series and collections can be favourited
+from the hero on Home or from their own page, and a **Favourites** row appears
+on Home just below *Continue watching*. The arrows in that row's heading move
+it up or down; that position is the only part kept on the device
+(`preferences.json`), because it is a layout choice and not account data.
 
-Watching something never removes it. The list is filed under the address the
-account signs in with and is stored in plain JSON in the app's user-data folder
-(`watchlist.json`). Persistence holds Beacon's content/collection ids, when each
-was saved, and the row position; titles, artwork and lengths are hydrated from
-the local catalog index each launch, so renamed or re-artworked titles update
-themselves.
+The list itself comes from `userCollectionFavourites` and is written back with
+`toggleCollectionFavouriteEndpoint`, so it is the same list beacon.tv and the
+official apps show. The control flips as soon as it is pressed and shows a
+spinner until the account confirms the write; a refused write puts it back.
+Items are hydrated from the local catalog index each launch, which keeps titles
+and artwork current. Nothing is cached for an offline session: with no account,
+or no network, there is no favourites row.
 
-It is not a credential, so an expired or rejected session does not delete it.
-Signing out asks whether to delete it when it has anything in it. Without an
-account, free-video browsing gets a guest list of its own.
+Episodes have no favourite of their own, so an episode page offers no button;
+favourite the series instead. Signing out leaves the account's favourites
+untouched.
 
 API calls live in the main process for two reasons: Beacon's CMS only accepts
 `beacon.tv` as a browser origin (so the renderer would be blocked by CORS), and

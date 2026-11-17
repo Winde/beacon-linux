@@ -46,28 +46,24 @@ export interface Row {
 }
 
 /**
- * One saved title, hydrated for the row. Only `kind`, `id` and `addedAt` are
- * written to disk; the rest is looked up in the local catalog each launch.
+ * One favourited series/collection, hydrated for the row. Beacon stores the
+ * favourite; only ids come back, so the rest is looked up in the local catalog.
  */
-export interface WatchlistItem {
-  kind: 'video' | 'series'
-  /** Beacon's content id (video) or collection id (series/collection). */
+export interface FavouriteItem {
+  kind: 'series'
+  /** Beacon's collection id. */
   id: string
   slug: string
   title: string
-  subtitle: string
   image: string | null
   image2x: string | null
-  minutes: number | null
   count: number | null
-  /** epoch ms, newest first */
-  addedAt: number
 }
 
-export interface WatchlistData {
-  items: WatchlistItem[]
+export interface FavouritesData {
+  items: FavouriteItem[]
   /**
-   * Where the Watchlist row sits on Home: the number of other rows above it.
+   * Where the Favourites row sits on Home: the number of other rows above it.
    * null keeps the default, just below Continue watching.
    */
   rowsAbove: number | null
@@ -201,16 +197,15 @@ export interface BeaconApi {
     indexStatus(): Promise<IndexStatus>
   }
   /**
-   * A local list, kept per sign-in address on this device. Beacon has no
-   * watchlist, and none of these calls touch the network.
+   * Beacon's own favourites for this account: collections only, and empty when
+   * nobody is signed in. The row's position on Home is the one local part.
    */
-  watchlist: {
-    list(): Promise<WatchlistData>
-    add(card: Card): Promise<WatchlistData>
-    remove(kind: Card['kind'], slug: string): Promise<WatchlistData>
-    /** Persist the Watchlist row's place: the number of Home rows above it. */
-    setPosition(rowsAbove: number): Promise<WatchlistData>
-    clear(): Promise<WatchlistData>
+  favourites: {
+    list(): Promise<FavouritesData>
+    add(card: Card): Promise<FavouritesData>
+    remove(slug: string): Promise<FavouritesData>
+    /** Persist the Favourites row's place: the number of Home rows above it. */
+    setPosition(rowsAbove: number): Promise<FavouritesData>
   }
   playback: {
     open(slug: string): Promise<PlaybackData | null>

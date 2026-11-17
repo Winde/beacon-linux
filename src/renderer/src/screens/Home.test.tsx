@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Card, HomeData, WatchlistItem } from '@shared/types'
+import type { Card, FavouriteItem, HomeData } from '@shared/types'
 import { HERO_WIDTH, preloadAll } from '../lib/images'
 import { focusFirst } from '../nav/focus'
 import { Home } from './Home'
@@ -43,18 +43,15 @@ function homeData(overrides: Partial<HomeData> = {}): HomeData {
   }
 }
 
-function saved(slug: string, title: string, overrides: Partial<WatchlistItem> = {}): WatchlistItem {
+function favourite(slug: string, title: string, overrides: Partial<FavouriteItem> = {}): FavouriteItem {
   return {
-    kind: 'video',
+    kind: 'series',
     id: `id-${slug}`,
     slug,
     title,
-    subtitle: 'Campaign 1',
     image: null,
     image2x: null,
-    minutes: 55,
-    count: null,
-    addedAt: 1,
+    count: 12,
     ...overrides
   }
 }
@@ -134,7 +131,7 @@ describe('Home', () => {
     expect(onOpen).toHaveBeenCalledWith(data.rows[0].items[1])
   })
 
-  it('puts the watchlist just below Continue watching', async () => {
+  it('puts the favourites just below Continue watching', async () => {
     stubHome(
       homeData({
         rows: [
@@ -144,29 +141,29 @@ describe('Home', () => {
       })
     )
     render(
-      <Home onOpen={vi.fn()} onPlay={vi.fn()} watchlist={[saved('w1', 'Saved One')]} />
+      <Home onOpen={vi.fn()} onPlay={vi.fn()} favourites={[favourite('w1', 'Saved One')]} />
     )
 
-    expect(await screen.findByRole('heading', { name: 'Watchlist' })).toBeDefined()
-    expect(shelfTitles()).toEqual(['Continue watching', 'Watchlist', 'Recently added'])
+    expect(await screen.findByRole('heading', { name: 'Favourites' })).toBeDefined()
+    expect(shelfTitles()).toEqual(['Continue watching', 'Favourites', 'Recently added'])
     expect(screen.getByText('Saved One')).toBeDefined()
   })
 
-  it('puts the watchlist first when there is nothing to continue', async () => {
+  it('puts the favourites first when there is nothing to continue', async () => {
     stubHome(
       homeData({
         rows: [{ title: 'Recently added', items: [card('a', 'Episode a')] }]
       })
     )
     render(
-      <Home onOpen={vi.fn()} onPlay={vi.fn()} watchlist={[saved('w1', 'Saved One')]} />
+      <Home onOpen={vi.fn()} onPlay={vi.fn()} favourites={[favourite('w1', 'Saved One')]} />
     )
 
-    await screen.findByRole('heading', { name: 'Watchlist' })
-    expect(shelfTitles()).toEqual(['Watchlist', 'Recently added'])
+    await screen.findByRole('heading', { name: 'Favourites' })
+    expect(shelfTitles()).toEqual(['Favourites', 'Recently added'])
   })
 
-  it('remembers a watchlist row the player moved to the end', async () => {
+  it('remembers a favourites row the player moved to the end', async () => {
     stubHome(
       homeData({
         rows: [
@@ -179,25 +176,25 @@ describe('Home', () => {
       <Home
         onOpen={vi.fn()}
         onPlay={vi.fn()}
-        watchlist={[saved('w1', 'Saved One')]}
+        favourites={[favourite('w1', 'Saved One')]}
         rowsAbove={2}
       />
     )
 
-    await screen.findByRole('heading', { name: 'Watchlist' })
-    expect(shelfTitles()).toEqual(['Continue watching', 'Recently added', 'Watchlist'])
+    await screen.findByRole('heading', { name: 'Favourites' })
+    expect(shelfTitles()).toEqual(['Continue watching', 'Recently added', 'Favourites'])
   })
 
-  it('hides the row while the watchlist is empty', async () => {
+  it('hides the row while there are no favourites', async () => {
     stubHome(homeData())
-    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} watchlist={[]} />)
+    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} favourites={[]} />)
 
     await screen.findByRole('heading', { name: 'Recently added' })
-    expect(screen.queryByRole('heading', { name: 'Watchlist' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Favourites' })).toBeNull()
   })
 
-  it('moves the watchlist row with its own arrows', async () => {
-    const onMoveWatchlist = vi.fn()
+  it('moves the favourites row with its own arrows', async () => {
+    const onMoveFavourites = vi.fn()
     stubHome(
       homeData({
         rows: [
@@ -210,18 +207,18 @@ describe('Home', () => {
       <Home
         onOpen={vi.fn()}
         onPlay={vi.fn()}
-        watchlist={[saved('w1', 'Saved One')]}
-        onMoveWatchlist={onMoveWatchlist}
+        favourites={[favourite('w1', 'Saved One')]}
+        onMoveFavourites={onMoveFavourites}
       />
     )
 
-    await screen.findByRole('heading', { name: 'Watchlist' })
+    await screen.findByRole('heading', { name: 'Favourites' })
 
-    fireEvent.click(screen.getByTestId('watchlist-up'))
-    expect(onMoveWatchlist).toHaveBeenLastCalledWith(0)
+    fireEvent.click(screen.getByTestId('favourites-up'))
+    expect(onMoveFavourites).toHaveBeenLastCalledWith(0)
 
-    fireEvent.click(screen.getByTestId('watchlist-down'))
-    expect(onMoveWatchlist).toHaveBeenLastCalledWith(2)
+    fireEvent.click(screen.getByTestId('favourites-down'))
+    expect(onMoveFavourites).toHaveBeenLastCalledWith(2)
   })
 
   it('disables the arrows at the ends of the shelves', async () => {
@@ -237,50 +234,50 @@ describe('Home', () => {
       <Home
         onOpen={vi.fn()}
         onPlay={vi.fn()}
-        watchlist={[saved('w1', 'Saved One')]}
+        favourites={[favourite('w1', 'Saved One')]}
         rowsAbove={0}
-        onMoveWatchlist={vi.fn()}
+        onMoveFavourites={vi.fn()}
       />
     )
-    await screen.findByRole('heading', { name: 'Watchlist' })
+    await screen.findByRole('heading', { name: 'Favourites' })
 
-    expect(screen.getByTestId<HTMLButtonElement>('watchlist-up').disabled).toBe(true)
-    expect(screen.getByTestId<HTMLButtonElement>('watchlist-down').disabled).toBe(false)
+    expect(screen.getByTestId<HTMLButtonElement>('favourites-up').disabled).toBe(true)
+    expect(screen.getByTestId<HTMLButtonElement>('favourites-down').disabled).toBe(false)
 
     rerender(
       <Home
         onOpen={vi.fn()}
         onPlay={vi.fn()}
-        watchlist={[saved('w1', 'Saved One')]}
+        favourites={[favourite('w1', 'Saved One')]}
         rowsAbove={2}
-        onMoveWatchlist={vi.fn()}
+        onMoveFavourites={vi.fn()}
       />
     )
 
-    expect(screen.getByTestId<HTMLButtonElement>('watchlist-up').disabled).toBe(false)
-    expect(screen.getByTestId<HTMLButtonElement>('watchlist-down').disabled).toBe(true)
+    expect(screen.getByTestId<HTMLButtonElement>('favourites-up').disabled).toBe(false)
+    expect(screen.getByTestId<HTMLButtonElement>('favourites-down').disabled).toBe(true)
   })
 
-  it('toggles the previewed title from the hero, saved or not', async () => {
-    const onToggleWatchlist = vi.fn()
+  it('favourites the previewed series from the hero, saved or not', async () => {
+    const onToggleFavourite = vi.fn()
     stubHome(homeData())
     render(
       <Home
         onOpen={vi.fn()}
         onPlay={vi.fn()}
-        watchlist={[saved('w1', 'Saved One')]}
-        onToggleWatchlist={onToggleWatchlist}
+        favourites={[favourite('w1', 'Saved One')]}
+        onToggleFavourite={onToggleFavourite}
       />
     )
     await screen.findByRole('heading', { level: 1, name: 'Featured One' })
-
-    expect(screen.getByTestId('hero-watchlist').textContent).toBe('Add to watchlist')
+    // The featured card is an episode: there is nothing to favourite yet.
+    expect(screen.queryByTestId('hero-favourite')).toBeNull()
 
     fireEvent.focusIn(screen.getByText('Saved One').closest('button')!)
-    expect(screen.getByTestId('hero-watchlist').textContent).toBe('Remove from watchlist')
+    expect(screen.getByTestId('hero-favourite').textContent).toBe('Remove from favourites')
 
-    fireEvent.click(screen.getByTestId('hero-watchlist'))
-    expect(onToggleWatchlist).toHaveBeenCalledWith(expect.objectContaining({ slug: 'w1' }))
+    fireEvent.click(screen.getByTestId('hero-favourite'))
+    expect(onToggleFavourite).toHaveBeenCalledWith(expect.objectContaining({ slug: 'w1' }))
   })
 
   it('refreshes the feed after playback without blanking it or moving focus', async () => {

@@ -44,14 +44,14 @@ describe('Row', () => {
   it('renders actions beside the heading', () => {
     render(
       <Row
-        title="Watchlist"
+        title="Favourites"
         items={items}
         onSelect={vi.fn()}
         actions={<button type="button">Move up</button>}
       />
     )
 
-    expect(screen.getByRole('heading', { name: 'Watchlist' })).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'Favourites' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Move up' })).toBeDefined()
   })
 

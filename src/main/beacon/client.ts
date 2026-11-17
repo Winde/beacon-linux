@@ -157,6 +157,8 @@ export class BeaconClient {
   private sessionId = 'linux-' + Math.random().toString(36).slice(2, 10)
   /** Explicit marks, kept per account until real playback supersedes them. */
   private readonly watchmarks = new WatchMarkStore()
+  /** In-flight favourite writes, keyed by collection id. */
+  private readonly favouriteWrites = new Map<string, Promise<boolean>>()
 
   // Beacon answers the same questions over and over while a member browses,
   // and most answers stay right for minutes. The keys carry the account, and
@@ -555,8 +557,7 @@ export class BeaconClient {
     const rows: Row[] = []
 
     const watching = (cw?.continueWatching?.docs ?? []).filter((d) => d.content)
-    if (watching.length) {
-      const { email, marks } = await this.watchMarks()
+    if (watching.length) {      const { email, marks } = await this.watchMarks()
       const states = new Map(
         watching.map((d) => {
           const content = d.content!
@@ -1058,6 +1059,61 @@ export class BeaconClient {
 
     this.invalidateProgress()
     return { watched, progress: watched ? 1 : 0 }
+  }
+
+  // ---------- favourites ----------
+
+  /** Every collection this member has favourited, in the order Beacon lists them. */
+  async favouriteCollectionIds(): Promise<string[]> {
+    const ids: string[] = []
+    let page = 1
+    let total = 1
+    // totalPages is 0 when the member has none, so this still runs once.
+    while (page <= total && page <= 20) {
+      const r = await this.gql<{
+        userCollectionFavourites?: { totalPages?: number; docs?: { id?: string }[] }
+      }>(Q.FAVOURITE_COLLECTIONS, { limit: 100, page })
+      const list = r.userCollectionFavourites
+      total = list?.totalPages ?? 0
+      for (const doc of list?.docs ?? []) if (doc.id) ids.push(doc.id)
+      page++
+    }
+    return [...new Set(ids)]
+  }
+
+  async isCollectionFavourited(id: string): Promise<boolean> {
+    const r = await this.gql<{ isCollectionFavourite?: boolean }>(Q.IS_COLLECTION_FAVOURITE, { id })
+    return Boolean(r.isCollectionFavourite)
+  }
+
+  /**
+   * Sets a favourite rather than toggling blind: the mutation flips whatever is
+   * there, so a retry or a stale click would undo it. Reading first costs one
+   * query and makes the write safe to repeat. Writes for the same id are
+   * serialized, so two presses in quick succession cannot interleave.
+   */
+  async setCollectionFavourite(id: string, favourite: boolean): Promise<boolean> {
+    const previous = this.favouriteWrites.get(id) ?? Promise.resolve()
+    const run = previous.catch(() => undefined).then(() => this.writeFavourite(id, favourite))
+    this.favouriteWrites.set(id, run)
+    try {
+      return await run
+    } finally {
+      if (this.favouriteWrites.get(id) === run) this.favouriteWrites.delete(id)
+    }
+  }
+
+  private async writeFavourite(id: string, favourite: boolean): Promise<boolean> {
+    const current = await this.isCollectionFavourited(id)
+    if (current === favourite) return current
+    const r = await this.gql<{
+      toggleCollectionFavourite?: { success?: boolean; reason?: string; isFavourite?: boolean | null }
+    }>(Q.TOGGLE_COLLECTION_FAVOURITE, { id })
+    const result = r.toggleCollectionFavourite
+    if (!result?.success) {
+      throw new BeaconError(result?.reason || 'Could not update favourites.')
+    }
+    return Boolean(result.isFavourite)
   }
 
   private async reportProgress(

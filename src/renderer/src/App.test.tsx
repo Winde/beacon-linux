@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { WatchlistItem } from '@shared/types'
+import type { Card, FavouriteItem, FavouritesData, HomeData } from '@shared/types'
 import App from './App'
 
 beforeEach(() => {
@@ -14,34 +14,54 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function saved(slug: string, title: string): WatchlistItem {
+function favourite(slug: string, title: string): FavouriteItem {
   return {
-    kind: 'video',
+    kind: 'series',
     id: `id-${slug}`,
     slug,
     title,
-    subtitle: 'Campaign 1',
     image: null,
     image2x: null,
-    minutes: 55,
-    count: null,
-    addedAt: 1
+    count: 12
   }
 }
 
-interface StubOptions {
-  signedIn?: boolean
-  items?: WatchlistItem[]
+const SERIES: Card = {
+  kind: 'series',
+  id: 'id-campaign-1',
+  slug: 'campaign-1',
+  title: 'Campaign 1',
+  image: null,
+  image2x: null,
+  count: 12
 }
 
-function stubApp({ signedIn = true, items = [] }: StubOptions = {}): {
+const HOME_WITH_SERIES: HomeData = { hero: [SERIES], rows: [] }
+
+interface StubOptions {
+  signedIn?: boolean
+  items?: FavouriteItem[]
+  home?: HomeData
+  add?: (card: Card) => Promise<FavouritesData>
+  remove?: (slug: string) => Promise<FavouritesData>
+}
+
+function stubApp({
+  signedIn = true,
+  items = [],
+  home = { hero: [], rows: [] },
+  add,
+  remove: removeImpl
+}: StubOptions = {}): {
   signOut: ReturnType<typeof vi.fn>
-  clear: ReturnType<typeof vi.fn>
   list: ReturnType<typeof vi.fn>
+  add: ReturnType<typeof vi.fn>
+  remove: ReturnType<typeof vi.fn>
 } {
   const signOut = vi.fn(() => Promise.resolve())
-  const clear = vi.fn(() => Promise.resolve({ items: [], rowsAbove: null }))
   const list = vi.fn(() => Promise.resolve({ items, rowsAbove: null }))
+  const addFn = vi.fn(add ?? (() => Promise.resolve({ items, rowsAbove: null })))
+  const remove = vi.fn(removeImpl ?? (() => Promise.resolve({ items: [], rowsAbove: null })))
 
   vi.stubGlobal('beacon', {
     auth: {
@@ -56,19 +76,18 @@ function stubApp({ signedIn = true, items = [] }: StubOptions = {}): {
       storage: vi.fn(() => Promise.resolve('keyring'))
     },
     catalog: {
-      home: vi.fn(() => Promise.resolve({ hero: [], rows: [] })),
+      home: vi.fn(() => Promise.resolve(home)),
       collection: vi.fn(),
       content: vi.fn(),
       search: vi.fn(),
       suggest: vi.fn(),
       indexStatus: vi.fn()
     },
-    watchlist: {
+    favourites: {
       list,
-      add: vi.fn(),
-      remove: vi.fn(),
-      setPosition: vi.fn(),
-      clear
+      add: addFn,
+      remove,
+      setPosition: vi.fn()
     },
     playback: { open: vi.fn(), next: vi.fn(), progress: vi.fn(), captions: vi.fn() },
     watch: { mark: vi.fn() },
@@ -80,66 +99,110 @@ function stubApp({ signedIn = true, items = [] }: StubOptions = {}): {
     }
   })
 
-  return { signOut, clear, list }
+  return { signOut, list, add: addFn, remove }
 }
 
 describe('App sign out', () => {
-  it('asks before deleting a non-empty watchlist', async () => {
-    const { signOut, clear } = stubApp({ items: [saved('c1e1', 'Saved One')] })
-    render(<App />)
-
-    fireEvent.click(await screen.findByTestId('rail-signout'))
-
-    expect(screen.getByRole('dialog', { name: 'Delete your watchlist?' })).toBeDefined()
-    expect(signOut).not.toHaveBeenCalled()
-
-    fireEvent.click(screen.getByTestId('keep-watchlist'))
-
-    await waitFor(() => expect(signOut).toHaveBeenCalledOnce())
-    expect(clear).not.toHaveBeenCalled()
-  })
-
-  it('deletes the list when that choice is made', async () => {
-    const { signOut, clear } = stubApp({ items: [saved('c1e1', 'Saved One')] })
-    render(<App />)
-
-    fireEvent.click(await screen.findByTestId('rail-signout'))
-    fireEvent.click(screen.getByTestId('delete-watchlist'))
-
-    await waitFor(() => expect(clear).toHaveBeenCalledOnce())
-    await waitFor(() => expect(signOut).toHaveBeenCalledOnce())
-    expect(clear.mock.invocationCallOrder[0]).toBeLessThan(signOut.mock.invocationCallOrder[0])
-  })
-
-  it('can cancel and stay signed in', async () => {
-    const { signOut, clear } = stubApp({ items: [saved('c1e1', 'Saved One')] })
-    render(<App />)
-
-    fireEvent.click(await screen.findByTestId('rail-signout'))
-    fireEvent.click(screen.getByTestId('cancel-signout'))
-
-    expect(screen.queryByRole('dialog')).toBeNull()
-    expect(signOut).not.toHaveBeenCalled()
-    expect(clear).not.toHaveBeenCalled()
-  })
-
-  it('signs out straight away when there is nothing to delete', async () => {
-    const { signOut, clear } = stubApp()
+  it('signs out without asking, since favourites are not stored here', async () => {
+    const { signOut, list, remove } = stubApp({ items: [favourite('campaign-1', 'Campaign 1')] })
     render(<App />)
 
     fireEvent.click(await screen.findByTestId('rail-signout'))
 
     await waitFor(() => expect(signOut).toHaveBeenCalledOnce())
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(clear).not.toHaveBeenCalled()
+    expect(remove).not.toHaveBeenCalled()
+    // Signed out, the list is read again and comes back empty.
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2))
   })
 
-  it('does not touch the list when an invalid session signs the member out', async () => {
-    const { clear, list } = stubApp({ signedIn: false })
+  it('asks the account for its favourites on boot', async () => {
+    const { list } = stubApp({ items: [favourite('campaign-1', 'Campaign 1')] })
+    render(<App />)
+
+    await waitFor(() => expect(list).toHaveBeenCalledOnce())
+  })
+
+  it('shows sign-in when there is no session', async () => {
+    stubApp({ signedIn: false })
     render(<App />)
 
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeDefined()
-    await waitFor(() => expect(list).toHaveBeenCalledOnce())
-    expect(clear).not.toHaveBeenCalled()
+  })
+})
+
+describe('App favourites', () => {
+  it('flips the button at once and spins until the account answers', async () => {
+    let settle!: (data: FavouritesData) => void
+    const { add } = stubApp({
+      home: HOME_WITH_SERIES,
+      add: () =>
+        new Promise<FavouritesData>((resolve) => {
+          settle = resolve
+        })
+    })
+    render(<App />)
+
+    const button = await screen.findByTestId('hero-favourite')
+    expect(button.textContent).toBe('Add to favourites')
+
+    fireEvent.click(button)
+
+    // The label is the new state immediately, with a spinner in place of the icon.
+    expect(screen.getByTestId('hero-favourite').textContent).toBe('Remove from favourites')
+    expect(screen.getByTestId('hero-favourite').getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByTestId('hero-favourite').querySelector('.button__spinner')).not.toBeNull()
+    expect(add).toHaveBeenCalledWith(SERIES)
+
+    settle({ items: [favourite('campaign-1', 'Campaign 1')], rowsAbove: null })
+
+    await waitFor(() =>
+      expect(screen.getByTestId('hero-favourite').getAttribute('aria-busy')).toBe('false')
+    )
+    expect(screen.getByTestId('hero-favourite').querySelector('.button__spinner')).toBeNull()
+    expect(screen.getByTestId('hero-favourite').textContent).toBe('Remove from favourites')
+  })
+
+  it('puts the button back when the account refuses the write', async () => {
+    const { add } = stubApp({
+      home: HOME_WITH_SERIES,
+      add: () => Promise.reject(new Error('You must be logged in.'))
+    })
+    render(<App />)
+
+    const button = await screen.findByTestId('hero-favourite')
+    fireEvent.click(button)
+    expect(screen.getByTestId('hero-favourite').textContent).toBe('Remove from favourites')
+
+    await waitFor(() => expect(screen.getByTestId('hero-favourite').textContent).toBe('Add to favourites'))
+    expect(add).toHaveBeenCalledOnce()
+    expect(screen.getByTestId('hero-favourite').getAttribute('aria-busy')).toBe('false')
+  })
+
+  it('removes a favourite at once and spins while storing that', async () => {
+    let settle!: (data: FavouritesData) => void
+    const { remove } = stubApp({
+      home: HOME_WITH_SERIES,
+      items: [favourite('campaign-1', 'Campaign 1')],
+      remove: () =>
+        new Promise<FavouritesData>((resolve) => {
+          settle = resolve
+        })
+    })
+    render(<App />)
+
+    const button = await screen.findByTestId('hero-favourite')
+    expect(button.textContent).toBe('Remove from favourites')
+
+    fireEvent.click(button)
+
+    expect(screen.getByTestId('hero-favourite').textContent).toBe('Add to favourites')
+    expect(screen.getByTestId('hero-favourite').getAttribute('aria-busy')).toBe('true')
+    expect(remove).toHaveBeenCalledWith('campaign-1')
+
+    settle({ items: [], rowsAbove: null })
+    await waitFor(() =>
+      expect(screen.getByTestId('hero-favourite').getAttribute('aria-busy')).toBe('false')
+    )
   })
 })

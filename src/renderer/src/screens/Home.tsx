@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavArrowDown, NavArrowUp } from 'iconoir-react'
-import type { Card, Row as RowData, WatchlistItem } from '@shared/types'
-import { isWatchlisted, toCard } from '@shared/watchlist'
+import type { Card, FavouriteItem, Row as RowData } from '@shared/types'
+import { isFavourite, toCard } from '@shared/favourites'
 import { useAsync } from '../lib/useAsync'
 import { backdropUrl, preloadAll } from '../lib/images'
 import { focusFirst } from '../nav/focus'
@@ -10,12 +10,12 @@ import { Row } from '../components/Row'
 import { ScreenScroll } from '../components/ScreenScroll'
 import { ErrorNote, Spinner } from '../components/ui'
 
-const WATCHLIST_ROW = 'Watchlist'
+const FAVOURITES_ROW = 'Favourites'
 const CONTINUE_ROW = 'Continue watching'
-const NO_WATCHLIST: WatchlistItem[] = []
+const NO_FAVOURITES: FavouriteItem[] = []
 
 interface HomeRow extends RowData {
-  watchlist?: boolean
+  favourites?: boolean
 }
 
 interface HomeProps {
@@ -23,13 +23,15 @@ interface HomeProps {
   onPlay: (card: Card) => void
   /** Bumped when playback ends; the feed is stale from then on. */
   refreshKey?: number
-  /** Saved titles, newest first. Empty means no row is shown. */
-  watchlist?: WatchlistItem[]
-  /** Rows above the Watchlist row; null means just below Continue watching. */
+  /** Favourited series, in the account's order. Empty means no row is shown. */
+  favourites?: FavouriteItem[]
+  /** Rows above the Favourites row; null means just below Continue watching. */
   rowsAbove?: number | null
-  onToggleWatchlist?: (card: Card) => void
-  /** Persist a new place for the Watchlist row (rows above it). */
-  onMoveWatchlist?: (rowsAbove: number) => void
+  onToggleFavourite?: (card: Card) => void
+  /** Persist a new place for the Favourites row (rows above it). */
+  onMoveFavourites?: (rowsAbove: number) => void
+  /** Slugs whose favourite write is still in flight. */
+  pendingFavourites?: ReadonlySet<string>
 }
 
 const clamp = (value: number, min: number, max: number): number =>
@@ -39,10 +41,11 @@ export function Home({
   onOpen,
   onPlay,
   refreshKey = 0,
-  watchlist = NO_WATCHLIST,
+  favourites = NO_FAVOURITES,
   rowsAbove = null,
-  onToggleWatchlist,
-  onMoveWatchlist
+  onToggleFavourite,
+  onMoveFavourites,
+  pendingFavourites
 }: HomeProps): React.JSX.Element | null {
   // The previous feed stays on screen while the refresh runs: this reload
   // happens behind the viewer, who is looking at the screen below the player.
@@ -56,21 +59,21 @@ export function Home({
   const [preview, setPreview] = useState<Card | null>(null)
   const placed = useRef(false)
 
-  // Home builds its shelves ad hoc, but the Watchlist row is ours: it slots in
+  // Home builds its shelves ad hoc, but the Favourites row is ours: it slots in
   // below Continue watching until the player moves it somewhere else.
   const rows = useMemo<HomeRow[]>(() => {
-    if (!data || !watchlist.length) return data?.rows ?? []
+    if (!data || !favourites.length) return data?.rows ?? []
     const defaultAt = Math.max(0, data.rows.findIndex((row) => row.title === CONTINUE_ROW) + 1)
     const at = clamp(rowsAbove ?? defaultAt, 0, data.rows.length)
     return [
       ...data.rows.slice(0, at),
-      { title: WATCHLIST_ROW, items: watchlist.map(toCard), watchlist: true },
+      { title: FAVOURITES_ROW, items: favourites.map(toCard), favourites: true },
       ...data.rows.slice(at)
     ]
-  }, [data, watchlist, rowsAbove])
+  }, [data, favourites, rowsAbove])
 
   // The row's place among the real shelves, which is what the arrows move.
-  const watchlistAt = rows.findIndex((row) => row.watchlist)
+  const favouritesAt = rows.findIndex((row) => row.favourites)
   const lastAt = data?.rows.length ?? 0
 
   useEffect(() => {
@@ -82,16 +85,16 @@ export function Home({
       placed.current = true
       focusFirst('[data-focus]')
     }
-    // Nor keep previewing a title that just left the feed or the watchlist.
+    // Nor keep previewing a title that just left the feed or the favourites.
     setPreview((current) => {
       if (!current) return current
       const present =
         data.hero.some((card) => card.slug === current.slug) ||
         data.rows.some((row) => row.items.some((item) => item.slug === current.slug)) ||
-        isWatchlisted(watchlist, current.kind, current.slug)
+        isFavourite(favourites, current.slug)
       return present ? current : null
     })
-  }, [data, watchlist])
+  }, [data, favourites])
 
   if (loading) {
     return (
@@ -118,33 +121,34 @@ export function Home({
           card={featured}
           onOpen={onOpen}
           onPlay={onPlay}
-          inWatchlist={isWatchlisted(watchlist, featured.kind, featured.slug)}
-          onToggleWatchlist={onToggleWatchlist}
+          inFavourites={isFavourite(favourites, featured.slug)}
+          onToggleFavourite={onToggleFavourite}
+          favouritePending={pendingFavourites?.has(featured.slug)}
         />
       ) : null}
       <ScreenScroll>
         <div className="rows">
           {rows.map((row) =>
-            row.watchlist ? (
+            row.favourites ? (
               <Row
-                key="watchlist"
+                key="favourites"
                 title={row.title}
                 items={row.items}
                 onSelect={onOpen}
                 onFocus={setPreview}
                 actions={
-                  onMoveWatchlist ? (
+                  onMoveFavourites ? (
                     <div className="row__actions">
                       <button
                         type="button"
                         className="row__move"
                         data-focus
-                        data-testid="watchlist-up"
+                        data-testid="favourites-up"
                         tabIndex={-1}
                         title="Move up"
-                        aria-label="Move Watchlist up"
-                        disabled={watchlistAt <= 0}
-                        onClick={() => onMoveWatchlist(Math.max(0, watchlistAt - 1))}
+                        aria-label="Move Favourites up"
+                        disabled={favouritesAt <= 0}
+                        onClick={() => onMoveFavourites(Math.max(0, favouritesAt - 1))}
                       >
                         <NavArrowUp width={18} height={18} strokeWidth={1.8} aria-hidden />
                       </button>
@@ -152,12 +156,12 @@ export function Home({
                         type="button"
                         className="row__move"
                         data-focus
-                        data-testid="watchlist-down"
+                        data-testid="favourites-down"
                         tabIndex={-1}
                         title="Move down"
-                        aria-label="Move Watchlist down"
-                        disabled={watchlistAt < 0 || watchlistAt >= lastAt}
-                        onClick={() => onMoveWatchlist(Math.min(lastAt, watchlistAt + 1))}
+                        aria-label="Move Favourites down"
+                        disabled={favouritesAt < 0 || favouritesAt >= lastAt}
+                        onClick={() => onMoveFavourites(Math.min(lastAt, favouritesAt + 1))}
                       >
                         <NavArrowDown width={18} height={18} strokeWidth={1.8} aria-hidden />
                       </button>

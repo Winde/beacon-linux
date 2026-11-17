@@ -5,7 +5,7 @@ import { Tile } from './Tile'
 interface RowProps extends RowData {
   onSelect: (card: Card) => void
   onFocus?: (card: Card) => void
-  /** Controls beside the heading, e.g. moving the Watchlist row. */
+  /** Controls beside the heading, e.g. moving the Favourites row. */
   actions?: React.ReactNode
 }
 

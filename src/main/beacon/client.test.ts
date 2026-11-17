@@ -1540,3 +1540,99 @@ describe('gql', () => {
     expect((failure as BeaconError).status).toBe(502)
   })
 })
+
+describe('favourites', () => {
+  it('reads every page of the account list without duplicates', async () => {
+    routeCms({
+      [Q.FAVOURITE_COLLECTIONS]: (variables) =>
+        variables.page === 1
+          ? {
+              userCollectionFavourites: {
+                totalPages: 2,
+                docs: [{ id: 'c1' }, { id: 'c2' }]
+              }
+            }
+          : {
+              userCollectionFavourites: {
+                totalPages: 2,
+                docs: [{ id: 'c2' }, { id: 'c3' }]
+              }
+            }
+    })
+    const client = new BeaconClient()
+
+    await expect(client.favouriteCollectionIds()).resolves.toEqual(['c1', 'c2', 'c3'])
+  })
+
+  it('writes only when the account is not already in the wanted state', async () => {
+    let favourited = true
+    routeCms({
+      [Q.IS_COLLECTION_FAVOURITE]: () => ({ isCollectionFavourite: favourited }),
+      [Q.TOGGLE_COLLECTION_FAVOURITE]: () => {
+        favourited = !favourited
+        return {
+          toggleCollectionFavourite: { success: true, isFavourite: favourited }
+        }
+      }
+    })
+    const client = new BeaconClient()
+    const toggles = (): number =>
+      net.fetch.mock.calls.filter(([, init]) =>
+        String((init as { body?: string } | undefined)?.body).includes('toggleCollectionFavouriteEndpoint')
+      ).length
+
+    await expect(client.setCollectionFavourite('c1', true)).resolves.toBe(true)
+    expect(toggles()).toBe(0)
+
+    await expect(client.setCollectionFavourite('c1', false)).resolves.toBe(false)
+    expect(toggles()).toBe(1)
+  })
+
+  it('surfaces the reason a favourite was refused', async () => {
+    routeCms({
+      [Q.IS_COLLECTION_FAVOURITE]: () => ({ isCollectionFavourite: false }),
+      [Q.TOGGLE_COLLECTION_FAVOURITE]: () => ({
+        toggleCollectionFavourite: {
+          success: false,
+          reason: 'You must be logged in to favourite collections.',
+          isFavourite: null
+        }
+      })
+    })
+    const client = new BeaconClient()
+
+    await expect(client.setCollectionFavourite('c1', true)).rejects.toThrow(
+      'You must be logged in to favourite collections.'
+    )
+  })
+
+  it('serializes two writes for the same collection', async () => {
+    let favourited = false
+    let toggles = 0
+    net.fetch.mockImplementation(async (_url: string, init?: { body?: string }) => {
+      const body = JSON.parse(init?.body ?? '{}')
+      if (body.query === Q.IS_COLLECTION_FAVOURITE) {
+        return response({ data: { isCollectionFavourite: favourited } })
+      }
+      if (body.query === Q.TOGGLE_COLLECTION_FAVOURITE) {
+        // Hold the write open long enough for a second press to arrive.
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        favourited = !favourited
+        toggles++
+        return response({
+          data: { toggleCollectionFavourite: { success: true, isFavourite: favourited } }
+        })
+      }
+      throw new Error('unrouted query')
+    })
+    const client = new BeaconClient()
+
+    await Promise.all([
+      client.setCollectionFavourite('c1', true),
+      client.setCollectionFavourite('c1', true)
+    ])
+
+    expect(toggles).toBe(1)
+    expect(favourited).toBe(true)
+  })
+})

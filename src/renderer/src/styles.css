@@ -556,6 +556,22 @@ kbd {
   background: rgba(240, 184, 102, 0.14);
 }
 
+/* The new state is already shown; this says the account has not confirmed it. */
+.button.is-pending {
+  cursor: progress;
+}
+
+.button__spinner {
+  /* Same box as the 18px bookmark, so the label does not shift. */
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  border-top-color: currentColor;
+  animation: spin 700ms linear infinite;
+}
+
 .button--danger {
   background: rgba(255, 92, 92, 0.16);
   color: #ffb4b4;

@@ -159,64 +159,13 @@ describe('Content', () => {
     ).toBeDefined()
   })
 
-  it('adds the episode to the watchlist', async () => {
-    const onToggleWatchlist = vi.fn()
+  it('offers no favourite on an episode', async () => {
     stubContent(contentData())
-    render(
-      <Content
-        slug="c1e5"
-        onOpen={vi.fn()}
-        onPlay={vi.fn()}
-        onToggleWatchlist={onToggleWatchlist}
-      />
-    )
+    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Add to watchlist' }))
-
-    expect(onToggleWatchlist).toHaveBeenCalledWith({
-      kind: 'video',
-      id: 'e5',
-      slug: 'c1e5',
-      title: 'Campaign 1 Episode 5',
-      subtitle: 'Campaign 1',
-      image: 'https://images.example/page/format=auto',
-      image2x: 'https://images.example/wide/format=auto',
-      minutes: 55
-    })
-  })
-
-  it('offers to remove an episode that is already saved', async () => {
-    stubContent(contentData())
-    render(
-      <Content
-        slug="c1e5"
-        onOpen={vi.fn()}
-        onPlay={vi.fn()}
-        onToggleWatchlist={vi.fn()}
-        inWatchlist
-      />
-    )
-
-    const toggle = await screen.findByRole('button', { name: 'Remove from watchlist' })
-    expect(toggle.getAttribute('aria-pressed')).toBe('true')
-  })
-
-  it('can save a video the account cannot watch yet', async () => {
-    const onToggleWatchlist = vi.fn()
-    stubContent(contentData({ locked: true, signInNeeded: true }))
-    render(
-      <Content
-        slug="c1e5"
-        onOpen={vi.fn()}
-        onPlay={vi.fn()}
-        onToggleWatchlist={onToggleWatchlist}
-      />
-    )
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Add to watchlist' }))
-
-    expect(onToggleWatchlist).toHaveBeenCalledOnce()
-    expect(screen.queryByTestId('play')).toBeNull()
+    await screen.findByText('Campaign 1 Episode 5')
+    expect(screen.queryByRole('button', { name: /favourites?$/i })).toBeNull()
+    expect(screen.queryByTestId('favourite-toggle')).toBeNull()
   })
 
   it('shows a clean error from the main process', async () => {

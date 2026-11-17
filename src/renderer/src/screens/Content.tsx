@@ -6,7 +6,6 @@ import { focusFirst } from '../nav/focus'
 import { backdropUrl } from '../lib/images'
 import { Row } from '../components/Row'
 import { ScreenScroll } from '../components/ScreenScroll'
-import { WatchlistButton } from '../components/WatchlistButton'
 import { ErrorNote, Spinner } from '../components/ui'
 
 interface ContentProps {
@@ -17,9 +16,6 @@ interface ContentProps {
   refreshKey?: number
   /** Lets screens behind this one drop their cached progress too. */
   onWatchedChanged?: () => void
-  /** Show the watchlist control, and whether this episode is already on it. */
-  onToggleWatchlist?: (card: Card) => void
-  inWatchlist?: boolean
 }
 
 const stripHtml = (value: string): string => value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -29,9 +25,7 @@ export function Content({
   onOpen,
   onPlay,
   refreshKey = 0,
-  onWatchedChanged,
-  onToggleWatchlist,
-  inWatchlist = false
+  onWatchedChanged
 }: ContentProps): React.JSX.Element | null {
   // Keep the page on screen while it reloads: it is what the player uncovers.
   const { data, error, loading } = useAsync(
@@ -75,17 +69,6 @@ export function Content({
 
   const resuming = data.resumeAt > 0
   const watched = watchedNow ?? data.watched
-  const saved: Card = {
-    kind: 'video',
-    id: data.id,
-    slug: data.slug,
-    title: data.title,
-    subtitle: data.series?.title,
-    image: data.image,
-    image2x: data.image2x,
-    minutes: data.minutes
-  }
-
   const toggleWatched = async (): Promise<void> => {
     if (marking) return
     const next = !watched
@@ -127,51 +110,41 @@ export function Content({
             </p>
           ) : null}
 
-          {!data.locked || onToggleWatchlist ? (
+          {!data.locked ? (
             <div className="button-row">
-              {!data.locked ? (
-                <>
-                  <button
-                    type="button"
-                    className="button button--primary"
-                    data-focus
-                    data-testid="play"
-                    tabIndex={-1}
-                    onClick={() => onPlay(slug)}
-                  >
-                    {resuming ? 'Resume' : 'Play'}
-                  </button>
-                  {resuming ? (
-                    <button
-                      type="button"
-                      className="button button--ghost"
-                      data-focus
-                      tabIndex={-1}
-                      onClick={() => onPlay(slug, 0)}
-                    >
-                      Start over
-                    </button>
-                  ) : null}
-                  {data.signedIn ? (
-                    <button
-                      type="button"
-                      className="button button--ghost"
-                      data-focus
-                      data-testid="watch-toggle"
-                      tabIndex={-1}
-                      disabled={marking}
-                      onClick={() => void toggleWatched()}
-                    >
-                      {watched ? 'Mark as unwatched' : 'Mark as watched'}
-                    </button>
-                  ) : null}
-                </>
+              <button
+                type="button"
+                className="button button--primary"
+                data-focus
+                data-testid="play"
+                tabIndex={-1}
+                onClick={() => onPlay(slug)}
+              >
+                {resuming ? 'Resume' : 'Play'}
+              </button>
+              {resuming ? (
+                <button
+                  type="button"
+                  className="button button--ghost"
+                  data-focus
+                  tabIndex={-1}
+                  onClick={() => onPlay(slug, 0)}
+                >
+                  Start over
+                </button>
               ) : null}
-              {onToggleWatchlist ? (
-                <WatchlistButton
-                  active={inWatchlist}
-                  onToggle={() => onToggleWatchlist(saved)}
-                />
+              {data.signedIn ? (
+                <button
+                  type="button"
+                  className="button button--ghost"
+                  data-focus
+                  data-testid="watch-toggle"
+                  tabIndex={-1}
+                  disabled={marking}
+                  onClick={() => void toggleWatched()}
+                >
+                  {watched ? 'Mark as unwatched' : 'Mark as watched'}
+                </button>
               ) : null}
             </div>
           ) : null}

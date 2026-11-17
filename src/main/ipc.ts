@@ -3,16 +3,17 @@ import type { Card, NextEpisodeRequest, PlaybackData, ProgressReport } from '@sh
 import { BeaconClient } from './beacon/client'
 import { Catalog } from './beacon/catalog'
 import { credentialStorage } from './beacon/session'
+import { FavouritesService } from './favourites'
 import { fetchCaptionFile, fetchMasterPlaylist } from './hls'
-import { WatchlistService } from './watchlist-service'
-import { WatchlistStore, watchlistPath } from './watchlist'
+import { PreferencesStore, preferencesPath } from './preferences'
 
 export const client = new BeaconClient()
 export const catalog = new Catalog(client)
 client.catalog = catalog
-export const watchlist = new WatchlistService(
-  new WatchlistStore(() => watchlistPath(app.getPath('userData'))),
-  catalog
+export const favourites = new FavouritesService(
+  client,
+  catalog,
+  new PreferencesStore(() => preferencesPath(app.getPath('userData')))
 )
 
 export function registerIpc(): void {
@@ -30,17 +31,12 @@ export function registerIpc(): void {
   ipcMain.handle('catalog:suggest', (_event, query: string) => client.suggest(query))
   ipcMain.handle('catalog:indexStatus', () => catalog.status())
 
-  ipcMain.handle('watchlist:list', async () => watchlist.list(await client.accountEmail()))
-  ipcMain.handle('watchlist:add', async (_event, card: Card) =>
-    watchlist.add(await client.accountEmail(), card)
+  ipcMain.handle('favourites:list', () => favourites.list())
+  ipcMain.handle('favourites:add', (_event, card: Card) => favourites.add(card))
+  ipcMain.handle('favourites:remove', (_event, slug: string) => favourites.remove(slug))
+  ipcMain.handle('favourites:setPosition', (_event, rowsAbove: number) =>
+    favourites.setPosition(rowsAbove)
   )
-  ipcMain.handle('watchlist:remove', async (_event, kind: Card['kind'], slug: string) =>
-    watchlist.remove(await client.accountEmail(), kind, slug)
-  )
-  ipcMain.handle('watchlist:setPosition', async (_event, rowsAbove: number) =>
-    watchlist.setPosition(await client.accountEmail(), rowsAbove)
-  )
-  ipcMain.handle('watchlist:clear', async () => watchlist.clear(await client.accountEmail()))
 
   ipcMain.handle('playback:open', async (_event, slug: string) => {
     const cached = await client.play(slug)
