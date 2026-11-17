@@ -896,6 +896,7 @@ export class BeaconClient {
       Contents?: {
         docs?: (CmsCard & {
           description?: string
+          continuedSummary?: string | null
           content?: { carouselContent?: CmsCard[] }[]
           contentVideo?: {
             video?: {
@@ -1050,6 +1051,7 @@ export class BeaconClient {
       slug,
       title: doc.title,
       description: doc.description ?? '',
+      continuedSummary: doc.continuedSummary ?? '',
       image: img(doc.thumbnail?.sizes?.landscape?.url, 1280),
       image2x: img(doc.thumbnail?.sizes?.landscape2x?.url, 1280),
       minutes: minutes(doc.duration),

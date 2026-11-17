@@ -663,10 +663,48 @@ kbd {
 }
 
 .page-head__desc {
-  margin: 0 0 20px;
+  margin: 0 0 10px;
   color: #cfd3dc;
   line-height: 1.55;
   max-width: 62ch;
+  /* Beacon's body text carries paragraph breaks; keep them. */
+  white-space: pre-line;
+}
+
+/* The app's collapsed state: three lines of description, then See More. */
+.page-head__desc.is-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.page-head__desc--continued {
+  margin-top: 8px;
+  color: #b9bec9;
+}
+
+.page-head__more {
+  display: inline-block;
+  margin: 0 0 20px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.page-head__more:hover {
+  color: #fff;
+}
+
+.page-head__more.is-focused {
+  color: #fff;
+  outline: 3px solid #fff;
+  outline-offset: 3px;
 }
 
 .page-head__locked {

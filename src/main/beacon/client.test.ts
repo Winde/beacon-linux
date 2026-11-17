@@ -660,6 +660,7 @@ describe('content', () => {
       slug: 'c1e5',
       episodeNumber: 5,
       description: 'An episode.',
+      continuedSummary: 'The rest of the page body.',
       contentVideo: { video: { video: 'https://cdn.jwplayer.com/manifests/abc.m3u8' } },
       content: [{ carouselContent: [cmsCard({ id: 'rec1', slug: 'rec1', title: 'Recommended' })] }],
       ...overrides
@@ -678,6 +679,7 @@ describe('content', () => {
       slug: 'c1e5',
       title: 'Campaign 1 Episode 1',
       description: 'An episode.',
+      continuedSummary: 'The rest of the page body.',
       minutes: 55,
       released: '2024-01-01T00:00:00.000Z',
       series: { slug: 'campaign-1', title: 'Campaign 1' },

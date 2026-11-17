@@ -18,6 +18,7 @@ function contentData(overrides: Partial<ContentData> = {}): ContentData {
     slug: 'c1e5',
     title: 'Campaign 1 Episode 5',
     description: 'An episode.',
+    continuedSummary: '',
     image: 'https://images.example/page/format=auto',
     image2x: 'https://images.example/wide/format=auto',
     minutes: 55,
@@ -62,7 +63,40 @@ describe('Content', () => {
     expect(screen.getByText('55 min · Apprentice')).toBeDefined()
     expect(screen.getByText('An episode.')).toBeDefined()
     expect(content).toHaveBeenCalledWith('c1e5')
-    expect(focusFirst).toHaveBeenCalledWith('[data-focus]')
+    expect(focusFirst).toHaveBeenCalledWith('[data-testid="play"]')
+  })
+
+  it('clamps the description and reveals the continued summary on See More', async () => {
+    stubContent(
+      contentData({
+        description: '<p>A short intro.</p>',
+        continuedSummary: '<p>Recorded live from Excalibur Con.</p><p>Credits here.</p>'
+      })
+    )
+    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
+
+    const intro = await screen.findByText('A short intro.')
+    expect(intro.className).toContain('is-clamped')
+    expect(screen.queryByText(/Credits here/)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '...See More' }))
+
+    expect(await screen.findByText(/Credits here/)).toBeDefined()
+    expect(intro.className).not.toContain('is-clamped')
+
+    fireEvent.click(screen.getByRole('button', { name: 'See Less' }))
+
+    expect(screen.queryByText(/Credits here/)).toBeNull()
+    expect(intro.className).toContain('is-clamped')
+  })
+
+  it('shows the full description without a toggle when there is nothing more', async () => {
+    stubContent(contentData({ description: 'A whole episode in one line.' }))
+    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
+
+    const description = await screen.findByText('A whole episode in one line.')
+    expect(description.className).not.toContain('is-clamped')
+    expect(screen.queryByRole('button', { name: /See (More|Less)/ })).toBeNull()
   })
 
   it('strips markup out of the description', async () => {

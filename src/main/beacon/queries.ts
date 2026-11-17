@@ -26,6 +26,7 @@ export const CONTENT = `
       docs {
         ...Card
         description
+        continuedSummary
         collections { id name slug isSeries }
         content { ... on SuggestedContent { carouselContent: content { ...Card } } }
         ${VIDEO}

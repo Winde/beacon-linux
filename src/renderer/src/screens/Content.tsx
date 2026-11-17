@@ -18,7 +18,17 @@ interface ContentProps {
   onWatchedChanged?: () => void
 }
 
-const stripHtml = (value: string): string => value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+/** Beacon's body text, with any CMS markup removed but paragraph breaks kept. */
+const cleanText = (value: string): string =>
+  value
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 
 export function Content({
   slug,
@@ -39,6 +49,9 @@ export function Content({
   const [watchedNow, setWatchedNow] = useState<boolean | null>(null)
   const [marking, setMarking] = useState(false)
   const [markError, setMarkError] = useState<string | null>(null)
+  // Beacon's content page opens with the description clamped to three lines;
+  // the rest of the body stays behind this toggle.
+  const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
     setWatchedNow(null)
@@ -46,9 +59,15 @@ export function Content({
   }, [data])
 
   useEffect(() => {
+    setExpanded(false)
+  }, [slug])
+
+  useEffect(() => {
     if (!data || placed.current) return
     placed.current = true
-    focusFirst('[data-focus]')
+    // Play is the primary action. The summary's See More sits above it in the
+    // header but must not take the first focus on entry.
+    focusFirst('[data-testid="play"]')
   }, [data])
 
   if (loading) {
@@ -68,6 +87,12 @@ export function Content({
   if (!data) return null
 
   const resuming = data.resumeAt > 0
+  const description = cleanText(data.description)
+  const continuedSummary = cleanText(data.continuedSummary)
+  // Only offer the toggle when there is a continuation to reveal. The app also
+  // clamps a description that has none, which leaves a See More that does
+  // nothing; showing the whole description is the better trade.
+  const canExpand = Boolean(continuedSummary)
   const watched = watchedNow ?? data.watched
   const toggleWatched = async (): Promise<void> => {
     if (marking) return
@@ -98,8 +123,29 @@ export function Content({
           <p className="page-head__sub">
             {[data.minutes ? `${data.minutes} min` : null, data.tier].filter(Boolean).join(' · ')}
           </p>
-          {data.description ? (
-            <p className="page-head__desc">{stripHtml(data.description)}</p>
+          {description || canExpand ? (
+            <div className="page-head__summary">
+              {description ? (
+                <p className={`page-head__desc${canExpand && !expanded ? ' is-clamped' : ''}`}>
+                  {description}
+                </p>
+              ) : null}
+              {expanded && continuedSummary ? (
+                <p className="page-head__desc page-head__desc--continued">{continuedSummary}</p>
+              ) : null}
+              {canExpand ? (
+                <button
+                  type="button"
+                  className="page-head__more"
+                  data-focus
+                  tabIndex={-1}
+                  aria-expanded={expanded}
+                  onClick={() => setExpanded((open) => !open)}
+                >
+                  {expanded ? 'See Less' : '...See More'}
+                </button>
+              ) : null}
+            </div>
           ) : null}
 
           {data.locked ? (

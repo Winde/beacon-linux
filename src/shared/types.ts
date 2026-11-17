@@ -108,6 +108,8 @@ export interface ContentData {
   slug: string
   title: string
   description: string
+  /** The rest of Beacon's page body; shown when the member expands it. */
+  continuedSummary: string
   image: string | null
   image2x: string | null
   minutes: number | null

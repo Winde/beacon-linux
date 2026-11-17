@@ -127,8 +127,11 @@ content docs):
   episode-code parsing and the content header, where the long form is useful.
 - `continuedSummary` — the rest of the page body. `description` is a
   ~125-character blurb; on 142 of 300 recent docs `continuedSummary` adds the
-  credits/sponsor text (~1 KB). Append it under `description` on the detail
-  page.
+  credits/sponsor text (~1 KB). The app shows `description` clamped to three
+  lines with a `...See More` toggle; expanding removes the clamp and renders
+  `continuedSummary` (and the tags) below it, and the label becomes
+  `See Less`. (This client clamps only when `continuedSummary` exists, so a
+  description-only page is never hidden behind a no-op toggle.)
 - `contentVisibleAt` / `msUntilVisible` / `comingSoonTagDate` — scheduling.
   `search` and `Contents` still return a doc whose `contentVisibleAt` is in the
   future (the CMS `coming-soon-test` doc is visible in 2035), so treat a future
