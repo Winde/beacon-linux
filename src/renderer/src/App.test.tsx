@@ -325,6 +325,22 @@ describe('App up navigation', () => {
       { id: 99, route: { name: 'collection', slug: 'previously-on' } }
     ])
   })
+
+  it('keeps the episode when an older copy of the series is buried by search', () => {
+    const stack: Entry[] = [
+      { id: 0, route: { name: 'home' } },
+      { id: 1, route: { name: 'collection', slug: 'campaign-1' } },
+      { id: 2, route: { name: 'search' } },
+      { id: 3, route: { name: 'content', slug: 'c1e1' } }
+    ]
+
+    expect(upToCollection(stack, 'campaign-1', () => 99)).toEqual([
+      { id: 0, route: { name: 'home' } },
+      { id: 2, route: { name: 'search' } },
+      { id: 3, route: { name: 'content', slug: 'c1e1' } },
+      { id: 99, route: { name: 'collection', slug: 'campaign-1' } }
+    ])
+  })
 })
 
 describe('App back', () => {

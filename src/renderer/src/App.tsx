@@ -33,24 +33,27 @@ export interface Entry {
 /**
  * Move up from an episode to the collection it belongs to.
  *
- * If that collection is already in the stack, truncate back to it instead of
- * pushing a second copy: opening the show from one of its episodes should not
- * leave the episode sandwiched between two identical show pages, where Back
- * just walks into the same loop again.
+ * When the collection is the screen immediately behind the episode, pop back to
+ * it. That is the case where "View series" would otherwise push a second copy
+ * of the page the viewer just came from, and Back would walk straight into the
+ * same episode/series cycle.
  *
- * When it is not in the stack (an episode reached from search, or a deep link),
- * push the collection on top so Back returns to the episode. That is the usual
- * "up" behaviour: only the duplicate-parent case collapses history.
+ * Otherwise keep the episode in history and put the collection on top, so Back
+ * returns to the episode. If an older copy of that collection is already deeper
+ * in the stack, remove it first: a series page opened from Home, then buried by
+ * Search, must not end up duplicated when the viewer reaches one of its episodes
+ * through search.
  */
 export function upToCollection(stack: Entry[], slug: string, nextId: () => number): Entry[] {
-  for (let index = stack.length - 1; index >= 0; index--) {
-    const route = stack[index]?.route
-    if (route?.name === 'collection' && route.slug === slug) {
-      return stack.slice(0, index + 1)
-    }
+  const previous = stack[stack.length - 2]
+  if (previous?.route.name === 'collection' && previous.route.slug === slug) {
+    return stack.slice(0, -1)
   }
 
-  return [...stack, { id: nextId(), route: { name: 'collection', slug } }]
+  const withoutExisting = stack.filter(
+    (entry) => !(entry.route.name === 'collection' && entry.route.slug === slug)
+  )
+  return [...withoutExisting, { id: nextId(), route: { name: 'collection', slug } }]
 }
 
 /**
