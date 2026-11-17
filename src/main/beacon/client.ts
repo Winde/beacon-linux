@@ -663,6 +663,7 @@ export class BeaconClient {
         docs?: (CmsCard & {
           description?: string
           continuedSummary?: string | null
+          collections?: { id: string; name: string; slug: string; isSeries?: boolean }[]
           content?: { carouselContent?: CmsCard[] }[]
           contentVideo?: {
             video?: {
@@ -684,7 +685,20 @@ export class BeaconClient {
     const signedIn = await this.isSignedIn()
     const { email, marks } = await this.watchMarks()
     const video = doc.contentVideo?.video
-    const series = doc.primaryCollection ?? null
+    // `primaryCollection` is the editor's main filing, but a few playable docs
+    // (one-offs, live-show videos) only carry `collections`. Use the first one
+    // as the page's category so those episodes still have an "up" link.
+    const filed = doc.collections?.[0]
+    const series =
+      doc.primaryCollection ??
+      (filed
+        ? {
+            id: filed.id,
+            name: filed.name,
+            slug: filed.slug,
+            isSeries: Boolean(filed.isSeries)
+          }
+        : null)
     const rows: Row[] = []
 
     // Every row item's id and runtime, so one progress read can badge them all.
