@@ -142,13 +142,14 @@ use Testing Library (`@testing-library/react`).
 
 Releases are started by hand, not by pushing a tag: tag the commit, create the
 release in the GitHub UI, then run the Release workflow with that tag. It builds
-the Linux AppImage and checksums and attaches them to that release. If the build
-fails, nothing is uploaded. The workflow can also be run with `dry_run` to build
-and test everything without touching the release. See
-[docs/releasing.md](docs/releasing.md) for versioning rules and the checklist.
+the Linux AppImage and checksums and attaches them to that release, along with
+`install.sh` and `steam-art.zip`. If the build fails, nothing is uploaded. The
+workflow can also be run with `dry_run` to build and test everything without
+touching the release. See [docs/releasing.md](docs/releasing.md) for versioning
+rules and the checklist.
 
 On a Steam Machine or Deck, see [docs/install-steamos.md](docs/install-steamos.md)
-for the one-time Desktop Mode setup.
+for the one-command installer or the manual Desktop Mode setup.
 
 ### Dev helpers
 

@@ -51,6 +51,9 @@ jobs:
             exit 1
           fi
 
+      - name: Check the installer
+        run: bash -n packaging/install.sh
+
       - run: npm ci
 
       - run: npm run typecheck
@@ -78,10 +81,22 @@ jobs:
       - name: Package
         run: npx electron-builder --linux AppImage --publish never
 
+      - name: Package installer and artwork
+        run: |
+          set -euo pipefail
+          cp packaging/install.sh release/install.sh
+          chmod +x release/install.sh
+          (cd packaging/steam-art \
+            && zip -q "$GITHUB_WORKSPACE/release/steam-art.zip" \
+                 hero.png portrait.png header.png logo.png icon.png)
+
       - uses: actions/upload-artifact@v4
         with:
           name: linux
-          path: release/*.AppImage
+          path: |
+            release/*.AppImage
+            release/install.sh
+            release/steam-art.zip
           if-no-files-found: error
 
   publish:

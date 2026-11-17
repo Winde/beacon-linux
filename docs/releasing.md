@@ -24,12 +24,18 @@ one that is), so a beta cannot become the "latest" download.
 
 | Platform | Artifacts |
 |---|---|
-| Linux x64 | `Beacon-<version>-x86_64.AppImage` |
+| Linux x64 | `Beacon-<version>-x86_64.AppImage`, `install.sh`, `steam-art.zip` |
 | all | `SHA256SUMS.txt` |
 
-The AppImage is the only published artifact. It is self-contained and runs on
-SteamOS and other glibc-based distributions; FUSE 2 is its only system
-dependency (SteamOS has it, and `--appimage-extract-and-run` works without it).
+The AppImage is the runnable artifact. `install.sh` downloads it, verifies the
+checksum, installs it under `~/Applications` and adds the Steam shortcut;
+`steam-art.zip` holds the five library images. Both use stable names, so
+`releases/latest/download/install.sh` always points at the newest release; the
+script resolves the tag itself.
+
+The AppImage is self-contained and runs on SteamOS and other glibc-based
+distributions; FUSE 2 is its only system dependency (SteamOS has it, and
+`--appimage-extract-and-run` works without it).
 
 ## Cutting a release
 

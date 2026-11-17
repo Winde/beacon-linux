@@ -4,6 +4,24 @@ The AppImage is the only published build. SteamOS is image-based: keep
 everything in `/home` and do not copy files into `/usr`. What follows lives in
 `/home`, so it survives system updates.
 
+## Fast path
+
+In Desktop Mode, with Steam running:
+
+```sh
+curl -LO https://github.com/Winde/beacon-linux/releases/latest/download/install.sh
+less install.sh
+bash install.sh
+```
+
+The script downloads and verifies the AppImage, installs it to
+`~/Applications/Beacon.AppImage`, adds a Steam shortcut, and applies the
+library artwork. Re-run it to update. `--no-steam` installs without the
+shortcut; `--version vX.Y.Z` pins a release; `--uninstall` removes the local
+files. It does not write outside `$HOME`.
+
+The manual steps below remain as the fallback.
+
 ## One-time setup
 
 1. Switch to Desktop Mode: **Steam button → Power → Switch to Desktop**.
@@ -33,10 +51,10 @@ password field.
 
 ## Updates
 
-Updates are manual for now. Download the new AppImage and replace the old file
-at the same path (`~/Applications/Beacon.AppImage`); the Steam entry keeps
-working because the path does not change. Check the release notes for anything
-that needs doing first.
+Re-run the installer; it replaces `~/Applications/Beacon.AppImage` in place, so
+the Steam entry and its appid stay valid. Manually, download the new AppImage
+over the old file at the same path. Check the release notes for anything that
+needs doing first.
 
 ## Staying signed in
 
@@ -57,3 +75,9 @@ sign-in screen says which case you are in.
   keyboard input.
 - **Wrong icon or name in the library**: edit the entry's properties in Desktop
   Mode; Steam remembers it.
+
+## Library art
+
+The installer applies the project's own artwork. For community art, use the
+SteamGridDB Decky plugin or set it manually in Desktop Mode; this project does
+not bundle or download third-party art.
