@@ -11,20 +11,26 @@ interface ProbeProps {
   load: () => Promise<unknown>
   deps: unknown[]
   keepData?: boolean
+  initial?: unknown
 }
 
 let latest: AsyncState<unknown>
 let root: Root
 let container: HTMLDivElement
 
-function Probe({ load, deps, keepData = false }: ProbeProps): null {
-  latest = useAsync(load, deps, { keepData })
+function Probe({ load, deps, keepData = false, initial }: ProbeProps): null {
+  latest = useAsync(load, deps, { keepData, initial })
   return null
 }
 
-function render(load: () => Promise<unknown>, deps: unknown[] = [], keepData = false): void {
+function render(
+  load: () => Promise<unknown>,
+  deps: unknown[] = [],
+  keepData = false,
+  initial?: unknown
+): void {
   act(() => {
-    root.render(createElement(Probe, { load, deps, keepData }))
+    root.render(createElement(Probe, { load, deps, keepData, initial }))
   })
 }
 
@@ -99,6 +105,14 @@ describe('useAsync', () => {
     render(load, [2], true)
 
     expect(latest).toEqual({ data: 'first', error: null, loading: false })
+  })
+
+  it('shows a prepared value at once and keeps it while it refreshes', () => {
+    const load = vi.fn(() => new Promise<unknown>(() => {}))
+    render(load, [], false, 'prepared')
+
+    expect(latest).toEqual({ data: 'prepared', error: null, loading: false })
+    expect(load).toHaveBeenCalledTimes(1)
   })
 
   it('ignores a response that belongs to an older request', async () => {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Card, FavouriteItem, FavouritesData, HomeData } from '@shared/types'
 import App from './App'
@@ -42,6 +42,7 @@ interface StubOptions {
   signedIn?: boolean
   items?: FavouriteItem[]
   home?: HomeData
+  homeImpl?: () => Promise<HomeData>
   add?: (card: Card) => Promise<FavouritesData>
   remove?: (slug: string) => Promise<FavouritesData>
 }
@@ -50,16 +51,19 @@ function stubApp({
   signedIn = true,
   items = [],
   home = { hero: [], rows: [] },
+  homeImpl,
   add,
   remove: removeImpl
 }: StubOptions = {}): {
   signOut: ReturnType<typeof vi.fn>
   list: ReturnType<typeof vi.fn>
+  home: ReturnType<typeof vi.fn>
   add: ReturnType<typeof vi.fn>
   remove: ReturnType<typeof vi.fn>
 } {
   const signOut = vi.fn(() => Promise.resolve())
   const list = vi.fn(() => Promise.resolve({ items, after: null }))
+  const homeFn = vi.fn(homeImpl ?? (() => Promise.resolve(home)))
   const addFn = vi.fn(add ?? (() => Promise.resolve({ items, after: null })))
   const remove = vi.fn(removeImpl ?? (() => Promise.resolve({ items: [], after: null })))
 
@@ -76,7 +80,7 @@ function stubApp({
       storage: vi.fn(() => Promise.resolve('keyring'))
     },
     catalog: {
-      home: vi.fn(() => Promise.resolve(home)),
+      home: homeFn,
       collection: vi.fn(),
       content: vi.fn(),
       search: vi.fn(),
@@ -99,7 +103,7 @@ function stubApp({
     }
   })
 
-  return { signOut, list, add: addFn, remove }
+  return { signOut, list, home: homeFn, add: addFn, remove }
 }
 
 describe('App sign out', () => {
@@ -128,6 +132,36 @@ describe('App sign out', () => {
     render(<App />)
 
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeDefined()
+  })
+})
+
+describe('App sign-in', () => {
+  it('keeps the form up until the first feed is ready', async () => {
+    let deliver!: (feed: HomeData) => void
+    const { home } = stubApp({
+      signedIn: false,
+      homeImpl: () =>
+        new Promise<HomeData>((resolve) => {
+          deliver = resolve
+        })
+    })
+    render(<App />)
+
+    fireEvent.change(await screen.findByLabelText('Email'), {
+      target: { value: 'member@example.com' }
+    })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'hunter2' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Sign in$/ }))
+
+    await waitFor(() => expect(home).toHaveBeenCalledOnce())
+    // No blank screen and no second spinner: the form waits for the feed.
+    expect(screen.getByRole('heading', { name: 'Sign in' })).toBeDefined()
+    expect(screen.queryByText('Loading Beacon')).toBeNull()
+
+    await act(async () => deliver(HOME_WITH_SERIES))
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })).toBeDefined()
+    expect(screen.queryByRole('heading', { name: 'Sign in' })).toBeNull()
   })
 })
 

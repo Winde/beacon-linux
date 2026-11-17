@@ -146,12 +146,6 @@ kbd {
   margin-top: auto;
 }
 
-.boot {
-  height: 100%;
-  display: grid;
-  place-items: center;
-}
-
 .screen {
   height: 100%;
   overflow-y: auto;
@@ -213,6 +207,9 @@ kbd {
 .screen--center {
   display: grid;
   place-items: center;
+  /* No room for a scroll tail here: a loading state sits in the middle of the
+     screen, the same place the app-start spinner sits. */
+  padding-bottom: 0;
 }
 
 /* ---------- focus ---------- */
@@ -570,6 +567,12 @@ kbd {
   border: 2px solid rgba(255, 255, 255, 0.22);
   border-top-color: currentColor;
   animation: spin 700ms linear infinite;
+}
+
+/* The default track disappears against the gold fill. */
+.button--primary .button__spinner {
+  border-color: rgba(255, 255, 255, 0.45);
+  border-top-color: currentColor;
 }
 
 .button--danger {

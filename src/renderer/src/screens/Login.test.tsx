@@ -103,9 +103,31 @@ describe('Login', () => {
 
     const busy = screen.getByRole('button', { name: 'Signing in…' }) as HTMLButtonElement
     expect(busy.disabled).toBe(true)
+    expect(busy.querySelector('.button__spinner')).not.toBeNull()
 
     resolve({ signedIn: true, user: null })
     await waitFor(() => expect(onSignedIn).toHaveBeenCalled())
+  })
+
+  it('stays busy until the screen behind it is ready', async () => {
+    stubSignIn()
+    let ready!: () => void
+    const onSignedIn = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          ready = resolve
+        })
+    )
+    render(<Login onSignedIn={onSignedIn} onSkip={vi.fn()} />)
+
+    fill('member@example.com', 'hunter2')
+    fireEvent.click(submit())
+
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: /Signing in/ })).toBeDefined()
+
+    ready()
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Sign in$/ })).toBeDefined())
   })
 
   it('continues with free videos', () => {

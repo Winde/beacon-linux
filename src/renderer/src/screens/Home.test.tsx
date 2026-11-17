@@ -75,6 +75,15 @@ describe('Home', () => {
     expect(screen.getByText('Loading Beacon')).toBeDefined()
   })
 
+  it('shows a feed fetched during sign-in without a loader', async () => {
+    stubHome(new Promise<HomeData>(() => {}))
+    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} initial={homeData()} />)
+
+    expect(screen.queryByText('Loading Beacon')).toBeNull()
+    expect(screen.getByRole('heading', { level: 1, name: 'Featured One' })).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'Recently added' })).toBeDefined()
+  })
+
   it('shows a clean error from the main process', async () => {
     stubHome(Promise.reject(new Error("Error invoking remote method 'catalog:home': Error: Network down")))
     render(<Home onOpen={vi.fn()} onPlay={vi.fn()} />)

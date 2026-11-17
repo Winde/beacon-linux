@@ -5,7 +5,7 @@ import { cleanError } from '../lib/errors'
 import { ErrorNote } from '../components/ui'
 
 interface LoginProps {
-  onSignedIn: () => void
+  onSignedIn: () => void | Promise<void>
   onSkip: () => void
 }
 
@@ -32,7 +32,9 @@ export function Login({ onSignedIn, onSkip }: LoginProps): React.JSX.Element {
     try {
       await window.beacon.auth.signIn(email, password)
       localStorage.setItem('beacon.email', email.trim())
-      onSignedIn()
+      // The app fetches the first feed before it takes the form away, so the
+      // button keeps spinning until the screen behind it is ready.
+      await onSignedIn()
     } catch (err) {
       setError(cleanError(err))
     } finally {
@@ -112,7 +114,14 @@ export function Login({ onSignedIn, onSkip }: LoginProps): React.JSX.Element {
             tabIndex={-1}
             disabled={busy || !email || !password}
           >
-            {busy ? 'Signing in…' : 'Sign in'}
+            {busy ? (
+              <>
+                <span className="button__spinner" aria-hidden />
+                Signing in…
+              </>
+            ) : (
+              'Sign in'
+            )}
           </button>
         </form>
 

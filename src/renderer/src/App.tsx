@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Card, FavouritesAnchor, FavouritesData } from '@shared/types'
+import type { Card, FavouritesAnchor, FavouritesData, HomeData } from '@shared/types'
 import { isFavourite, optimisticItem } from '@shared/favourites'
 import { useInput } from './input/useInput'
 import { focusFirst, getFocused, move, setFocused } from './nav/focus'
@@ -14,7 +14,8 @@ import { Spinner } from './components/ui'
 
 type Route =
   | { name: 'login' }
-  | { name: 'home' }
+  /** `feed` carries a home feed fetched while the sign-in panel was up. */
+  | { name: 'home'; feed?: HomeData }
   | { name: 'collection'; slug: string }
   | { name: 'content'; slug: string }
   | { name: 'search' }
@@ -334,8 +335,8 @@ export default function App(): React.JSX.Element {
 
   if (!current) {
     return (
-      <div className="boot">
-        <Spinner label="Beacon" />
+      <div className="screen screen--center">
+        <Spinner label="Loading Beacon" />
       </div>
     )
   }
@@ -352,8 +353,17 @@ export default function App(): React.JSX.Element {
               // A locked page underneath was waiting for this account: refresh
               // it and stay there instead of dropping the viewer on Home.
               setProgressVersion((version) => version + 1)
-              if (returnsToScreen) back()
-              else reset({ name: 'home' })
+              if (returnsToScreen) {
+                back()
+                return
+              }
+              // Fetch the first feed while the form is still up, then replace
+              // the form with the finished screen. Otherwise the app blinks
+              // through a second full-screen spinner on the way to Home.
+              return window.beacon.catalog
+                .home()
+                .then((feed) => reset({ name: 'home', feed }))
+                .catch(() => reset({ name: 'home' }))
             }}
             onSkip={() => {
               if (returnsToScreen) back()
@@ -367,6 +377,7 @@ export default function App(): React.JSX.Element {
             onOpen={openCard}
             onPlay={playCard}
             refreshKey={progressVersion}
+            initial={route.feed}
             favourites={favourites.items}
             favouritesAfter={favourites.after}
             onToggleFavourite={signedIn ? toggleFavourite : undefined}

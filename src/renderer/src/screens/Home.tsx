@@ -4,6 +4,7 @@ import type {
   Card,
   FavouriteItem,
   FavouritesAnchor,
+  HomeData,
   HomeRow
 } from '@shared/types'
 import { isFavourite, toCard } from '@shared/favourites'
@@ -23,6 +24,8 @@ interface HomeProps {
   onPlay: (card: Card) => void
   /** Bumped when playback ends; the feed is stale from then on. */
   refreshKey?: number
+  /** A feed the app fetched while the sign-in panel was still up. */
+  initial?: HomeData
   /** Favourited series, in the account's order. Empty means no row is shown. */
   favourites?: FavouriteItem[]
   /** Which shelf the Favourites row follows; null keeps the default. */
@@ -38,6 +41,7 @@ export function Home({
   onOpen,
   onPlay,
   refreshKey = 0,
+  initial,
   favourites = NO_FAVOURITES,
   favouritesAfter = null,
   onToggleFavourite,
@@ -46,10 +50,13 @@ export function Home({
 }: HomeProps): React.JSX.Element | null {
   // The previous feed stays on screen while the refresh runs: this reload
   // happens behind the viewer, who is looking at the screen below the player.
+  // After sign-in there is no previous feed yet, so the app passes the one it
+  // fetched while the sign-in panel was still up, and this screen never blanks
+  // to a spinner of its own.
   const { data, error, loading } = useAsync(
     () => window.beacon.catalog.home(),
     [refreshKey],
-    { keepData: true }
+    { keepData: true, initial }
   )
   // The hero previews whatever the player is pointing at, so the backdrop
   // changes as focus moves rather than staying on the first featured item.
