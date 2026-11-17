@@ -20,6 +20,8 @@ const glue = vi.hoisted(() => ({
     suggest: vi.fn(),
     play: vi.fn(),
     trackProgress: vi.fn(),
+    trackStart: vi.fn(),
+    flushProgress: vi.fn(),
     catalog: null as unknown
   },
   catalog: { status: vi.fn() }
@@ -173,11 +175,15 @@ describe('registerIpc', () => {
     vi.mocked(fetchCaptionFile).mockResolvedValue('WEBVTT')
 
     await handler('playback:progress')({}, { contentId: 'e1', position: 12, duration: 100 })
+    await handler('playback:start')({}, 'e1')
+    await handler('playback:flush')()
     await expect(handler('playback:captions')({}, 'https://cdn.example/en.vtt')).resolves.toBe(
       'WEBVTT'
     )
 
     expect(glue.client.trackProgress).toHaveBeenCalledWith('e1', 12, 100)
+    expect(glue.client.trackStart).toHaveBeenCalledWith('e1')
+    expect(glue.client.flushProgress).toHaveBeenCalled()
     expect(fetchCaptionFile).toHaveBeenCalledWith('https://cdn.example/en.vtt')
   })
 

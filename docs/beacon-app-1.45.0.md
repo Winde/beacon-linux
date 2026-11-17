@@ -128,17 +128,40 @@ The one local part left is where the Favourites row sits on Home
 The app does not fire one `trackView` per event. It has a small queue:
 
 - events are appended to a local store and sent on a **20 s** timer
-  (`setInterval(..., 20000)`) and on app state changes;
-- batches are **at most 10** events per mutation;
-- a failed send keeps the events stored and retries later (with console
-  error logging);
-- `viewedAt` is `new Date().toISOString()`, `sessionId` is generated per
-  session, and the rest of the event object is copied from the caller
-  (`content`, `duration`, `videoProgress`, `videoProgressSeconds`).
+  (`setInterval(..., 20000)`), on app state changes (background/inactive), as
+  soon as ten are waiting, on player ready (a forced bare `{ content }` event),
+  on unmount, and when a cast session ends;
+- a flush sends **at most 10 events per mutation**, but drains in a loop: the
+  whole queue goes out in ten-event batches, so one flush can be several
+  mutations; positions are queued after **10 s** of playback movement (the first
+  tick always queues), and the queue keeps only the first event per content per
+  ten-second bucket;
+- a failed send (thrown, or `success: false`) keeps the events stored, stops
+  that flush, and retries on the next trigger, with console error logging; a
+  NetInfo check skips the attempt entirely while offline; the queue holds at
+  most **500** events and drops the oldest;
+- the store is AsyncStorage key `unsentEvents` in production builds and is
+  loaded at startup, so a position survives the app being closed — but it is
+  one global key, not per account, so pending events are sent with whichever
+  member signs in next;
+- `viewedAt` is `new Date().toISOString()` at **enqueue** time (the send-time
+  stamp is overwritten by the spread), `sessionId` is generated per app run,
+  and the rest of the event object is copied from the caller (`content`,
+  `duration`, `videoProgress`, `videoProgressSeconds`).
 
-We write immediately and re-read to settle. If reports ever feel laggy or we
-see 429/5xx from the CMS, batching ten at a time with a 20 s flush is the
-pattern Beacon's own client uses.
+Our main process now uses the same shape, with one deliberate change: the
+queue is stored per account (`progress-queue.json`), never under whichever
+token signs in next. The player queues a started view and a position every
+10 s of playback; the client sends ten at a time on a 20 s timer, on window
+blur/hide, on suspend and lock, and on quit (with a short bounded wait), and a
+screen read flushes first. Failed or offline events stay on disk instead of
+being dropped.
+
+Marks use the same queue. An explicit watched/unwatched mark first drops any
+older position still queued for that title, then queues its 99%/1% point with
+an internal flag; the Continue-watching removal is sent only after that point
+lands. Playback reports in the other direction drop an unsent mark for the
+title, because starting to watch is the newer decision.
 
 ### 3.5 The home page is block-driven, and we build it ourselves
 
@@ -273,8 +296,10 @@ our screens behave.
 4. **Move media loading to a `RefetchMedia`-shaped query** and add the
    `contentLivestream` / `contentPodcast` unions, so live and podcast items
    can play at all.
-5. **Batch progress writes** (10 per call, 20 s flush, retry from store) if
-   the CMS ever complains.
+5. ~~Batch progress writes (10 per call, 20 s flush, retry from store)~~ — done:
+   the main process now keeps a bounded, per-account queue, sends ten per
+   mutation, flushes on a 20 s timer / window blur / quit, and flushes before
+   any read that would show the result.
 6. **PKCE sign-in** — the largest change, but it removes password handling
    entirely and matches the official client.
 7. Later: block-driven home, ratings, pre-roll, live-event clock.

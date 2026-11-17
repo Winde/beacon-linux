@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { accountKey } from './account'
 
 /** An explicit watched/unwatched choice for one video. */
 export interface WatchMark {
@@ -19,12 +20,6 @@ function defaultPath(): string | null {
     // Not ready yet, or no Electron app (tests): keep the marks in memory.
     return null
   }
-}
-
-/** Keyed like the other per-account files: the sign-in address, lowercased. */
-export function accountKey(email: string | null | undefined): string {
-  const address = (email ?? '').trim().toLowerCase()
-  return address || 'guest'
 }
 
 function normalize(value: unknown): WatchFile {

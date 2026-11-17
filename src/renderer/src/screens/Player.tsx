@@ -60,7 +60,8 @@ const SCRUB_HOLD_GAP = 350
 const SCRUB_ACCELERATION = 1.5
 const SCRUB_MIN_CEILING = 30
 const SCRUB_MAX_CEILING = 120
-const REPORT_EVERY = 15000
+/** The app queues a position after this much playback has moved, not on a timer. */
+const REPORT_STEP = 10
 const SUBTITLE_KEY = 'beacon.player.subtitles'
 const SPEEDS = [0.75, 1, 1.25, 1.5, 2]
 /**
@@ -107,6 +108,9 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([])
   const anchorRefs = useRef<Partial<Record<Panel, HTMLButtonElement | null>>>({})
   const lastRef = useRef({ position: 0, duration: 0 })
+  const lastQueued = useRef(-1)
+  const contentRef = useRef<string | null>(null)
+  const startedRef = useRef<string | null>(null)
   const hideTimer = useRef<number | undefined>(undefined)
   const panelRef = useRef(false)
   const scrubMotion = useRef({ direction: 0, at: 0, step: 0 })
@@ -139,6 +143,42 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
 
   const [upNext, setUpNext] = useState<NextEpisode | null>(null)
   const [upNextDismissed, setUpNextDismissed] = useState(false)
+
+  /**
+   * Hand the main process a position worth sending. The queue there does the
+   * deduplicating and batching; this only decides when playback has moved far
+   * enough to be worth a new event. The first report after a new episode goes
+   * out at once, as the app's tracker does.
+   */
+  const queueProgress = useCallback((force = false): void => {
+    const contentId = contentRef.current
+    const { position, duration: total } = lastRef.current
+    if (!contentId || !total || position < 1) return
+    if (!force && lastQueued.current >= 0 && Math.abs(position - lastQueued.current) < REPORT_STEP) {
+      return
+    }
+    lastQueued.current = position
+    void window.beacon.playback.progress({ contentId, position, duration: total })
+  }, [])
+
+  // Tell Beacon a view has started, reset the position gate for a new episode,
+  // and hand over the last position when this one closes.
+  useEffect(() => {
+    contentRef.current = data?.id ?? null
+    lastQueued.current = -1
+    lastRef.current = { position: 0, duration: 0 }
+    if (!data) return
+    // StrictMode runs effects twice in development; a view is started once.
+    if (startedRef.current !== data.id) {
+      startedRef.current = data.id
+      void window.beacon.playback.start(data.id).catch(() => false)
+    }
+    return () => {
+      queueProgress(true)
+      void window.beacon.playback.flush().catch(() => false)
+      contentRef.current = null
+    }
+  }, [data, queueProgress])
 
   // A menu stays open until it is dismissed; the bar itself may fade.
   useEffect(() => {
@@ -319,6 +359,7 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
     const onTime = (): void => {
       setCurrent(video.currentTime)
       lastRef.current.position = video.currentTime
+      queueProgress()
     }
     const onDuration = (): void => {
       const value = Number.isFinite(video.duration) ? video.duration : 0
@@ -341,26 +382,7 @@ export function Player({ slug, startAt, onClose, onPlayNext, ref }: PlayerProps)
       video.removeEventListener('pause', onPause)
       video.removeEventListener('ratechange', onRate)
     }
-  }, [])
-
-  // Keep Beacon's "Continue watching" in sync with what we play.
-  useEffect(() => {
-    if (!data) return
-    const report = (): void => {
-      const { position, duration: total } = lastRef.current
-      if (!total || position < 1) return
-      void window.beacon.playback.progress({
-        contentId: data.id,
-        position,
-        duration: total
-      })
-    }
-    const timer = window.setInterval(report, REPORT_EVERY)
-    return () => {
-      window.clearInterval(timer)
-      report()
-    }
-  }, [data])
+  }, [queueProgress])
 
   // Remember the chosen subtitle language and pick it again on the next video.
   useEffect(() => {

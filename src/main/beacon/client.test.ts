@@ -797,6 +797,32 @@ describe('content', () => {
     expect(content.resumeAt).toBe(0)
   })
 
+  it('shows the same watched state on the page as the tiles', async () => {
+    routeCms(
+      contentRoutes(playableDoc(), {
+        [Q.CONTENT]: () => ({
+          Contents: { docs: [playableDoc()] },
+          // The page's own read still lags the per-id read the tiles use.
+          currentProgress: { videoProgress: 40, videoProgressSeconds: 125 }
+        }),
+        [Q.PROGRESS_FOR]: () => ({
+          getProgressForContent: {
+            timeMap: [{ contentId: 'e5', videoProgress: 99, videoProgressSeconds: 3267 }]
+          }
+        })
+      })
+    )
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos })
+
+    const content = await client.content('c1e5')
+
+    // The list badge is watched, so the page must offer to unmark it, not mark
+    // it again, and must not offer to resume an almost-finished episode.
+    expect(content.watched).toBe(true)
+    expect(content.resumeAt).toBe(0)
+  })
+
   it('shows a marked episode as watched and drops its resume point', async () => {
     let marked = false
     routeCms(
@@ -1032,8 +1058,11 @@ describe('trackProgress', () => {
     const client = new BeaconClient()
 
     const ok = await client.trackProgress('e1', 300.4, 600)
-
     expect(ok).toBe(true)
+    expect(event).toBeNull()
+
+    await client.flushProgress()
+
     expect(event).toMatchObject({
       content: 'e1',
       duration: 600,
@@ -1055,6 +1084,7 @@ describe('trackProgress', () => {
     const client = new BeaconClient()
 
     await client.trackProgress('e1', 900, 600)
+    await client.flushProgress()
 
     expect(event!.videoProgress).toBe(100)
   })
@@ -1070,6 +1100,7 @@ describe('trackProgress', () => {
     const client = new BeaconClient()
 
     await client.trackProgress('e1', 10, 0)
+    await client.flushProgress()
 
     expect(event!.videoProgress).toBe(0)
     expect(event!.duration).toBe(0)
@@ -1087,9 +1118,113 @@ describe('trackProgress', () => {
 
     // 40 seconds into a four-hour episode.
     await client.trackProgress('e1', 40, 4 * 3600)
+    await client.flushProgress()
 
     expect(event!.videoProgressSeconds).toBe(40)
     expect(event!.videoProgress).toBe(1)
+  })
+
+  it('queues one position per ten-second bucket, keeping the first', async () => {
+    const events: Record<string, any>[] = []
+    routeCms({
+      [Q.TRACK]: (variables) => {
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      }
+    })
+    const client = new BeaconClient()
+
+    await client.trackProgress('e1', 12, 600)
+    await client.trackProgress('e1', 18, 600)
+    await client.trackProgress('e1', 21, 600)
+    await client.flushProgress()
+
+    expect(events.map((event) => event.videoProgressSeconds)).toEqual([12, 21])
+  })
+
+  it('sends ten events per mutation and drains the rest', async () => {
+    const batches: number[] = []
+    routeCms({
+      [Q.TRACK]: (variables) => {
+        batches.push(variables.events.length)
+        return { trackView: { success: true } }
+      }
+    })
+    const client = new BeaconClient()
+
+    for (let step = 1; step <= 9; step++) {
+      await client.trackProgress('e1', step * 10, 600)
+    }
+    expect(batches).toEqual([])
+
+    // The tenth event is what makes the app flush before the timer.
+    await client.trackProgress('e1', 100, 600)
+    await vi.waitFor(() => expect(batches).toEqual([10]))
+
+    await client.trackProgress('e1', 110, 600)
+    await client.trackProgress('e1', 120, 600)
+    await expect(client.flushProgress()).resolves.toBe(true)
+    expect(batches).toEqual([10, 2])
+  })
+
+  it('flushes queued positions on the twenty-second timer', async () => {
+    vi.useFakeTimers()
+    const batches: number[] = []
+    routeCms({
+      [Q.TRACK]: (variables) => {
+        batches.push(variables.events.length)
+        return { trackView: { success: true } }
+      }
+    })
+    const client = new BeaconClient()
+
+    await client.trackProgress('e1', 10, 600)
+    await client.trackProgress('e1', 20, 600)
+    await vi.advanceTimersByTimeAsync(19_000)
+    expect(batches).toEqual([])
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(batches).toEqual([2])
+  })
+
+  it('keeps events a failed send did not deliver', async () => {
+    const batches: number[] = []
+    let attempts = 0
+    routeCms({
+      [Q.TRACK]: (variables) => {
+        attempts += 1
+        if (attempts === 1) throw new Error('Beacon is busy')
+        batches.push(variables.events.length)
+        return { trackView: { success: true } }
+      }
+    })
+    const client = new BeaconClient()
+
+    await client.trackProgress('e1', 10, 600)
+    await client.trackProgress('e1', 20, 600)
+
+    await expect(client.flushProgress()).resolves.toBe(false)
+    await expect(client.flushProgress()).resolves.toBe(true)
+    expect(batches).toEqual([2])
+  })
+
+  it('sends a started view on its own, before any position', async () => {
+    const events: Record<string, any>[] = []
+    routeCms({
+      [Q.TRACK]: (variables) => {
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      }
+    })
+    const client = new BeaconClient()
+
+    await expect(client.trackStart('e1')).resolves.toBe(true)
+
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ content: 'e1' })
+    expect(events[0]).not.toHaveProperty('duration')
+    expect(events[0]).not.toHaveProperty('videoProgress')
+    expect(events[0]).not.toHaveProperty('videoProgressSeconds')
   })
 
   it('does nothing when signed out', async () => {
@@ -1097,6 +1232,8 @@ describe('trackProgress', () => {
     const client = new BeaconClient()
 
     await expect(client.trackProgress('e1', 10, 100)).resolves.toBe(false)
+    await expect(client.trackStart('e1')).resolves.toBe(false)
+    await expect(client.flushProgress()).resolves.toBe(false)
     expect(net.fetch).not.toHaveBeenCalled()
   })
 })
@@ -1207,7 +1344,108 @@ describe('watch state', () => {
       videoProgress: 99,
       videoProgressSeconds: 3299
     })
+    // The queue's removal bookkeeping is ours, not an EventInput field.
+    expect(event).not.toHaveProperty('removeFromContinueWatching')
     expect(removed).toBe('e1')
+  })
+
+  it('drops a queued position for a title when it is marked', async () => {
+    const batches: Record<string, any>[][] = []
+    let removed = 0
+    routeCms({
+      [Q.TRACK]: (variables) => {
+        batches.push(variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => {
+        removed += 1
+        return { removeContentFromContinueWatching: { success: true } }
+      }
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.trackProgress('e1', 120, 3300)
+    await client.markWatched('c1e1', true)
+
+    // The pre-mark position never reaches Beacon: replaying it after the mark
+    // would move the saved point back.
+    expect(batches).toHaveLength(1)
+    expect(batches[0]).toHaveLength(1)
+    expect(batches[0]![0]).toMatchObject({
+      content: 'e1',
+      videoProgress: 99,
+      videoProgressSeconds: 3299
+    })
+    expect(removed).toBe(1)
+  })
+
+  it('keeps a mark queued when Beacon cannot take it, then sends it with the removal', async () => {
+    const events: Record<string, any>[] = []
+    let removed: string | null = null
+    let attempts = 0
+    routeCms({
+      [Q.TRACK]: (variables) => {
+        attempts += 1
+        if (attempts === 1) throw new Error('Beacon is busy')
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: (variables) => {
+        removed = variables.id
+        return { removeContentFromContinueWatching: { success: true } }
+      }
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await expect(client.markWatched('c1e1', true)).resolves.toEqual({
+      watched: true,
+      progress: 1
+    })
+    expect(removed).toBeNull()
+
+    await expect(client.flushProgress()).resolves.toBe(true)
+
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      content: 'e1',
+      videoProgress: 99,
+      videoProgressSeconds: 3299
+    })
+    expect(removed).toBe('e1')
+  })
+
+  it('lets playback supersede a mark that has not been sent', async () => {
+    const events: Record<string, any>[] = []
+    let removed = 0
+    let attempts = 0
+    routeCms({
+      [Q.TRACK]: (variables) => {
+        attempts += 1
+        if (attempts === 1) throw new Error('Beacon is busy')
+        events.push(...variables.events)
+        return { trackView: { success: true } }
+      },
+      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => {
+        removed += 1
+        return { removeContentFromContinueWatching: { success: true } }
+      }
+    })
+    const client = new BeaconClient()
+    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
+
+    await client.markWatched('c1e1', true)
+    await client.trackProgress('e1', 120, 3300)
+    await client.flushProgress()
+
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      content: 'e1',
+      videoProgress: 4,
+      videoProgressSeconds: 120
+    })
+    expect(removed).toBe(0)
   })
 
   it('takes an episode back to the start when marked unwatched', async () => {

@@ -21,6 +21,8 @@ import { episodeCode, imageUrl as img } from './text'
 import { chooseUpNext } from './upnext'
 import type { IndexedCollection, IndexedVideo } from './catalog-types'
 import { WatchMarkStore, type WatchMark } from './watchmarks'
+import { accountKey } from './account'
+import { BATCH_SIZE, ProgressQueue, type QueuedEvent } from './progress-queue'
 
 const CMS_URL = 'https://critrole-beacon-production-backend.clockhosting.com/api/graphql'
 const OAUTH_URL = 'https://pocketbeacon.memberful.com/oauth/token'
@@ -28,8 +30,10 @@ const OAUTH_URL = 'https://pocketbeacon.memberful.com/oauth/token'
 const CLIENT_ID = '3Wdgxb5im239JhTBhS7KczZn'
 
 const LEVEL_TTL = 10 * 60 * 1000
-/** How long a screen may wait for a progress report before reading anyway. */
+/** How long a screen may wait for progress writes before reading anyway. */
 const REPORT_WAIT = 5_000
+/** The app's own client flushes progress on this interval. */
+const FLUSH_EVERY = 20_000
 
 /** Must match the `x-platform` header sent with every request. */
 const PLATFORM = 'web'
@@ -228,11 +232,22 @@ export class BeaconClient {
   private readonly playbackCache = new TtlCache<string, PlaybackData | null>(5 * 60_000, 40)
   private readonly progressCache = new TtlCache<string, Record<string, ProgressInfo>>(30_000, 30)
   /**
-   * Progress reports on their way to Beacon. The player closes and reports in
-   * the same breath as the screen below it reloads, and a read that ran ahead
-   * of the write would rebuild "Continue watching" without it.
+   * Progress leaves the player every ten seconds of playback, but reaches
+   * Beacon in batches: ten events per mutation, flushed every twenty seconds
+   * and before any read that would show the result. A send that fails or runs
+   * offline stays on disk, so closing the app cannot lose the last position.
    */
-  private readonly reports = new Set<Promise<boolean>>()
+  private readonly progressQueue = new ProgressQueue(
+    undefined,
+    () => {
+      try {
+        return typeof net.isOnline === 'function' ? net.isOnline() : true
+      } catch {
+        return true
+      }
+    }
+  )
+  private flushTimer: ReturnType<typeof setInterval> | undefined
 
   /** What an entry belongs to: a member's rows and tier are not shared. */
   private async scope(): Promise<string> {
@@ -254,6 +269,12 @@ export class BeaconClient {
     if (!this.sessionLoad) {
       this.sessionLoad = loadSession().then((session) => {
         this.sessionState = session
+        // A queue left by the previous run still owes Beacon. Send it now,
+        // rather than making the next launch wait out the timer; a failed
+        // send starts the timer as usual.
+        if (session && this.progressQueue.size(accountKey(session.email))) {
+          void this.flushProgress().catch(() => {})
+        }
         return session
       })
     }
@@ -331,10 +352,17 @@ export class BeaconClient {
     })
     this.level = null
     this.clearCaches()
+    // Progress this account left behind while signed out is still owed.
+    if (this.progressQueue.size(accountKey(address))) {
+      void this.flushProgress().catch(() => {})
+    }
     return this.status()
   }
 
   async signOut(): Promise<void> {
+    // The queue is kept for this account and never sent with another token;
+    // when the same member signs back in, its timer picks the events up again.
+    this.stopFlushTimer()
     await this.updateSession(null)
     this.level = null
     this.clearCaches()
@@ -962,26 +990,34 @@ export class BeaconClient {
       }
     }
 
+    // The rows above read progress by content id; the page's own
+    // `currentProgress` is a second read that can lag it. Use the same source
+    // for the header button as for the tiles, so the same episode cannot show
+    // a watched badge and offer "Mark as watched" at the same time. The page
+    // read is the fallback when the id has no entry in the map.
     const cp = r.currentProgress
+    const info = progress[doc.id]
+    const docProgress = info ? info.progress : Math.min(1, (cp?.videoProgress ?? 0) / 100)
+    const docPosition = info ? info.position : (cp?.videoProgressSeconds ?? null)
     // A mark means the member has said where this episode stands, whatever the
     // server still reports; start it from the beginning either way.
     const marked = Boolean(marks[doc.id])
     const docWatched = this.effectiveWatch(
       doc.id,
       doc.duration,
-      Math.min(1, (cp?.videoProgress ?? 0) / 100),
-      cp?.videoProgressSeconds,
+      docProgress,
+      docPosition,
       email,
       marks
     ).watched
-    const resumeFrom = cp?.videoProgressSeconds ?? 0
+    const resumeFrom = docPosition ?? 0
     const resumeAt =
       !marked &&
-      cp &&
+      docPosition != null &&
       resumeFrom > RESUME_MIN &&
       !closingStretch(
-        cp.videoProgress ?? 0,
-        cp.videoProgressSeconds,
+        docProgress * 100,
+        docPosition,
         (doc.duration ?? 0) / 1000,
         RESUME_SHARE,
         RESUME_TAIL
@@ -1126,30 +1162,113 @@ export class BeaconClient {
     )
   }
 
+  /**
+   * Queue one playback position. It leaves for Beacon within twenty seconds
+   * (or sooner if ten are waiting), and a read that would show it flushes the
+   * queue first.
+   */
   async trackProgress(contentId: string, position: number, duration: number): Promise<boolean> {
-    // Register before the first await: a screen read issued right after this
-    // call must find the report and wait for it.
-    const pending = this.reportProgress(contentId, position, duration)
-    this.reports.add(pending)
-    void pending
-      .finally(() => {
-        this.reports.delete(pending)
-      })
-      .catch(() => {})
-    return pending
+    const session = await this.currentSession()
+    if (!session || !contentId) return false
+    const seconds = Math.round(position)
+    const percent = duration ? Math.min(100, Math.round((seconds / duration) * 100)) : 0
+    // A minute into a four-hour episode rounds to 0%, which reads as "never
+    // started" to Continue watching; anything played counts as at least 1%.
+    const shown = duration && seconds > 0 ? Math.max(1, percent) : percent
+    const account = accountKey(session.email)
+    // Playing is newer than an unsent mark for the same title; that mark and
+    // its row removal must not follow this point to Beacon.
+    this.progressQueue.dropMark(account, contentId)
+    this.progressQueue.add(
+      account,
+      {
+        content: contentId,
+        duration: Math.round(duration || 0),
+        videoProgress: shown,
+        videoProgressSeconds: seconds
+      },
+      this.sessionId
+    )
+    // Playing the episode is a newer decision than the mark, whether or not the
+    // report has landed. From here the server's own point takes over again.
+    this.watchmarks.clear(session.email ?? null, contentId)
+    this.startFlushTimer()
+    // The app flushes as soon as ten are waiting rather than waiting for the
+    // timer; the queue itself decides whether this update was a duplicate.
+    if (this.progressQueue.size(account) >= BATCH_SIZE) {
+      void this.flushProgress().catch(() => {})
+    }
+    return true
   }
 
-  /** Let progress writes land before reading what they change. */
+  /**
+   * Tell Beacon a view has started, before there is a position. The app forces
+   * this one out immediately so a playback closed a second later still counts.
+   */
+  async trackStart(contentId: string): Promise<boolean> {
+    const session = await this.currentSession()
+    if (!session || !contentId) return false
+    const account = accountKey(session.email)
+    // A bare start is not a progress decision: it does not clear an explicit
+    // mark or its pending write. The first real position report does that.
+    this.progressQueue.add(account, { content: contentId }, this.sessionId)
+    return this.flushProgress()
+  }
+
+  /** Send whatever progress is owed for the signed-in account. */
+  async flushProgress(): Promise<boolean> {
+    const session = await this.currentSession()
+    if (!session) return false
+    const account = accountKey(session.email)
+    const before = this.progressQueue.size(account)
+    if (!before) {
+      this.stopFlushTimer()
+      return true
+    }
+    // A batch already on the wire when this was called finishes first; an event
+    // added during it would miss that drain, so go round again. Three rounds
+    // covers a mark or a closing player racing the timer; the timer takes over
+    // if anything is still left.
+    let sent = true
+    for (let round = 0; round < 3 && this.progressQueue.size(account); round++) {
+      sent = await this.progressQueue
+        .flush(account, (events) => this.sendEvents(events))
+        .catch(() => false)
+      if (!sent) break
+    }
+    // Only what actually left the queue has changed the rows and bars.
+    if (this.progressQueue.size(account) < before) this.invalidateProgress()
+    if (this.progressQueue.size(account)) this.startFlushTimer()
+    else this.stopFlushTimer()
+    return sent
+  }
+
+  private startFlushTimer(): void {
+    if (this.flushTimer) return
+    const timer = setInterval(() => {
+      void this.flushProgress().catch(() => {})
+    }, FLUSH_EVERY)
+    // The queue is best-effort; it must not hold a test or a quitting app open.
+    timer.unref?.()
+    this.flushTimer = timer
+  }
+
+  private stopFlushTimer(): void {
+    if (!this.flushTimer) return
+    clearInterval(this.flushTimer)
+    this.flushTimer = undefined
+  }
+
+  /** Let queued progress writes land before reading what they change. */
   private async settleReports(): Promise<void> {
-    if (!this.reports.size) return
-    // A report that never lands must not hold the screen shut either: past a
-    // few seconds the read is better served stale than not at all.
+    // A write that never lands must not hold the screen shut either: past a few
+    // seconds the read is better served stale than not at all.
     let timer: ReturnType<typeof setTimeout> | undefined
     const deadline = new Promise<void>((resolve) => {
       timer = setTimeout(resolve, REPORT_WAIT)
     })
     try {
-      await Promise.race([Promise.allSettled([...this.reports]), deadline])
+      await Promise.race([this.flushProgress().catch(() => false), deadline])
     } finally {
       clearTimeout(timer)
     }
@@ -1160,16 +1279,17 @@ export class BeaconClient {
    *
    * The mark is kept locally first: Beacon answers `trackView` with success but
    * keeps reporting the old point for both extremes, so a server-only mark
-   * would visibly bounce back. The server still gets a best-effort interior
-   * position (99% or 1%) and the Continue-watching removal; once its own read
-   * agrees with the mark, the local copy is dropped.
+   * would visibly bounce back. The mark then goes through the progress queue:
+   * any older position still queued for this title is dropped, the 99%/1% point
+   * is sent after whatever is already in flight, and the Continue-watching
+   * removal follows the point that landed. Once Beacon's own read agrees with
+   * the mark, the local copy is dropped.
    */
   async markWatched(slug: string, watched: boolean): Promise<WatchState> {
     const session = await this.currentSession()
     if (!session) {
       throw new BeaconError('Sign in with a Beacon account to track what you have watched.')
     }
-    await this.settleReports()
 
     const known = this.catalog?.videoBySlug(slug) ?? null
     let id = known?.id ?? null
@@ -1190,11 +1310,26 @@ export class BeaconClient {
     // Both 0 and 100 come back unchanged from the CMS, so stay one step inside
     // each end. The results still read as finished or at the start.
     const seconds = watched ? Math.max(1, durationSec - 1) : 1
-    await this.postProgress(id, seconds, durationSec, watched ? 99 : 1).catch(() => false)
-
-    // A cleared title sits at 1% and would otherwise enter Continue watching
-    // as "started"; a finished one should leave the row too.
-    await this.gql(Q.REMOVE_FROM_CONTINUE_WATCHING, { id }).catch(() => null)
+    const account = accountKey(session.email)
+    // A mark is a newer decision than any position still queued for this title.
+    // Replaying an older one after the mark would move Beacon back (it keeps
+    // the last point it is told) and put the title in the row again.
+    this.progressQueue.dropContent(account, id)
+    this.progressQueue.add(
+      account,
+      {
+        content: id,
+        duration: durationSec,
+        videoProgress: watched ? 99 : 1,
+        videoProgressSeconds: seconds,
+        removeFromContinueWatching: true
+      },
+      this.sessionId
+    )
+    this.startFlushTimer()
+    // Put it after any batch already in flight, but never hold the screen shut
+    // on a stalled network; an unsent mark stays queued for the timer/launch.
+    await this.settleReports()
 
     this.invalidateProgress()
     return { watched, progress: watched ? 1 : 0 }
@@ -1255,44 +1390,30 @@ export class BeaconClient {
     return Boolean(result.isFavourite)
   }
 
-  private async reportProgress(
-    contentId: string,
-    position: number,
-    duration: number
-  ): Promise<boolean> {
-    const session = await this.currentSession()
-    if (!session || !contentId) return false
-    const seconds = Math.round(position)
-    const percent = duration ? Math.min(100, Math.round((seconds / duration) * 100)) : 0
-    // A minute into a four-hour episode rounds to 0%, which reads as "never
-    // started" to Continue watching; anything played counts as at least 1%.
-    const shown = duration && seconds > 0 ? Math.max(1, percent) : percent
-    const tracked = await this.postProgress(contentId, seconds, duration, shown).catch(() => false)
-    // Playing the episode is a newer decision than the mark, whether or not the
-    // report landed. From here the server's own point takes over again.
-    this.watchmarks.clear(session.email ?? null, contentId)
-    if (tracked) this.invalidateProgress()
-    return tracked
-  }
-
-  private async postProgress(
-    contentId: string,
-    seconds: number,
-    duration: number,
-    percent: number
-  ): Promise<boolean> {
-    const event = {
-      content: contentId,
-      viewedAt: new Date().toISOString(),
-      sessionId: this.sessionId,
-      duration: Math.round(duration || 0),
-      videoProgressSeconds: seconds,
-      videoProgress: percent
+  private async sendEvents(events: QueuedEvent[]): Promise<boolean> {
+    // The queue's bookkeeping fields are ours; Beacon's EventInput has no
+    // place for them.
+    const payload = events.map((event) => ({
+      content: event.content,
+      viewedAt: event.viewedAt,
+      sessionId: event.sessionId,
+      duration: event.duration,
+      videoProgress: event.videoProgress,
+      videoProgressSeconds: event.videoProgressSeconds
+    }))
+    const r = await this.gql<{ trackView?: { success?: boolean } }>(Q.TRACK, { events: payload })
+    if (!r?.trackView?.success) return false
+    // A mark is not finished until its title leaves the row. Sending this only
+    // after the point landed means a retry cannot remove before it writes. A
+    // later event for the same title in this batch means playback resumed, so
+    // that newer point decides and the removal is skipped.
+    for (let index = 0; index < events.length; index++) {
+      const event = events[index]!
+      if (!event.removeFromContinueWatching) continue
+      if (events.slice(index + 1).some((next) => next.content === event.content)) continue
+      await this.gql(Q.REMOVE_FROM_CONTINUE_WATCHING, { id: event.content }).catch(() => null)
     }
-    const r = await this.gql<{ trackView?: { success?: boolean } }>(Q.TRACK, {
-      events: [event]
-    })
-    return Boolean(r?.trackView?.success)
+    return true
   }
 
   /** The rows, resume points and progress bars now describe an older moment. */

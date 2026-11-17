@@ -69,7 +69,9 @@ function stubBeacon(captions: CaptionTrack[] = playback.captions): ReturnType<ty
     playback: {
       open: vi.fn(() => Promise.resolve({ ...playback, captions })),
       next: vi.fn(() => Promise.resolve(null)),
+      start: vi.fn(() => Promise.resolve(true)),
       progress: vi.fn(() => Promise.resolve(true)),
+      flush: vi.fn(() => Promise.resolve(true)),
       captions: fetchCaptions
     },
     app: { toggleFullscreen: vi.fn() }
@@ -102,7 +104,9 @@ function stubEpisode(
     playback: {
       open: vi.fn(() => Promise.resolve({ ...episode, ...overrides })),
       next: request,
+      start: vi.fn(() => Promise.resolve(true)),
       progress: vi.fn(() => Promise.resolve(true)),
+      flush: vi.fn(() => Promise.resolve(true)),
       captions: vi.fn(() => Promise.resolve('WEBVTT'))
     },
     app: { toggleFullscreen: vi.fn() }
@@ -157,6 +161,43 @@ describe('Player', () => {
 
     expect(screen.queryByText(/LT\/RT/)).toBeNull()
     expect(screen.queryByText(/X subtitles/)).toBeNull()
+  })
+
+  it('starts a view once and reports only after ten seconds of playback', async () => {
+    const progress = vi.fn(() => Promise.resolve(true))
+    const start = vi.fn(() => Promise.resolve(true))
+    const flush = vi.fn(() => Promise.resolve(true))
+    vi.stubGlobal('beacon', {
+      playback: {
+        open: vi.fn(() => Promise.resolve(playback)),
+        next: vi.fn(() => Promise.resolve(null)),
+        start,
+        progress,
+        flush,
+        captions: vi.fn(() => Promise.resolve('WEBVTT'))
+      },
+      app: { toggleFullscreen: vi.fn() }
+    })
+
+    const { container, unmount } = render(
+      <Player slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />
+    )
+    await screen.findByText('Test Episode')
+    await vi.waitFor(() => expect(start).toHaveBeenCalledWith('v1'))
+
+    playTo(container, 100)
+    expect(progress).toHaveBeenCalledTimes(1)
+    expect(progress).toHaveBeenLastCalledWith({ contentId: 'v1', position: 100, duration: 600 })
+
+    playTo(container, 105)
+    expect(progress).toHaveBeenCalledTimes(1)
+
+    playTo(container, 111)
+    expect(progress).toHaveBeenCalledTimes(2)
+
+    unmount()
+    expect(flush).toHaveBeenCalled()
+    expect(progress).toHaveBeenLastCalledWith({ contentId: 'v1', position: 111, duration: 600 })
   })
 
   it('opens the subtitle menu from the control bar and turns captions on', async () => {

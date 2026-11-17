@@ -25,7 +25,9 @@ const api: BeaconApi = {
   playback: {
     open: (slug: string) => ipcRenderer.invoke('playback:open', slug),
     next: (request: NextEpisodeRequest) => ipcRenderer.invoke('playback:next', request),
+    start: (contentId: string) => ipcRenderer.invoke('playback:start', contentId),
     progress: (report: ProgressReport) => ipcRenderer.invoke('playback:progress', report),
+    flush: () => ipcRenderer.invoke('playback:flush'),
     captions: (url: string) => ipcRenderer.invoke('playback:captions', url)
   },
   watch: {

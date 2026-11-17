@@ -60,6 +60,10 @@ export function registerIpc(): void {
     client.trackProgress(report.contentId, report.position, report.duration)
   )
 
+  ipcMain.handle('playback:start', (_event, contentId: string) => client.trackStart(contentId))
+
+  ipcMain.handle('playback:flush', () => client.flushProgress())
+
   ipcMain.handle('playback:captions', (_event, url: string) => fetchCaptionFile(url))
 
   ipcMain.handle('watch:mark', (_event, slug: string, watched: boolean) =>

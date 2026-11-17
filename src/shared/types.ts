@@ -219,7 +219,11 @@ export interface BeaconApi {
   playback: {
     open(slug: string): Promise<PlaybackData | null>
     next(request: NextEpisodeRequest): Promise<NextEpisode | null>
+    /** Tell Beacon a view has started, before there is a position to report. */
+    start(contentId: string): Promise<boolean>
     progress(report: ProgressReport): Promise<boolean>
+    /** Send queued progress now, e.g. when the player closes. */
+    flush(): Promise<boolean>
     captions(url: string): Promise<string>
   }
   watch: {

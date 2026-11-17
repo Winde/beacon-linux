@@ -1,8 +1,8 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { registerIpc } from './ipc'
+import { client, registerIpc } from './ipc'
 
 const isDev = !app.isPackaged
 
@@ -13,6 +13,14 @@ const initialSlug =
   null
 
 let mainWindow: BrowserWindow | null = null
+/** How long quitting waits for the last progress batch; the rest stays on disk. */
+const QUIT_FLUSH_WAIT = 2_000
+let flushingBeforeQuit = false
+
+/** Best effort, like the app's background flush; a failed send stays queued. */
+function flushProgress(): void {
+  void client.flushProgress().catch(() => false)
+}
 
 /**
  * Dev aid: BEACON_SHOT=<path> renders the app, saves a PNG of the page and quits.
@@ -74,6 +82,13 @@ function createWindow(): void {
     console.log('[window] ready-to-show')
     mainWindow?.show()
   })
+
+  // The app flushes progress when it goes inactive. A window that loses focus,
+  // hides or minimises is the desktop equivalent: send what is owed now rather
+  // than after the twenty-second timer.
+  mainWindow.on('blur', flushProgress)
+  mainWindow.on('hide', flushProgress)
+  mainWindow.on('minimize', flushProgress)
 
   mainWindow.webContents.on('did-finish-load', () => {
     console.log('[window] did-finish-load')
@@ -150,6 +165,26 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc()
     ipcMain.handle('app:initialSlug', () => initialSlug)
     createWindow()
+
+    // Closing is the normal exit on a TV, so give the queue a short chance to
+    // put its last position on the wire. Anything that misses the window is
+    // already on disk and goes out on the next launch.
+    app.on('before-quit', (event) => {
+      if (flushingBeforeQuit) return
+      event.preventDefault()
+      flushingBeforeQuit = true
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const deadline = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, QUIT_FLUSH_WAIT)
+      })
+      void Promise.race([client.flushProgress().catch(() => false), deadline])
+        .finally(() => {
+          clearTimeout(timer)
+          app.quit()
+        })
+    })
+    powerMonitor.on('suspend', flushProgress)
+    powerMonitor.on('lock-screen', flushProgress)
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
