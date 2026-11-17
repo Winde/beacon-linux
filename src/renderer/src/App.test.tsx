@@ -60,12 +60,14 @@ function stubApp({
   home: ReturnType<typeof vi.fn>
   add: ReturnType<typeof vi.fn>
   remove: ReturnType<typeof vi.fn>
+  quit: ReturnType<typeof vi.fn>
 } {
   const signOut = vi.fn(() => Promise.resolve())
   const list = vi.fn(() => Promise.resolve({ items, after: null }))
   const homeFn = vi.fn(homeImpl ?? (() => Promise.resolve(home)))
   const addFn = vi.fn(add ?? (() => Promise.resolve({ items, after: null })))
   const remove = vi.fn(removeImpl ?? (() => Promise.resolve({ items: [], after: null })))
+  const quit = vi.fn()
 
   vi.stubGlobal('beacon', {
     auth: {
@@ -96,28 +98,56 @@ function stubApp({
     playback: { open: vi.fn(), next: vi.fn(), progress: vi.fn(), captions: vi.fn() },
     watch: { mark: vi.fn() },
     app: {
-      quit: vi.fn(),
+      quit,
       toggleFullscreen: vi.fn(),
       platform: vi.fn(() => Promise.resolve('linux')),
       initialSlug: vi.fn(() => Promise.resolve(null))
     }
   })
 
-  return { signOut, list, home: homeFn, add: addFn, remove }
+  return { signOut, list, home: homeFn, add: addFn, remove, quit }
 }
 
 describe('App sign out', () => {
-  it('signs out without asking, since favourites are not stored here', async () => {
+  it('asks before dropping the session', async () => {
     const { signOut, list, remove } = stubApp({ items: [favourite('campaign-1', 'Campaign 1')] })
     render(<App />)
 
     fireEvent.click(await screen.findByTestId('rail-signout'))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Sign out?' })
+    expect(dialog).toBeDefined()
+    expect(signOut).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByTestId('confirm-signout'))
 
     await waitFor(() => expect(signOut).toHaveBeenCalledOnce())
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(remove).not.toHaveBeenCalled()
     // Signed out, the list is read again and comes back empty.
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2))
+  })
+
+  it('can cancel and stay signed in', async () => {
+    const { signOut } = stubApp()
+    render(<App />)
+
+    fireEvent.click(await screen.findByTestId('rail-signout'))
+    fireEvent.click(screen.getByTestId('cancel-signout'))
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(signOut).not.toHaveBeenCalled()
+  })
+
+  it('takes Back as cancel', async () => {
+    const { signOut } = stubApp()
+    render(<App />)
+
+    fireEvent.click(await screen.findByTestId('rail-signout'))
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(signOut).not.toHaveBeenCalled()
   })
 
   it('asks the account for its favourites on boot', async () => {
@@ -132,6 +162,34 @@ describe('App sign out', () => {
     render(<App />)
 
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeDefined()
+  })
+})
+
+describe('App back', () => {
+  it('exits when Back is pressed on the first screen', async () => {
+    const { quit } = stubApp({ home: HOME_WITH_SERIES })
+    render(<App />)
+
+    await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(quit).toHaveBeenCalledOnce()
+  })
+
+  it('goes back a screen before it offers to exit', async () => {
+    const { quit } = stubApp({ home: HOME_WITH_SERIES })
+    render(<App />)
+
+    await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })
+    fireEvent.keyDown(window, { key: '/' })
+    await screen.findByRole('heading', { level: 1, name: 'Search' })
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('heading', { level: 1, name: 'Search' })).toBeNull()
+    expect(quit).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(quit).toHaveBeenCalledOnce()
   })
 })
 

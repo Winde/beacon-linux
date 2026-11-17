@@ -18,6 +18,14 @@ UNINSTALL=0
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 say() { printf '==> %s\n' "$*"; }
 
+# Steam owns each shortcut's controller configuration, so this cannot be set
+# here. Point at the layouts that present the pad the app reads.
+controller_hint() {
+  say "One-time in Steam (kept across updates): open Beacon -> Properties ->"
+  say "  Controller and choose Gamepad (or Gamepad with Joystick Trackpad),"
+  say "  so the app receives the controller's buttons."
+}
+
 usage() {
   cat <<'EOF'
 Usage: install.sh [options]
@@ -208,10 +216,12 @@ fi
 if [ -z "$shortcut_path" ]; then
   say "The shortcut was not found."
   say "Add it in Steam (Games -> Add a Non-Steam Game), then run this script again to apply artwork."
+  controller_hint
   exit 0
 fi
 
 say "Found the Steam shortcut"
+controller_hint
 appid=""
 if command -v python3 >/dev/null 2>&1; then
   appid="$(python3 - "$shortcut_path" "$DESKTOP" "$APPIMAGE" <<'PY'

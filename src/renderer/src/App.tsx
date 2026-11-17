@@ -9,6 +9,7 @@ import { Collection } from './screens/Collection'
 import { Content } from './screens/Content'
 import { Search } from './screens/Search'
 import { Player, type PlayerHandle } from './screens/Player'
+import { ConfirmDialog } from './components/ConfirmDialog'
 import { NavRail } from './components/NavRail'
 import { Spinner } from './components/ui'
 
@@ -45,6 +46,9 @@ export default function App(): React.JSX.Element {
   const railReturn = useRef<HTMLElement | null>(null)
   /** Whether the rail should offer Sign out; guests have no account to leave. */
   const [signedIn, setSignedIn] = useState(false)
+  /** Signing out drops the stored session, so the rail asks before doing it. */
+  const [confirmSignOut, setConfirmSignOut] = useState(false)
+  const dialogReturn = useRef<HTMLElement | null>(null)
   const [favourites, setFavourites] = useState<FavouritesData>(EMPTY_FAVOURITES)
   /** Slugs with a favourite write in flight, so the button can show a spinner. */
   const [pendingFavourites, setPendingFavourites] = useState<ReadonlySet<string>>(new Set())
@@ -162,6 +166,7 @@ export default function App(): React.JSX.Element {
   // Favourites belong to the account and are left alone.
   const signOut = useCallback(async () => {
     setRailOpen(false)
+    setConfirmSignOut(false)
     await window.beacon.auth.signOut().catch(() => {})
     try {
       window.localStorage.removeItem('beacon.email')
@@ -176,9 +181,19 @@ export default function App(): React.JSX.Element {
     void loadFavourites()
   }, [loadFavourites, reset])
 
+  // The account action sits beside browsing, where a stray press would end the
+  // session; confirm it and come back to the same rail item if it is refused.
   const requestSignOut = useCallback(() => {
-    void signOut()
-  }, [signOut])
+    dialogReturn.current = getFocused()
+    setConfirmSignOut(true)
+  }, [])
+
+  const cancelSignOut = useCallback(() => {
+    setConfirmSignOut(false)
+    const previous = dialogReturn.current
+    if (previous?.isConnected) setFocused(previous)
+    else focusFirst()
+  }, [])
 
   const toggleFavourite = useCallback(
     (card: Card) => {
@@ -264,6 +279,21 @@ export default function App(): React.JSX.Element {
       return
     }
 
+    // The confirmation is modal: nothing behind it may take a move or a press.
+    if (confirmSignOut) {
+      if (action === 'up' || action === 'down' || action === 'left' || action === 'right') {
+        move(action, document.querySelector<HTMLElement>('.dialog') ?? undefined)
+        return
+      }
+      if (action === 'accept') {
+        const active = document.activeElement as HTMLElement | null
+        active?.click()
+        return
+      }
+      if (action === 'back') cancelSignOut()
+      return
+    }
+
     switch (action) {
       case 'up':
       case 'down':
@@ -307,6 +337,11 @@ export default function App(): React.JSX.Element {
           active.blur()
           const next = document.querySelector<HTMLElement>('[data-focus]:not(input)')
           if (next) setFocused(next)
+          return
+        }
+        // Nothing left to go back to: the first screen is also the way out.
+        if (stack.length <= 1) {
+          void window.beacon.app.quit()
           return
         }
         back()
@@ -432,6 +467,27 @@ export default function App(): React.JSX.Element {
           {renderRoute(entry.route)}
         </div>
       ))}
+
+      {confirmSignOut ? (
+        <ConfirmDialog
+          title="Sign out?"
+          message="You'll need to sign in again to watch member videos. Free videos stay available without an account."
+          actions={[
+            {
+              label: 'Cancel',
+              onSelect: cancelSignOut,
+              variant: 'primary',
+              testId: 'cancel-signout'
+            },
+            {
+              label: 'Sign out',
+              onSelect: () => void signOut(),
+              variant: 'danger',
+              testId: 'confirm-signout'
+            }
+          ]}
+        />
+      ) : null}
 
       {player ? (
         <Player

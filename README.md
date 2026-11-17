@@ -120,6 +120,21 @@ are described in [docs/install-steamos.md](docs/install-steamos.md).
 The installer and the artwork are separate release assets; the AppImage stays a
 single self-contained file.
 
+### Controller layout (one-time)
+
+Beacon reads the controller through the Gamepad API, so the Steam shortcut
+must use a layout that presents the pad as a gamepad. The installer adds the
+shortcut but cannot choose this for you:
+
+1. In Steam, open **Beacon → Properties → Controller**.
+2. Pick **Gamepad** or **Gamepad with Joystick Trackpad**.
+3. Leave **Enable the Steam Overlay while in-game** on; the on-screen keyboard
+   depends on it.
+
+These are the layouts the app expects; see
+[docs/steam-input.md](docs/steam-input.md#the-layout-the-app-expects) for
+details.
+
 ### Controls
 
 | Action | Gamepad | Keyboard |
@@ -135,8 +150,12 @@ single self-contained file.
 | Scrub while paused | ↑ then ← / →, A to jump, A again to play | ↑ then ← / →, Enter to jump, Enter again to play |
 | Choose in a player menu | D-pad + A | Arrows + Enter |
 | Ending card (last 15s) | A plays next, B keeps watching | Enter / Escape |
-| Quit | — | Ctrl+Q |
+| Quit | B on the first screen | Ctrl+Q |
 | Fullscreen | — | F11 |
+
+These assume the **Gamepad** or **Gamepad with Joystick Trackpad** layout from
+[Controller layout](#controller-layout-one-time). B on Home exits the app; the
+rail's Sign out asks for confirmation first.
 
 In the player, ↑/↓ (or Y/Start) reaches the controls, where ←/→ moves
 between them. While the bar is unfocused, ←/→ seek. When paused, ↑ goes

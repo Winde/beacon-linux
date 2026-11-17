@@ -26,6 +26,11 @@ library artwork. Re-run it to update. `--no-steam` installs without the
 shortcut; `--version vX.Y.Z` pins a release; `--uninstall` removes the local
 files. It does not write outside `$HOME`.
 
+It cannot choose the controller layout (Steam owns that per-shortcut setting),
+so do this once: **Beacon → Properties → Controller → Gamepad** (or **Gamepad
+with Joystick Trackpad**). Use one of those two templates; the app reads a
+standard gamepad.
+
 The manual steps below remain as the fallback.
 
 ## One-time setup
@@ -46,8 +51,9 @@ The manual steps below remain as the fallback.
 4. Open Steam in Desktop Mode, then **Games → Add a Non-Steam Game → Browse**
    and pick `~/Applications/Beacon.AppImage`.
 5. Open the new entry's **Properties → Controller** and choose the **Gamepad**
-   template. Leave **Enable the Steam Overlay while in-game** on: Steam Input and
-   the on-screen keyboard both depend on it.
+   template (or **Gamepad with Joystick Trackpad**), so the app receives a
+   standard gamepad. Leave **Enable the Steam Overlay while in-game** on: Steam
+   Input and the on-screen keyboard both depend on it.
 6. Return to Game Mode (**Return to Gaming Mode** on the desktop, or Steam →
    Power) and launch Beacon from the Non-Steam section of your library.
 
@@ -76,9 +82,11 @@ sign-in screen says which case you are in.
   `--appimage-extract-and-run` to the Steam entry's launch options.
 - **Nothing happens**: check the file is executable (`chmod +x`), and try
   launching it once from Desktop Mode to see the error.
-- **Controller does nothing**: confirm the Steam entry uses the **Gamepad**
-  template and the Steam Overlay is enabled. The app reads a real gamepad, not
-  keyboard input.
+- **A/B do nothing**: confirm the shortcut uses **Gamepad** or **Gamepad with
+  Joystick Trackpad** in **Properties → Controller**. The app reads a real
+  gamepad, not key presses.
+- **Controller does nothing at all**: check the same setting and make sure the
+  Steam Overlay is enabled.
 - **Wrong icon or name in the library**: edit the entry's properties in Desktop
   Mode; Steam remembers it.
 

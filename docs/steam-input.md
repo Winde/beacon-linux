@@ -56,6 +56,18 @@ code path covers both.
    zoomed to the 1280x800 size it was drawn at, so text and artwork are drawn
    at the real pixel size on a 1080p or 4K set.
 
+## The layout the app expects
+
+The app reads a standard gamepad through the Gamepad API, so the Steam shortcut
+must use a layout that presents the pad as one. The templates that do this are:
+
+1. **Gamepad**
+2. **Gamepad with Joystick Trackpad**
+
+Set either one in Properties → Controller → Controller Layout. The app cannot
+detect or change this setting; Steam owns it per shortcut, and it survives
+updates to the app.
+
 ## Text input in Game Mode
 
 Typing in the login fields with the Steam keyboard doubled every character.
@@ -92,8 +104,8 @@ matters when running the app on Windows during development; the target platform
 ## Recommended setup
 
 1. Add the app to Steam as a non-Steam game.
-2. Properties → Controller → pick the **Gamepad** template. Do not use
-   "Keyboard (WASD) and Mouse" — the app reads a real gamepad, not key presses.
+2. Properties → Controller → pick the **Gamepad** template (or **Gamepad with
+   Joystick Trackpad**). The app reads a real gamepad, not key presses.
 3. Make sure **Enable the Steam Overlay while in-game** is on. Steam Input and
    the on-screen keyboard both depend on the overlay.
 4. Launch from Game Mode.
