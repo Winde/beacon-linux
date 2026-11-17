@@ -323,15 +323,26 @@ Measured 2026-11-17 on C4 E004 (runtime 17842 s), one event per mutation:
 
 So a report lower than the furthest one **its own `sessionId`** has already
 reported is accepted and then dropped, and a new `sessionId` has no such floor:
-its first report may land anywhere. A client that keeps one session id for a
-whole process therefore cannot save a rewind, a rewatch, or a mark that lowers
-the point once it has reported past it — the read stays where it was, with no
-error anywhere.
+its first report may land anywhere.
 
-That is why this client starts a new session whenever a position would go
-backwards (`sessionFor` in `client.ts`), and why a title stuck at a finished
-point on another machine usually clears itself when that machine restarts the
-app: the restart is what makes a new session.
+This is intended, not a client bug: the official app (1.45.0, `EventBatcher`)
+mints **one UUID v4 per run**, in the tracker's constructor, and stamps every
+event with it for the life of the process. It is a singleton
+(`getInstance()` caches the instance), it subscribes to `AppState` once, and it
+never rotates the id on a seek, a replay, or a player open. The furthest point
+of a viewing session is what the account keeps, and a rewind inside that session
+is a temporary move rather than a new saved position.
+
+Consequences for this client, by design:
+
+- a rewatch of a finished title does not lower the account's point until the
+  app is restarted (a new run, a new session) or another device reports under
+  its own session;
+- a watched mark (97%) is a forward report, so it is stored; any later playback
+  below it in the same run is ignored, exactly as the official app's own
+  progress would be;
+- an unwatched mark still works, because `removeContentFromContinueWatching`
+  zeroes the point it names rather than relying on the 1% write.
 
 
 `trackView` success does not prove the point was stored, so the local mark is

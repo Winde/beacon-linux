@@ -1320,61 +1320,6 @@ describe('trackProgress', () => {
     expect(events.map((event) => event.videoProgressSeconds)).toEqual([12, 21])
   })
 
-  it('starts a new Beacon session when playback moves backwards', async () => {
-    const sessions: string[] = []
-    routeCms({
-      [Q.TRACK]: (variables) => {
-        sessions.push(variables.events[0].sessionId)
-        return { trackView: { success: true } }
-      }
-    })
-    const client = new BeaconClient()
-
-    await client.trackProgress('e1', 300, 1200)
-    await client.flushProgress()
-    await client.trackProgress('e1', 900, 1200)
-    await client.flushProgress()
-    // Beacon keeps the furthest point a session has reported and drops a lower
-    // one without saying so, so a rewatch or a rewind needs a new session.
-    await client.trackProgress('e1', 300, 1200)
-    await client.flushProgress()
-
-    expect(sessions).toHaveLength(3)
-    expect(sessions[1]).toBe(sessions[0])
-    expect(sessions[2]).not.toBe(sessions[0])
-    expect(sessions[2]).toMatch(/^linux-/)
-  })
-
-  it('files a mark in a new session when it moves the point backwards', async () => {
-    const sessions: string[] = []
-    routeCms({
-      [Q.PROGRESS_FOR]: () => ({
-        getProgressForContent: {
-          timeMap: [{ contentId: 'e1', videoProgress: 99, videoProgressSeconds: 3290 }]
-        }
-      }),
-      [Q.TRACK]: (variables) => {
-        sessions.push(variables.events[0].sessionId)
-        return { trackView: { success: true } }
-      },
-      [Q.REMOVE_FROM_CONTINUE_WATCHING]: () => ({
-        removeContentFromContinueWatching: { success: true }
-      })
-    })
-    const client = new BeaconClient()
-    client.catalog = fakeCatalog({ videos: [indexedVideo(1)] })
-
-    // This run already reported the closing seconds of the episode.
-    await client.trackProgress('e1', 3290, 3300)
-    await client.flushProgress()
-    // Marking it unwatched puts the point at one second: lower than what the
-    // session reported, so it would be dropped unless it goes out anew.
-    await client.markWatched('c1e1', false)
-
-    expect(sessions).toHaveLength(2)
-    expect(sessions[1]).not.toBe(sessions[0])
-  })
-
   it('sends ten events per mutation and drains the rest', async () => {
     const batches: number[] = []
     routeCms({
