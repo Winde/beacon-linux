@@ -65,6 +65,12 @@ Response is a standard OAuth token body:
 - Accounts that sign in with an emailed link need a password set on beacon.tv first.
 - Only tokens are stored; the password is never persisted.
 
+The official phone app does **not** use the password grant: it runs an OAuth
+authorization-code flow with PKCE in the browser (redirect `tv.beacon.app://`),
+then refreshes with `grant_type=refresh_token`. Access tokens live 15 minutes.
+Our client keeps the password grant, which still works but requires a password
+on the account; see [beacon-app-1.45.0.md](beacon-app-1.45.0.md).
+
 ## 3. GraphQL operations
 
 Fragments used below:
@@ -238,6 +244,28 @@ bars on every device signed in to the account. The client marks an episode only
 when the member asks; finishing one by playback is detected from the progress
 (`videoProgress` plus `videoProgressSeconds` against the runtime).
 
+### Favourites and ratings
+
+Server-side, per member; not to be confused with Continue watching.
+
+```graphql
+query  IsContentFavourite($id: String!) { isContentFavourite: hasContentFavourited(id: $id) }
+query  IsCollectionFavourite($id: String!) { isCollectionFavourite: hasCollectionFavourited(id: $id) }
+
+mutation ToggleContentFavourite($id: String!) {
+  toggleContentFavourite: toggleContentFavourite(id: $id) { success reason isFavourite }
+}
+mutation ToggleCollectionFavourite($id: String!) {
+  toggleCollectionFavourite: toggleCollectionFavouriteEndpoint(id: $id) { success reason isFavourite }
+}
+
+query CurrentRating($id: String!) { currentRating(id: $id) }
+mutation RateContent($id: String!, $rating: Int!) { rateContent(id: $id, rating: $rating) { success } }
+```
+
+`GetFavouritesPage` and `GetUserCollectionFavourites` read the lists back.
+Observed in the official app; see [beacon-app-1.45.0.md](beacon-app-1.45.0.md).
+
 ### Home page
 
 beacon.tv's member home page is a single large query (`MemberHomePage.pageContent`),
@@ -259,8 +287,15 @@ a list of blocks whose shapes vary. Blocks contain arrays under keys like `items
 
 ## 5. Open questions
 
-- Exact queries the official Android TV app (`tv.beacon.ott`) uses — to be confirmed
-  by decompiling the APK.
-- Whether the TV app has a device-code / QR sign-in flow instead of the password grant.
-- Live-event ("waiting room") behaviour.
+- Exact queries the official Android TV app (`tv.beacon.ott`) uses. The phone
+  app (`tv.beacon.app`) has been decompiled — see
+  [beacon-app-1.45.0.md](beacon-app-1.45.0.md) — but the TV app is a separate
+  package and has not been checked.
+- Whether the TV app has a device-code / QR sign-in flow instead of the
+  browser OAuth + PKCE flow the phone app uses.
+- Live-event ("waiting room") behaviour: `getActiveLivestream`,
+  `getLivestreamStatus` and `ContentSync` (with `msUntilLiveSyncEnd`) exist;
+  the timing rules still need a live event to confirm.
 - Downloads / offline playback (mobile app only, per Beacon's release notes).
+- The values the official app sends for `x-platform` and `x-supports-drm`
+  (built at runtime, not string literals in the bundle).
