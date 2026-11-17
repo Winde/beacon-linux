@@ -337,6 +337,10 @@ kbd {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  /* The clamp clips at the content box; at this line-height a font's descenders
+   * sit below it, so "Campaign" lost the tail of its g. Padding gives them room
+   * without loosening the line spacing of a two-line title. */
+  padding-bottom: 0.14em;
 }
 
 .hero__sub {
@@ -735,6 +739,8 @@ kbd {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  /* Same descender room as the hero title: the clamp clips at the content box. */
+  padding-bottom: 0.14em;
 }
 
 .page-head__sub {
