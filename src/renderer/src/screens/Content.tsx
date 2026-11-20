@@ -253,7 +253,13 @@ export function Content({
           <h1 className="page-head__title">{data.title}</h1>
           <p className="page-head__sub">
             {[
-              data.kind === 'audio' ? 'Podcast' : null,
+              data.kind === 'audio'
+                ? 'Podcast'
+                : data.livestream
+                  ? data.live
+                    ? 'Live'
+                    : 'Livestream replay'
+                  : null,
               data.minutes ? `${data.minutes} min` : null,
               data.tier
             ]
@@ -323,9 +329,15 @@ export function Content({
                       ? resuming
                         ? 'Resume'
                         : 'Listen'
-                      : resuming
-                        ? 'Resume'
-                        : 'Play'}
+                      : data.livestream
+                        ? resuming
+                          ? 'Resume'
+                          : data.live
+                            ? 'Watch live'
+                            : 'Play replay'
+                        : resuming
+                          ? 'Resume'
+                          : 'Play'}
                   </button>
                   {seriesAction}
                   {resuming ? (

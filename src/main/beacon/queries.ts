@@ -1,6 +1,6 @@
 /** GraphQL documents used against Beacon's CMS. */
 
-export const PLAYABLE = ['video', 'videoPodcast', 'podcast']
+export const PLAYABLE = ['video', 'videoPodcast', 'podcast', 'livestream']
 
 /** Shared shape for anything that renders as a tile. */
 const CARD = `
@@ -20,6 +20,31 @@ const PODCAST = `
   contentPodcast { podcast { source audio player audioData } }
 `
 
+/**
+ * Beacon uses a JW playlist or a Mux asset, and the editor can switch which
+ * one is current. `currentStream` names the side to use.
+ */
+const LIVESTREAM = `
+  contentLivestream {
+    currentStream
+    player
+    main {
+      relationTo
+      value {
+        ... on MuxAsset { playbackUrl }
+        ... on Video { video videoData closedCaptions }
+      }
+    }
+    fallback {
+      relationTo
+      value {
+        ... on MuxAsset { playbackUrl }
+        ... on Video { video videoData closedCaptions }
+      }
+    }
+  }
+`
+
 export const ME = `
   query { meMember { user { username activeSubscription tier { name planLevel } } } }
 `
@@ -33,8 +58,10 @@ export const CONTENT = `
         continuedSummary
         collections { id name slug isSeries }
         content { ... on SuggestedContent { carouselContent: content { ...Card } } }
+        secondsAfterAvailable
         ${VIDEO}
         ${PODCAST}
+        ${LIVESTREAM}
       }
     }
     currentProgress(slug: $slug) { videoProgress videoProgressSeconds }
@@ -49,8 +76,10 @@ export const MEDIA = `
         id title duration episodeNumber
         primaryCollection { id isSeries }
         thumbnail { sizes { square { url } } }
+        secondsAfterAvailable
         ${VIDEO}
         ${PODCAST}
+        ${LIVESTREAM}
       }
     }
     currentProgress(slug: $slug) { videoProgress videoProgressSeconds }

@@ -131,6 +131,10 @@ export interface ContentData {
   released: string | null
   /** Video wins when it exists; audio is the fallback for podcasts. */
   kind: PlaybackKind
+  /** The page is backed by contentLivestream rather than contentVideo. */
+  livestream: boolean
+  /** Beacon says the livestream is on now; false means a replay. */
+  live: boolean
   /** The collection this video is filed under; the header links to it. */
   series: { slug: string; title: string; isSeries: boolean } | null
   tier: string | null
@@ -157,6 +161,10 @@ export interface PlaybackData {
   title: string
   /** Video when the item has one, otherwise audio. */
   kind: PlaybackKind
+  /** The stream came from contentLivestream (a live event or its replay). */
+  livestream?: boolean
+  /** Beacon's event is on now; false for the replay after it ends. */
+  live?: boolean
   /** Square podcast artwork, for the audio surface. */
   image?: string | null
   image2x?: string | null

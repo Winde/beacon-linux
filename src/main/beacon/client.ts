@@ -2,6 +2,7 @@ import { net } from 'electron'
 import type {
   AuthStatus,
   CachedPages,
+  CaptionTrack,
   Card,
   CollectionData,
   ContentData,
@@ -39,6 +40,38 @@ const CLIENT_ID = '3Wdgxb5im239JhTBhS7KczZn'
 const LEVEL_TTL = 10 * 60 * 1000
 /** How long a screen may wait for progress writes before reading anyway. */
 const REPORT_WAIT = 5_000
+
+interface CmsLivestreamValue {
+  playbackUrl?: string | null
+  video?: string | null
+  videoData?: string | null
+  closedCaptions?: string | null
+}
+
+interface CmsLivestream {
+  currentStream?: string | null
+  main?: { relationTo?: string | null; value?: CmsLivestreamValue | null } | null
+  fallback?: { relationTo?: string | null; value?: CmsLivestreamValue | null } | null
+}
+
+/**
+ * The APK follows `currentStream` and reads either the Mux asset's
+ * `playbackUrl` or the JW video's `video`. An empty side falls back to the
+ * other, because editors switch streams around an event.
+ */
+function livestreamMedia(
+  livestream: CmsLivestream | null | undefined
+): { url: string; captions: CaptionTrack[] } | null {
+  const preferred =
+    livestream?.currentStream === 'fallback' ? livestream.fallback : livestream?.main
+  const other = livestream?.currentStream === 'fallback' ? livestream?.main : livestream?.fallback
+  for (const source of [preferred, other]) {
+    const value = source?.value
+    const url = value?.playbackUrl ?? value?.video
+    if (url) return { url, captions: value ? captionsOf(value) : [] }
+  }
+  return null
+}
 /** The app's own client flushes progress on this interval. */
 const FLUSH_EVERY = 20_000
 /** A CMS or token request that hangs must not hold a screen open forever. */
@@ -857,6 +890,8 @@ export class BeaconClient {
               audioData?: string | null
             } | null
           } | null
+          contentLivestream?: CmsLivestream | null
+          secondsAfterAvailable?: number | null
         })[]
       }
       currentProgress?: { videoProgress?: number; videoProgressSeconds?: number } | null
@@ -871,10 +906,12 @@ export class BeaconClient {
     const { email, marks } = await this.watchMarks()
     const video = doc.contentVideo?.video
     const audio = doc.contentPodcast?.podcast?.audio
-    const playable = Boolean(video?.video || audio)
+    const stream = livestreamMedia(doc.contentLivestream)
+    const playable = Boolean(video?.video || stream || audio)
     // A TV client watches the video when there is one. Audio is the fallback
     // for podcast-only items, not a second mode for a video item.
-    const kind: PlaybackKind = video?.video || !audio ? 'video' : 'audio'
+    const kind: PlaybackKind = video?.video || stream || !audio ? 'video' : 'audio'
+    const live = Boolean(stream) && (doc.secondsAfterAvailable ?? -1) >= 0
     // `primaryCollection` is the editor's main filing, but a few playable docs
     // (one-offs, live-show videos) only carry `collections`. Use the first one
     // as the page's category so those episodes still have an "up" link.
@@ -1007,13 +1044,14 @@ export class BeaconClient {
         id: doc.id,
         title: doc.title,
         kind,
-        image: kind === 'audio' ? img(doc.thumbnail?.sizes?.square?.url, 960) : undefined,
-        image2x: undefined,
-        url: video?.video ?? audio!,
+        livestream: Boolean(stream),
+        live,
+        ...(kind === 'audio' ? { image: img(doc.thumbnail?.sizes?.square?.url, 960) } : {}),
+        url: stream?.url ?? video?.video ?? audio!,
         playlist: null,
         duration: doc.duration ? Math.round(doc.duration / 1000) : null,
         resumeAt,
-        captions: video ? captionsOf(video) : [],
+        captions: stream?.captions ?? (video ? captionsOf(video) : []),
         episodeNumber: doc.episodeNumber ?? null,
         collection: doc.primaryCollection
           ? { id: doc.primaryCollection.id, isSeries: Boolean(doc.primaryCollection.isSeries) }
@@ -1032,6 +1070,8 @@ export class BeaconClient {
       minutes: minutes(doc.duration),
       released: doc.releaseDate ?? null,
       kind,
+      livestream: Boolean(stream),
+      live,
       series: series
         ? { slug: series.slug, title: series.name, isSeries: Boolean(series.isSeries) }
         : null,
@@ -1065,6 +1105,8 @@ export class BeaconClient {
             video?: { video?: string; videoData?: string; closedCaptions?: string } | null
           } | null
           contentPodcast?: { podcast?: { audio?: string | null } | null } | null
+          contentLivestream?: CmsLivestream | null
+          secondsAfterAvailable?: number | null
         }[]
       }
       currentProgress?: { videoProgress?: number; videoProgressSeconds?: number } | null
@@ -1073,8 +1115,10 @@ export class BeaconClient {
     const doc = r.Contents?.docs?.[0]
     const video = doc?.contentVideo?.video
     const audio = doc?.contentPodcast?.podcast?.audio
-    if (!video?.video && !audio) return null
-    const kind: PlaybackKind = video?.video ? 'video' : 'audio'
+    const stream = livestreamMedia(doc?.contentLivestream)
+    if (!video?.video && !stream && !audio) return null
+    const kind: PlaybackKind = video?.video || stream || !audio ? 'video' : 'audio'
+    const live = Boolean(stream) && (doc?.secondsAfterAvailable ?? -1) >= 0
 
     const cp = r.currentProgress
     const runtimeSec = (doc?.duration ?? 0) / 1000
@@ -1088,8 +1132,10 @@ export class BeaconClient {
       id: doc?.id ?? '',
       title: doc?.title ?? '',
       kind,
-      image: kind === 'audio' ? img(doc?.thumbnail?.sizes?.square?.url, 960) : undefined,
-      url: video?.video ?? audio!,
+      livestream: Boolean(stream),
+      live,
+      ...(kind === 'audio' ? { image: img(doc?.thumbnail?.sizes?.square?.url, 960) } : {}),
+      url: stream?.url ?? video?.video ?? audio!,
       playlist: null,
       duration: doc?.duration ? Math.round(doc.duration / 1000) : null,
       resumeAt:
@@ -1099,7 +1145,7 @@ export class BeaconClient {
         !closingStretch(progress * 100, position, runtimeSec, RESUME_SHARE, RESUME_TAIL)
           ? position
           : 0,
-      captions: video ? captionsOf(video) : [],
+      captions: stream?.captions ?? (video ? captionsOf(video) : []),
       episodeNumber: doc?.episodeNumber ?? null,
       collection: doc?.primaryCollection
         ? { id: doc.primaryCollection.id, isSeries: Boolean(doc.primaryCollection.isSeries) }

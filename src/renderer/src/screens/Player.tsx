@@ -625,7 +625,10 @@ export function Player({
       >
         {!audioOnly ? (
           <div className="player__top">
-            <h1 className="player__title">{data?.title ?? ''}</h1>
+            <h1 className="player__title">
+              {data?.title ?? ''}
+              {data?.live ? <span className="player__live">Live</span> : null}
+            </h1>
           </div>
         ) : null}
 

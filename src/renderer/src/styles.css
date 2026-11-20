@@ -1601,6 +1601,21 @@ kbd {
   font-weight: 600;
 }
 
+.player__live {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: #d9364b;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.5;
+  text-transform: uppercase;
+  vertical-align: 2px;
+}
+
 .player__bottom {
   position: relative;
   padding: 30px 44px 38px;

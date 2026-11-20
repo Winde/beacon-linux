@@ -225,6 +225,14 @@ describe('Player', () => {
     expect(screen.getByRole('button', { name: 'Playback speed: 1×' })).toBeDefined()
   })
 
+  it('marks a live stream in the player title', async () => {
+    stubBeaconWith({ ...playback, livestream: true, live: true })
+    render(<Player slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+
+    expect(await screen.findByText('Live')).toBeDefined()
+    expect(screen.getByText('Test Episode')).toBeDefined()
+  })
+
   it('starts a view once and reports only after ten seconds of playback', async () => {
     const progress = vi.fn(() => Promise.resolve(true))
     const start = vi.fn(() => Promise.resolve(true))

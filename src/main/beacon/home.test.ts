@@ -94,6 +94,32 @@ describe('buildHome', () => {
     expect(home.rows).toEqual([])
   })
 
+  it('keeps a livestream card in the Latest carousel', async () => {
+    const home = await buildHome(
+      depsFor(
+        [
+          {
+            __typename: 'LatestCarousel',
+            id: 'latest-block',
+            title: 'Latest Videos',
+            content: [
+              cmsCard({
+                id: 'live1',
+                slug: 'a-live-event',
+                title: 'A Live Event',
+                contentType: 'livestream'
+              })
+            ]
+          }
+        ],
+        []
+      )
+    )
+
+    expect(home.rows[0]).toMatchObject({ id: 'latest-block', kind: 'latest' })
+    expect(home.rows[0].items[0]).toMatchObject({ id: 'live1', title: 'A Live Event' })
+  })
+
   it('renders the Listen carousel with podcast cards', async () => {
     const home = await buildHome(
       depsFor(

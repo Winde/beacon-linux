@@ -19,7 +19,7 @@ describe('query documents', () => {
   })
 
   it('asks only for playable content types in feed queries', () => {
-    expect(Q.PLAYABLE).toEqual(['video', 'videoPodcast', 'podcast'])
+    expect(Q.PLAYABLE).toEqual(['video', 'videoPodcast', 'podcast', 'livestream'])
   })
 
   it.each(documents)('%s is a GraphQL operation', (_name, text) => {

@@ -26,6 +26,8 @@ function contentData(overrides: Partial<ContentData> = {}): ContentData {
     minutes: 55,
     released: '2024-01-01T00:00:00.000Z',
     kind: 'video',
+    livestream: false,
+    live: false,
     series: { slug: 'campaign-1', title: 'Campaign 1', isSeries: true },
     tier: 'Apprentice',
     locked: false,
@@ -243,6 +245,23 @@ describe('Content', () => {
     expect(await screen.findByText(/Podcast/)).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Listen' }))
     expect(onPlay).toHaveBeenCalledWith('c1e5')
+  })
+
+  it('offers Play replay for a livestream that has ended', async () => {
+    const onPlay = vi.fn()
+    stubContent(contentData({ livestream: true, live: false }))
+    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={onPlay} />)
+
+    expect(await screen.findByText(/Livestream replay/)).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+    expect(onPlay).toHaveBeenCalledWith('c1e5')
+  })
+
+  it('offers Watch live while the event is live', async () => {
+    stubContent(contentData({ livestream: true, live: true }))
+    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} />)
+
+    expect(await screen.findByRole('button', { name: 'Watch live' })).toBeDefined()
   })
 
   it('offers Resume and Start over for a started video', async () => {

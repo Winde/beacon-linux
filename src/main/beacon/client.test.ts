@@ -1004,6 +1004,8 @@ describe('play', () => {
       id: 'e1',
       title: 'Episode 1',
       kind: 'video',
+      livestream: false,
+      live: false,
       url: 'https://cdn.jwplayer.com/manifests/abc.m3u8',
       playlist: null,
       duration: 3600,
@@ -1114,6 +1116,41 @@ describe('play', () => {
     await expect(client.play('a-video-podcast')).resolves.toMatchObject({
       kind: 'video',
       url: 'https://cdn.example/video.m3u8'
+    })
+  })
+
+  it('plays a livestream from its current stream and marks it live', async () => {
+    routeCms({
+      [Q.MEDIA]: () => ({
+        Contents: {
+          docs: [
+            {
+              id: 'live1',
+              title: 'A Live Event',
+              duration: 7_200_000,
+              secondsAfterAvailable: 30,
+              contentVideo: null,
+              contentPodcast: null,
+              contentLivestream: {
+                currentStream: 'main',
+                main: { relationTo: 'videos', value: { video: 'https://cdn.example/main.m3u8' } },
+                fallback: {
+                  relationTo: 'mux_assets',
+                  value: { playbackUrl: 'https://stream.example/fallback.m3u8' }
+                }
+              }
+            }
+          ]
+        }
+      })
+    })
+    const client = new BeaconClient()
+
+    await expect(client.play('a-live-event')).resolves.toMatchObject({
+      kind: 'video',
+      livestream: true,
+      live: true,
+      url: 'https://cdn.example/main.m3u8'
     })
   })
 

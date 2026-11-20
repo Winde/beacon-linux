@@ -6,7 +6,10 @@ import { displayTitle, imageUrl as img } from './text'
 export const minutes = (ms?: number | null): number | null =>
   ms ? Math.max(1, Math.round(ms / 60000)) : null
 
-export function captionsOf(video: { videoData?: string; closedCaptions?: string }): CaptionTrack[] {
+export function captionsOf(video: {
+  videoData?: string | null
+  closedCaptions?: string | null
+}): CaptionTrack[] {
   const out: CaptionTrack[] = []
   try {
     const data = JSON.parse(video.videoData || '{}') as {

@@ -103,7 +103,8 @@ Build, test and release commands are under [Development](#development).
 ## Status
 
 Working end to end: sign-in, home, browse, series, episode pages, search, favourites,
-and video or audio playback with resume, progress sync and next-episode autoplay. Verified on
+video or audio playback with resume, progress sync and next-episode autoplay, and
+livestream replays. Verified on
 SteamOS in Game Mode with a real Steam Controller, using one of the layouts under
 [Controller layout](#controller-layout-one-time). Watch progress is flushed when
 the machine suspends.
@@ -174,6 +175,14 @@ Videos, Latest Podcast — in the order the editors set. Blocks the client canno
 block, and a block the client has no fragment for is skipped without taking the
 page down. `ListenCarousel` is rendered as a **Latest Podcast** shelf; article
 blocks are still skipped until there is a reader.
+
+### Livestreams
+
+A `contentType: livestream` item plays from `contentLivestream`, following
+Beacon's `currentStream` and falling back to the other source if the chosen one
+is empty. This works for an event that has ended, shown as a **Livestream
+replay**; the waiting room and live-edge sync for a future/current event are not
+implemented yet.
 
 ### Audio
 

@@ -343,6 +343,11 @@ Beyond `x-has-waiting-room`, the app has:
 start and stop live playback; that is the waiting-room behaviour our notes
 list as unknown, and it is worth a follow-up with a live event.
 
+The livestream source is `contentLivestream`: `currentStream` names `main` or
+`fallback`, and each relation is either a Mux asset (`playbackUrl`) or a JW
+video (`video`). The client now follows that selection for replay and playback;
+`Content(id)` supplies `secondsAfterAvailable` once a real event is live.
+
 ### 3.10 Account features on the member API
 
 The app also uses `MeMember`-adjacent operations the client still does not touch:

@@ -28,6 +28,8 @@ function content(slug: string): ContentData {
     minutes: null,
     released: null,
     kind: 'video',
+    livestream: false,
+    live: false,
     series: null,
     tier: null,
     locked: false,

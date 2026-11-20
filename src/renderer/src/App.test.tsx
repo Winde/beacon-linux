@@ -61,6 +61,8 @@ const EPISODE: ContentData = {
   minutes: 55,
   released: null,
   kind: 'video',
+  livestream: false,
+  live: false,
   series: { slug: 'campaign-1', title: 'Campaign 1', isSeries: true },
   tier: 'Apprentice',
   locked: false,
