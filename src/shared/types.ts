@@ -42,6 +42,8 @@ export interface Card {
   minutes?: number | null
   /** series only */
   count?: number | null
+  /** series only; Beacon's collection release date, used by the Browse sort */
+  released?: string | null
   /** true when the account's tier is too low for this item */
   locked?: boolean
   /** 0..1 watch progress, video only */

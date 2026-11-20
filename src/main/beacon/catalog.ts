@@ -268,11 +268,14 @@ export class Catalog implements CatalogLike {
     // collectionSearch skips some series; the filter lists have them all, but
     // without pictures, so those borrow the picture of their newest video.
     const lists = await this.client.gql<{
-      series?: { docs?: { id: string; name: string; slug: string }[] }
-      other?: { docs?: { id: string; name: string; slug: string }[] }
+      series?: { docs?: { id: string; name: string; slug: string; releaseDate?: string | null }[] }
+      other?: { docs?: { id: string; name: string; slug: string; releaseDate?: string | null }[] }
     }>(ALL_COLLECTIONS)
 
-    const groups: [{ id: string; name: string; slug: string }[], boolean][] = [
+    const groups: [
+      { id: string; name: string; slug: string; releaseDate?: string | null }[],
+      boolean
+    ][] = [
       [lists.series?.docs ?? [], true],
       [lists.other?.docs ?? [], false]
     ]
@@ -287,7 +290,10 @@ export class Catalog implements CatalogLike {
           name: doc.name,
           isSeries,
           itemCount: own.length,
-          released: own[0].released,
+          // Match the official list: the collection's own release date, not its
+          // newest episode. The fallback only matters for the few series that
+          // collectionSearch omits.
+          released: doc.releaseDate ?? own[0].released,
           image: own[0].image,
           image2x: own[0].image2x,
           portrait: null

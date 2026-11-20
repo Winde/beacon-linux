@@ -133,7 +133,8 @@ describe('card mapping', () => {
       title: 'Previously On...',
       image: 'https://images.example/portrait/format=auto,width=480',
       image2x: null,
-      count: 5
+      count: 5,
+      released: null
     })
   })
 

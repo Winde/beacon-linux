@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Card } from '@shared/types'
 import { useAsync } from '../lib/useAsync'
+import { BROWSE_SORTS, sortBrowseCards, type BrowseSort } from '../lib/browse'
 import { focusFirst } from '../nav/focus'
 import { ScreenScroll } from '../components/ScreenScroll'
 import { Tile } from '../components/Tile'
@@ -21,13 +22,18 @@ interface BrowseProps {
 export function Browse({ onOpen }: BrowseProps): React.JSX.Element | null {
   const { data, error, loading } = useAsync(() => window.beacon.catalog.browse(), [])
   const [chosen, setChosen] = useState<Tab | null>(null)
+  // Beacon's own Series and Collections lists open on Newest First.
+  const [sort, setSort] = useState<BrowseSort>('newest')
   const placed = useRef(false)
 
   const both = Boolean(data?.series.length && data?.collections.length)
   // A missing group must not leave the screen on an empty tab; the viewer can
   // still switch once the other one has something in it.
   const active: Tab = chosen ?? (data && !data.series.length ? 'collections' : 'series')
-  const items = active === 'series' ? (data?.series ?? []) : (data?.collections ?? [])
+  const items = useMemo(() => {
+    const source = active === 'series' ? (data?.series ?? []) : (data?.collections ?? [])
+    return sortBrowseCards(source, sort)
+  }, [active, data, sort])
 
   useEffect(() => {
     if (!data || placed.current) return
@@ -79,6 +85,26 @@ export function Browse({ onOpen }: BrowseProps): React.JSX.Element | null {
               onClick={() => setChosen(tab)}
             >
               {tab === 'series' ? 'Series' : 'Collections'}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {data.series.length || data.collections.length ? (
+        <div className="tabs" role="group" aria-label="Sort" data-focus-row>
+          <span className="tabs__label">Sort</span>
+          {BROWSE_SORTS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`tab${sort === option.value ? ' is-active' : ''}`}
+              data-focus
+              tabIndex={-1}
+              aria-pressed={sort === option.value}
+              title={option.title}
+              onClick={() => setSort(option.value)}
+            >
+              {option.label}
             </button>
           ))}
         </div>

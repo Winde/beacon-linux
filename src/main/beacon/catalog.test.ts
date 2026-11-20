@@ -29,6 +29,7 @@ interface Doc {
   id: string
   name: string
   slug: string
+  releaseDate?: string | null
 }
 
 interface Call {
@@ -199,6 +200,27 @@ describe('Catalog', () => {
       itemCount: 2,
       image: 'https://images.example/s1/landscape/format=auto',
       portrait: 'https://images.example/s1/portrait/format=auto'
+    })
+  })
+
+  it('keeps the collection release date for a series missing from collectionSearch', async () => {
+    const { client } = fakeClient({
+      videos: [rawVideo(1)],
+      series: [
+        {
+          id: 's1',
+          name: 'Campaign 1',
+          slug: 'campaign-1',
+          releaseDate: '2020-02-03T00:00:00.000Z'
+        }
+      ]
+    })
+    const catalog = new Catalog(client)
+
+    await catalog.ensure()
+
+    expect(catalog.collectionBySlug('campaign-1')).toMatchObject({
+      released: '2020-02-03T00:00:00.000Z'
     })
   })
 

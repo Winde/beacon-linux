@@ -130,12 +130,13 @@ mutation ToggleContentFavourite($id: String!) {
 query { favourited: favouriteCollections ... }   # GetUserCollectionFavourites / GetFavouritesPage
 ```
 
-This is not the same feature as a watchlist: favourites are for series and
-collections you follow, and there is no "saved episodes" list. The client used
-to keep a local watchlist; it now uses these favourites for series and
-collections, and no longer saves individual episodes. That makes saved shows
-visible on beacon.tv and in the app, and removes the device-local list and its
-sign-out prompt.
+This is not the same feature as a watchlist. The app can favourite both
+collections/series and individual content (`hasContentFavourited` /
+`toggleContentFavourite`), but there is no "saved episodes" list. This client
+uses collection favourites only; it does not expose content favourites yet.
+The client used to keep a local watchlist; it now uses these favourites for
+series and collections. That makes saved shows visible on beacon.tv and in the
+app, and removes the device-local list and its sign-out prompt.
 
 The one local part left is where the Favourites row sits on Home
 (`preferences.json`), because that is layout, not account data. Verified live
@@ -351,8 +352,22 @@ The app also uses `MeMember`-adjacent operations the client still does not touch
 `GetMembershipPlans`, `GetAccessTiers`, `GetJoinPage`, `GetJoinBeaconContent`,
 `GetLockedContentPrompt` (with an `appOnly` variant), `GetContactPage` and
 `SubmitForm`. `GetFavouritesPage` is the list the client already reads through
-`userCollectionFavourites`. Ratings are the only remaining one that would change
-how a screen behaves.
+`userCollectionFavourites`. `GetContentRating` / `RateContent` are defined, but
+no screen in this bundle uses them, so ratings are not a visible feature.
+
+### 3.11 The Series and Collections lists are sortable
+
+The app's bottom tabs are Home, Series, Collections and Downloads. The Series
+and Collections screens read `collectionSearch` and start with `-releaseDate`;
+their sort control offers Newest First / Oldest First / A-Z / Z-A. The same
+`getOrderSelectOptions` helper is used for content grids, with `order:` sorts
+such as `-releaseDate` and `-aggregateEpisodeNumber`.
+
+`Collection.releaseDate` is the collection record's own date, not its newest
+episode: measured live on 2026-11-20, all 38 collections with both values had a
+newer episode than the stored `releaseDate`. `updatedAt` is CMS edit time, not
+episode release. Our Browse now matches the app by sorting on `releaseDate`;
+if "latest episode" is wanted later, the local index already has the dates.
 
 ## 4. Smaller things worth knowing
 
@@ -424,7 +439,9 @@ how a screen behaves.
   answers by `x-platform`; only DRM is left to check.
 - Whether `tv.beacon.ott` (Android TV) uses the same OAuth flow, a device
   code, or a QR hand-off. This XAPK is the phone app.
-- Download/offline playback: not present in this bundle.
+- Download/offline playback: present in the phone app (a full Downloads tab
+  with quality, Wi-Fi-only, storage and licence/expiry handling). The Android
+  TV package's support is still unchecked.
 - Whether `x-supports-drm: true` on Android yields Widevine for the app; we
   stay on `false` and plain HLS, which is what our client relies on.
 

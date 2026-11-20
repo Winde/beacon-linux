@@ -43,7 +43,7 @@ export interface IndexedCollection {
  * Bumped when the stored shape changes; a cache without the current version is
  * rebuilt rather than read.
  */
-export const CATALOG_VERSION = 2
+export const CATALOG_VERSION = 3
 
 export interface CatalogSnapshot {
   version: number

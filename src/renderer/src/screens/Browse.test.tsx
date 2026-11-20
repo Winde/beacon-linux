@@ -13,7 +13,7 @@ afterEach(() => {
   vi.mocked(focusFirst).mockClear()
 })
 
-function card(slug: string, title: string): Card {
+function card(slug: string, title: string, released: string | null = null): Card {
   return {
     kind: 'series',
     id: slug,
@@ -21,7 +21,8 @@ function card(slug: string, title: string): Card {
     title,
     image: `https://images.example/${slug}/format=auto`,
     image2x: null,
-    count: 12
+    count: 12,
+    released
   }
 }
 
@@ -70,6 +71,34 @@ describe('Browse', () => {
     expect(screen.getByRole('tab', { name: 'Collections' }).getAttribute('aria-selected')).toBe(
       'true'
     )
+  })
+
+  it('sorts by collection release date and can switch the order', async () => {
+    stubBrowse({
+      series: [
+        card('old', 'Old Show', '2024-01-01T00:00:00.000Z'),
+        card('new', 'New Show', '2026-01-01T00:00:00.000Z'),
+        card('mid', 'Mid Show', '2025-01-01T00:00:00.000Z')
+      ],
+      collections: []
+    })
+    const { container } = render(<Browse onOpen={vi.fn()} />)
+
+    await screen.findByText('New Show')
+    const titles = (): (string | null)[] =>
+      [...container.querySelectorAll('.grid .tile__title')].map((el) => el.textContent)
+
+    expect(titles()).toEqual(['New Show', 'Mid Show', 'Old Show'])
+    expect(screen.getByRole('button', { name: 'Newest' }).getAttribute('aria-pressed')).toBe('true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'A-Z' }))
+    expect(titles()).toEqual(['Mid Show', 'New Show', 'Old Show'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Oldest' }))
+    expect(titles()).toEqual(['Old Show', 'Mid Show', 'New Show'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Z-A' }))
+    expect(titles()).toEqual(['Old Show', 'New Show', 'Mid Show'])
   })
 
   it('focuses the tabs when both groups have something', async () => {

@@ -174,6 +174,13 @@ Videos — in the order the editors set. Blocks the client cannot use on a TV
 block, and a block the client has no fragment for is skipped without taking the
 page down.
 
+### Browse
+
+Browse lists every series and collection in the index, split into the two tabs
+Beacon files them under. Both open on **Newest**, ordered by the collection's
+release date from Beacon, and the sort row switches to **Oldest**, **A-Z** or
+**Z-A**.
+
 ### Favourites
 
 Favourites are Beacon's, not ours. Series and collections can be favourited
@@ -192,7 +199,8 @@ Items are hydrated from the local catalog index each launch, which keeps titles
 and artwork current. Nothing is cached for an offline session: with no account,
 or no network, there is no favourites row.
 
-Episodes have no favourite of their own, so an episode page offers no button;
+Beacon also records a favourite on individual videos. This client only surfaces
+series and collection favourites today, so an episode page offers no button;
 favourite the series instead. Signing out leaves the account's favourites
 untouched.
 

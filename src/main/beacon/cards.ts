@@ -91,7 +91,8 @@ export function seriesCard(c: CmsCollection): Card {
     title: c.name,
     image: img(c.thumbnail?.sizes?.landscape?.url ?? c.thumbnail?.sizes?.portrait?.url, 480),
     image2x: img(c.thumbnail?.sizes?.landscape2x?.url, 480),
-    count: c.itemCount ?? null
+    count: c.itemCount ?? null,
+    released: c.releaseDate ?? null
   }
 }
 
@@ -104,7 +105,8 @@ export function indexedCollectionCard(c: IndexedCollection): Card {
     title: c.name,
     image: img(c.image ?? c.portrait, 480),
     image2x: img(c.image2x, 480),
-    count: c.itemCount
+    count: c.itemCount,
+    released: c.released
   }
 }
 

@@ -905,6 +905,14 @@ kbd {
   display: none;
 }
 
+.tabs__label {
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding-right: 2px;
+}
+
 .tab {
   padding: 9px 18px;
   border-radius: 999px;

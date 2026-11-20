@@ -85,8 +85,12 @@ export const COLLECTIONS = `
 
 export const ALL_COLLECTIONS = `
   query {
-    series: Collections(where: { isSeries: { equals: true } }, limit: 1000) { docs { id name slug } }
-    other: Collections(where: { isSeries: { not_equals: true } }, limit: 1000) { docs { id name slug } }
+    series: Collections(where: { isSeries: { equals: true } }, limit: 1000) {
+      docs { id name slug releaseDate }
+    }
+    other: Collections(where: { isSeries: { not_equals: true } }, limit: 1000) {
+      docs { id name slug releaseDate }
+    }
   }
 `
 
