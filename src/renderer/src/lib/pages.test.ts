@@ -27,6 +27,7 @@ function content(slug: string): ContentData {
     image2x: null,
     minutes: null,
     released: null,
+    kind: 'video',
     series: null,
     tier: null,
     locked: false,

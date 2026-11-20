@@ -6,7 +6,7 @@ import type { CachedPages, CollectionData, ContentData } from '@shared/types'
  * Bump when CollectionData or ContentData changes shape. An older file is
  * dropped, not read: a page painted from the wrong shape is worse than a load.
  */
-const PAGE_STORE_VERSION = 1
+const PAGE_STORE_VERSION = 2
 
 /**
  * The file size is the real bound; the per-kind count only stops a pathological
@@ -108,6 +108,7 @@ function isContentData(value: unknown): value is ContentData {
     isImage(value['image2x']) &&
     (value['minutes'] === null || typeof value['minutes'] === 'number') &&
     (value['released'] === null || typeof value['released'] === 'string') &&
+    (value['kind'] === 'video' || value['kind'] === 'audio') &&
     seriesOk &&
     (value['tier'] === null || typeof value['tier'] === 'string') &&
     typeof value['locked'] === 'boolean' &&

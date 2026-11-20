@@ -25,6 +25,7 @@ function contentData(overrides: Partial<ContentData> = {}): ContentData {
     image2x: 'https://images.example/wide/format=auto',
     minutes: 55,
     released: '2024-01-01T00:00:00.000Z',
+    kind: 'video',
     series: { slug: 'campaign-1', title: 'Campaign 1', isSeries: true },
     tier: 'Apprentice',
     locked: false,
@@ -232,6 +233,16 @@ describe('Content', () => {
 
     expect(onPlay).toHaveBeenCalledWith('c1e5')
     expect(screen.queryByText('Start over')).toBeNull()
+  })
+
+  it('offers Listen for an audio-only podcast', async () => {
+    const onPlay = vi.fn()
+    stubContent(contentData({ kind: 'audio' }))
+    render(<Content slug="c1e5" onOpen={vi.fn()} onPlay={onPlay} />)
+
+    expect(await screen.findByText(/Podcast/)).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Listen' }))
+    expect(onPlay).toHaveBeenCalledWith('c1e5')
   })
 
   it('offers Resume and Start over for a started video', async () => {

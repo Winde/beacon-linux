@@ -85,11 +85,13 @@ export function registerIpc(): void {
     if (!cached) return null
     // play() may hand back a cached object; keep per-open state out of it.
     const data: PlaybackData = { ...cached, playlist: null }
-    try {
-      data.playlist = await fetchMasterPlaylist(data.url)
-    } catch {
-      // Serve the original playlist; the player still works, just starts softer.
-      data.playlist = null
+    if (data.kind === 'video') {
+      try {
+        data.playlist = await fetchMasterPlaylist(data.url)
+      } catch {
+        // Serve the original playlist; the player still works, just starts softer.
+        data.playlist = null
+      }
     }
     return data
   })

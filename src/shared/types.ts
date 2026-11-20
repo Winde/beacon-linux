@@ -53,7 +53,7 @@ export interface Card {
 }
 
 /** What a shelf is for; the server id below is its identity. */
-export type HomeRowKind = 'continue' | 'featured' | 'series' | 'latest' | 'favourites'
+export type HomeRowKind = 'continue' | 'featured' | 'series' | 'latest' | 'listen' | 'favourites'
 
 export interface Row {
   title: string
@@ -115,6 +115,9 @@ export interface CaptionTrack {
   url: string
 }
 
+/** What the player has to draw: a video surface, or audio with artwork. */
+export type PlaybackKind = 'video' | 'audio'
+
 export interface ContentData {
   id: string
   slug: string
@@ -126,6 +129,8 @@ export interface ContentData {
   image2x: string | null
   minutes: number | null
   released: string | null
+  /** Video wins when it exists; audio is the fallback for podcasts. */
+  kind: PlaybackKind
   /** The collection this video is filed under; the header links to it. */
   series: { slug: string; title: string; isSeries: boolean } | null
   tier: string | null
@@ -150,6 +155,11 @@ export interface WatchState {
 export interface PlaybackData {
   id: string
   title: string
+  /** Video when the item has one, otherwise audio. */
+  kind: PlaybackKind
+  /** Square podcast artwork, for the audio surface. */
+  image?: string | null
+  image2x?: string | null
   /** HLS master playlist URL as Beacon returned it */
   url: string
   /**

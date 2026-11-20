@@ -310,6 +310,8 @@ export function Player({
       ]
     : []
 
+  const audioOnly = data?.kind === 'audio'
+
   const audioOptions: MenuOption[] = audioTracks.map((name, index) => ({
     key: `audio-${index}`,
     label: name,
@@ -376,10 +378,12 @@ export function Player({
     closePanel()
   }
 
-  const barOrder: BarId[] = ['exit', 'play', 'subtitles']
-  if (audioTracks.length > 1) barOrder.push('audio')
-  if (levels.length && !qualityFixed) barOrder.push('quality')
-  barOrder.push('speed', 'fullscreen')
+  const barOrder: BarId[] = ['exit', 'play']
+  if (!audioOnly) barOrder.push('subtitles')
+  if (!audioOnly && audioTracks.length > 1) barOrder.push('audio')
+  if (!audioOnly && levels.length && !qualityFixed) barOrder.push('quality')
+  barOrder.push('speed')
+  if (!audioOnly) barOrder.push('fullscreen')
 
   const moveBar = (delta: number): void => {
     const index = Math.max(0, barOrder.indexOf(barFocus))
@@ -571,7 +575,12 @@ export function Player({
     <div className="player" onPointerMove={poke}>
       {/* The caption track below is added only when the member picks one. */}
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <video ref={videoRef} className="player__video" playsInline onClick={togglePlay}>
+      <video
+        ref={videoRef}
+        className={`player__video${audioOnly ? ' player__video--audio' : ''}`}
+        playsInline
+        onClick={togglePlay}
+      >
         {captionUrl ? (
           <track
             key={captionUrl}
@@ -582,6 +591,22 @@ export function Player({
           />
         ) : null}
       </video>
+
+      {audioOnly ? (
+        <div className="player__audio" data-testid="audio-player">
+          <div className="player__audio-art">
+            {data?.image ? (
+              <img src={data.image} alt="" draggable={false} />
+            ) : (
+              <div className="player__audio-art-empty" aria-hidden />
+            )}
+          </div>
+          <div className="player__audio-meta">
+            <span className="player__audio-kicker">Beacon podcast</span>
+            <h2 className="player__audio-title">{data?.title}</h2>
+          </div>
+        </div>
+      ) : null}
 
       {!data && !error ? (
         <div className="player__center">
@@ -595,10 +620,14 @@ export function Player({
         </div>
       ) : null}
 
-      <div className={`player__chrome${showControls ? ' is-visible' : ''}`}>
-        <div className="player__top">
-          <h1 className="player__title">{data?.title ?? ''}</h1>
-        </div>
+      <div
+        className={`player__chrome${showControls ? ' is-visible' : ''}${audioOnly ? ' player__chrome--audio' : ''}`}
+      >
+        {!audioOnly ? (
+          <div className="player__top">
+            <h1 className="player__title">{data?.title ?? ''}</h1>
+          </div>
+        ) : null}
 
         <div className="player__bottom">
           {panel ? (
@@ -673,29 +702,33 @@ export function Player({
             </div>
 
             <div className="player__group player__group--right">
-              <button
-                type="button"
-                ref={(element) => {
-                  anchorRefs.current.subtitles = element
-                }}
-                className={`player__control${focused('subtitles')}${captionsOn ? ' is-active' : ''}`}
-                tabIndex={-1}
-                aria-haspopup="menu"
-                aria-expanded={panel === 'subtitles'}
-                aria-label={captionsOn ? `Subtitles: ${caption?.label ?? 'on'}` : 'Subtitles: off'}
-                title="Subtitles"
-                onClick={() => {
-                  setBarFocus('subtitles')
-                  openPanel('subtitles')
-                }}
-              >
-                <ClosedCaptionsTagSolid width={24} height={24} strokeWidth={1.8} aria-hidden />
-                <span className="player__control-value">
-                  {captionsOn ? (caption?.label ?? 'On') : 'Subtitles'}
-                </span>
-              </button>
+              {!audioOnly ? (
+                <button
+                  type="button"
+                  ref={(element) => {
+                    anchorRefs.current.subtitles = element
+                  }}
+                  className={`player__control${focused('subtitles')}${captionsOn ? ' is-active' : ''}`}
+                  tabIndex={-1}
+                  aria-haspopup="menu"
+                  aria-expanded={panel === 'subtitles'}
+                  aria-label={
+                    captionsOn ? `Subtitles: ${caption?.label ?? 'on'}` : 'Subtitles: off'
+                  }
+                  title="Subtitles"
+                  onClick={() => {
+                    setBarFocus('subtitles')
+                    openPanel('subtitles')
+                  }}
+                >
+                  <ClosedCaptionsTagSolid width={24} height={24} strokeWidth={1.8} aria-hidden />
+                  <span className="player__control-value">
+                    {captionsOn ? (caption?.label ?? 'On') : 'Subtitles'}
+                  </span>
+                </button>
+              ) : null}
 
-              {audioTracks.length > 1 ? (
+              {!audioOnly && audioTracks.length > 1 ? (
                 <button
                   type="button"
                   ref={(element) => {
@@ -716,7 +749,7 @@ export function Player({
                 </button>
               ) : null}
 
-              {levels.length ? (
+              {!audioOnly && levels.length ? (
                 <button
                   type="button"
                   ref={(element) => {
@@ -760,20 +793,22 @@ export function Player({
                 <span className="player__control-value">{speedLabel(speed)}</span>
               </button>
 
-              <button
-                type="button"
-                className={`player__control player__control--icon${focused('fullscreen')}`}
-                tabIndex={-1}
-                aria-label="Fullscreen"
-                title="Fullscreen"
-                onClick={() => {
-                  setBarFocus('fullscreen')
-                  setFocusBar(true)
-                  window.beacon.app.toggleFullscreen()
-                }}
-              >
-                <Maximize width={24} height={24} strokeWidth={1.8} aria-hidden />
-              </button>
+              {!audioOnly ? (
+                <button
+                  type="button"
+                  className={`player__control player__control--icon${focused('fullscreen')}`}
+                  tabIndex={-1}
+                  aria-label="Fullscreen"
+                  title="Fullscreen"
+                  onClick={() => {
+                    setBarFocus('fullscreen')
+                    setFocusBar(true)
+                    window.beacon.app.toggleFullscreen()
+                  }}
+                >
+                  <Maximize width={24} height={24} strokeWidth={1.8} aria-hidden />
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

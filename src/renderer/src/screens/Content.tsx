@@ -252,7 +252,13 @@ export function Content({
           ) : null}
           <h1 className="page-head__title">{data.title}</h1>
           <p className="page-head__sub">
-            {[data.minutes ? `${data.minutes} min` : null, data.tier].filter(Boolean).join(' · ')}
+            {[
+              data.kind === 'audio' ? 'Podcast' : null,
+              data.minutes ? `${data.minutes} min` : null,
+              data.tier
+            ]
+              .filter(Boolean)
+              .join(' · ')}
           </p>
           {description || canExpand ? (
             <div className="page-head__summary">
@@ -313,7 +319,13 @@ export function Content({
                     tabIndex={-1}
                     onClick={() => onPlay(slug)}
                   >
-                    {resuming ? 'Resume' : 'Play'}
+                    {data.kind === 'audio'
+                      ? resuming
+                        ? 'Resume'
+                        : 'Listen'
+                      : resuming
+                        ? 'Resume'
+                        : 'Play'}
                   </button>
                   {seriesAction}
                   {resuming ? (

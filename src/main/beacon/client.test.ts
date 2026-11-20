@@ -1003,6 +1003,7 @@ describe('play', () => {
     expect(playback).toEqual({
       id: 'e1',
       title: 'Episode 1',
+      kind: 'video',
       url: 'https://cdn.jwplayer.com/manifests/abc.m3u8',
       playlist: null,
       duration: 3600,
@@ -1067,7 +1068,56 @@ describe('play', () => {
     await expect(client.play('c1e1')).resolves.toMatchObject({ captions: [] })
   })
 
-  it('returns null when there is no video', async () => {
+  it('falls back to audio when the podcast has no video', async () => {
+    routeCms({
+      [Q.MEDIA]: () => ({
+        Contents: {
+          docs: [
+            {
+              id: 'p1',
+              title: 'A Podcast',
+              duration: 300_000,
+              contentVideo: null,
+              contentPodcast: { podcast: { audio: 'https://cdn.example/audio.m3u8' } }
+            }
+          ]
+        }
+      })
+    })
+    const client = new BeaconClient()
+
+    await expect(client.play('a-podcast')).resolves.toMatchObject({
+      kind: 'audio',
+      url: 'https://cdn.example/audio.m3u8',
+      captions: []
+    })
+  })
+
+  it('prefers video when a videoPodcast carries both sources', async () => {
+    routeCms({
+      [Q.MEDIA]: () => ({
+        Contents: {
+          docs: [
+            {
+              id: 'vp1',
+              title: 'A Video Podcast',
+              duration: 300_000,
+              contentVideo: { video: { video: 'https://cdn.example/video.m3u8' } },
+              contentPodcast: { podcast: { audio: 'https://cdn.example/audio.m3u8' } }
+            }
+          ]
+        }
+      })
+    })
+    const client = new BeaconClient()
+
+    await expect(client.play('a-video-podcast')).resolves.toMatchObject({
+      kind: 'video',
+      url: 'https://cdn.example/video.m3u8'
+    })
+  })
+
+  it('returns null when there is no playable media', async () => {
     routeCms({ [Q.MEDIA]: () => ({ Contents: { docs: [] } }) })
     const client = new BeaconClient()
 

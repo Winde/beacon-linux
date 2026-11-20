@@ -163,6 +163,19 @@ export async function buildHome(deps: HomeDependencies): Promise<HomeData> {
         }
         break
       }
+
+      case 'ListenCarousel': {
+        const items = blockCards(block.content, level)
+        if (items.length) {
+          rows.push({
+            id: block.id ?? 'listen',
+            kind: 'listen',
+            title: block.title || 'Listen',
+            items
+          })
+        }
+        break
+      }
     }
   }
 

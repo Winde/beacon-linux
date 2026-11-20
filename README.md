@@ -103,7 +103,7 @@ Build, test and release commands are under [Development](#development).
 ## Status
 
 Working end to end: sign-in, home, browse, series, episode pages, search, favourites,
-and video playback with resume, progress sync and next-episode autoplay. Verified on
+and video or audio playback with resume, progress sync and next-episode autoplay. Verified on
 SteamOS in Game Mode with a real Steam Controller, using one of the layouts under
 [Controller layout](#controller-layout-one-time). Watch progress is flushed when
 the machine suspends.
@@ -136,9 +136,9 @@ In the player, ↑/↓ (or Y/Start) reaches the controls, where ←/→ moves be
 them. While the bar is unfocused, ←/→ seek. When paused, ↑ goes instead to the
 progress bar: ←/→ move the seek marker and A/Enter jumps to that time. Press
 A/Enter again without moving the marker to play from there. ↓ leaves the
-scrubber for the controls. The bar has subtitles, audio track, quality, playback
-speed and fullscreen; a chosen subtitle language is remembered for the next
-video.
+scrubber for the controls. For video, the bar has subtitles, audio track,
+quality, playback speed and fullscreen; a chosen subtitle language is remembered
+for the next video. Audio-only podcasts keep play, seek and speed.
 
 ## How it works
 
@@ -169,10 +169,18 @@ goes, is in [docs/startup.md](docs/startup.md).
 
 Home is Beacon's own editorial page: `MemberHomePage.pageContent` supplies the
 hero and the shelves — Featured, Continue watching, Watch by Series, Latest
-Videos — in the order the editors set. Blocks the client cannot use on a TV
-(articles, audio for now) are filtered out, `excludedPlatforms` is honoured per
+Videos, Latest Podcast — in the order the editors set. Blocks the client cannot use on a TV
+(articles for now) are filtered out, `excludedPlatforms` is honoured per
 block, and a block the client has no fragment for is skipped without taking the
-page down.
+page down. `ListenCarousel` is rendered as a **Latest Podcast** shelf; article
+blocks are still skipped until there is a reader.
+
+### Audio
+
+Podcast-only items (`contentType: podcast`) play from the `contentPodcast` HLS
+stream. The player keeps the same controls, resume point and progress reporting,
+and shows the square podcast artwork in place of the video. A `videoPodcast`
+always plays its video; the client does not offer an audio-only switch.
 
 ### Browse
 

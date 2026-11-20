@@ -5,6 +5,7 @@ export interface CmsThumb {
     landscape?: { url?: string } | null
     landscape2x?: { url?: string } | null
     portrait?: { url?: string } | null
+    square?: { url?: string } | null
   } | null
 }
 

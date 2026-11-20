@@ -277,7 +277,7 @@ is the recommendation behind it.
 | `contentVisibleAt`, `msUntilVisible` | `contentVisibleAt` set on 43 docs, all past except the CMS test doc `coming-soon-test` (visible 2035). Search still returns not-yet-visible docs. | **Not yet** — a future value is not treated as unplayable. |
 | `comingSoonTagDate` | The card badge date, 15 minutes before `contentVisibleAt` (e.g. 01:45 for a 02:00 release); all in the past right now. | **Not yet** — there is no "Coming soon" badge. |
 | `contentLivestream` | Present on every doc, but `currentStream`, `main` and `fallback` are null on everything sampled; `enableMonitoring: true` and a JW `player` URL are always set. No `livestream` docs exist today. | **Not yet** — live events are the remaining roadmap item. Presence is not a signal; use `contentType: livestream` + `currentStream`, then read `main`/`fallback` `MuxAsset.playbackUrl`. |
-| `contentPodcast` | 990 `videoPodcast` docs also have `contentVideo`; 93 `podcast` docs are audio-only (`audio` HLS + podcast `player`). | **Not yet** — only needed for audio playback. |
+| `contentPodcast` | 990 `videoPodcast` docs also have `contentVideo`; 93 `podcast` docs are audio-only (`audio` HLS + podcast `player`). | **Used** — audio-only podcasts play from `contentPodcast.podcast.audio`; `videoPodcast` still plays video first. |
 | `freeContent` | Empty `[]` on every sample, Free and Member tier alike. | **No** |
 | `tags` | 8 of 300 recent docs. | **No** |
 | `thumbnail.sizes.square` / `portrait`, `podcastThumbnail` | Square and portrait exist on all 1,759 docs. | **Partly** — collections use portrait; the TV grid stays on `landscape`/`landscape2x`, and square is unused. |

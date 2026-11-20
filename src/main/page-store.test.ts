@@ -37,6 +37,7 @@ function content(slug: string, description = ''): ContentData {
     image2x: null,
     minutes: 55,
     released: null,
+    kind: 'video',
     series: { slug: 'campaign-1', title: 'Campaign 1', isSeries: true },
     tier: 'Apprentice',
     locked: false,

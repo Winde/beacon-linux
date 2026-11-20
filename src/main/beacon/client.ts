@@ -10,6 +10,7 @@ import type {
   NextEpisode,
   NextEpisodeRequest,
   PlaybackData,
+  PlaybackKind,
   Row,
   SearchData,
   SessionInfo,
@@ -848,6 +849,14 @@ export class BeaconClient {
               closedCaptions?: string
             } | null
           } | null
+          contentPodcast?: {
+            podcast?: {
+              source?: string | null
+              audio?: string | null
+              player?: string | null
+              audioData?: string | null
+            } | null
+          } | null
         })[]
       }
       currentProgress?: { videoProgress?: number; videoProgressSeconds?: number } | null
@@ -861,6 +870,11 @@ export class BeaconClient {
     const signedIn = await this.isSignedIn()
     const { email, marks } = await this.watchMarks()
     const video = doc.contentVideo?.video
+    const audio = doc.contentPodcast?.podcast?.audio
+    const playable = Boolean(video?.video || audio)
+    // A TV client watches the video when there is one. Audio is the fallback
+    // for podcast-only items, not a second mode for a video item.
+    const kind: PlaybackKind = video?.video || !audio ? 'video' : 'audio'
     // `primaryCollection` is the editor's main filing, but a few playable docs
     // (one-offs, live-show videos) only carry `collections`. Use the first one
     // as the page's category so those episodes still have an "up" link.
@@ -988,15 +1002,18 @@ export class BeaconClient {
 
     // Play would ask the CMS for this same stream again a second later; hand
     // the player what this page already fetched.
-    if (video?.video) {
+    if (playable) {
       this.playbackCache.set(`${await this.scope()}|${slug}`, {
         id: doc.id,
         title: doc.title,
-        url: video.video,
+        kind,
+        image: kind === 'audio' ? img(doc.thumbnail?.sizes?.square?.url, 960) : undefined,
+        image2x: undefined,
+        url: video?.video ?? audio!,
         playlist: null,
         duration: doc.duration ? Math.round(doc.duration / 1000) : null,
         resumeAt,
-        captions: captionsOf(video),
+        captions: video ? captionsOf(video) : [],
         episodeNumber: doc.episodeNumber ?? null,
         collection: doc.primaryCollection
           ? { id: doc.primaryCollection.id, isSeries: Boolean(doc.primaryCollection.isSeries) }
@@ -1014,12 +1031,13 @@ export class BeaconClient {
       image2x: img(doc.thumbnail?.sizes?.landscape2x?.url, 1280),
       minutes: minutes(doc.duration),
       released: doc.releaseDate ?? null,
+      kind,
       series: series
         ? { slug: series.slug, title: series.name, isSeries: Boolean(series.isSeries) }
         : null,
       tier: doc.contentTier?.name ?? null,
-      locked: !video?.video,
-      signInNeeded: !video?.video && !signedIn,
+      locked: !playable,
+      signInNeeded: !playable && !signedIn,
       signedIn,
       watched: state.watched,
       resumeAt,
@@ -1042,9 +1060,11 @@ export class BeaconClient {
           duration?: number | null
           episodeNumber?: number | null
           primaryCollection?: { id: string; isSeries?: boolean } | null
+          thumbnail?: { sizes?: { square?: { url?: string } | null } | null } | null
           contentVideo?: {
             video?: { video?: string; videoData?: string; closedCaptions?: string } | null
           } | null
+          contentPodcast?: { podcast?: { audio?: string | null } | null } | null
         }[]
       }
       currentProgress?: { videoProgress?: number; videoProgressSeconds?: number } | null
@@ -1052,7 +1072,9 @@ export class BeaconClient {
 
     const doc = r.Contents?.docs?.[0]
     const video = doc?.contentVideo?.video
-    if (!video?.video) return null
+    const audio = doc?.contentPodcast?.podcast?.audio
+    if (!video?.video && !audio) return null
+    const kind: PlaybackKind = video?.video ? 'video' : 'audio'
 
     const cp = r.currentProgress
     const runtimeSec = (doc?.duration ?? 0) / 1000
@@ -1065,7 +1087,9 @@ export class BeaconClient {
     return {
       id: doc?.id ?? '',
       title: doc?.title ?? '',
-      url: video.video,
+      kind,
+      image: kind === 'audio' ? img(doc?.thumbnail?.sizes?.square?.url, 960) : undefined,
+      url: video?.video ?? audio!,
       playlist: null,
       duration: doc?.duration ? Math.round(doc.duration / 1000) : null,
       resumeAt:
@@ -1075,7 +1099,7 @@ export class BeaconClient {
         !closingStretch(progress * 100, position, runtimeSec, RESUME_SHARE, RESUME_TAIL)
           ? position
           : 0,
-      captions: captionsOf(video),
+      captions: video ? captionsOf(video) : [],
       episodeNumber: doc?.episodeNumber ?? null,
       collection: doc?.primaryCollection
         ? { id: doc.primaryCollection.id, isSeries: Boolean(doc.primaryCollection.isSeries) }

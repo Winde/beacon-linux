@@ -62,6 +62,7 @@ vi.mock('hls.js', () => {
 const playback: PlaybackData = {
   id: 'v1',
   title: 'Test Episode',
+  kind: 'video',
   url: 'https://cdn.example/master.m3u8',
   playlist: null,
   duration: 600,
@@ -206,6 +207,22 @@ describe('Player', () => {
 
     expect(screen.queryByText(/LT\/RT/)).toBeNull()
     expect(screen.queryByText(/X subtitles/)).toBeNull()
+  })
+
+  it('draws an audio surface and hides video-only controls', async () => {
+    stubBeaconWith({
+      ...playback,
+      kind: 'audio',
+      image: 'https://images.example/podcast/format=auto',
+      captions: []
+    })
+    render(<Player slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+
+    expect(await screen.findByTestId('audio-player')).toBeDefined()
+    expect(screen.getByText('Beacon podcast')).toBeDefined()
+    expect(screen.queryByRole('button', { name: /Subtitles/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Playback speed: 1×' })).toBeDefined()
   })
 
   it('starts a view once and reports only after ten seconds of playback', async () => {

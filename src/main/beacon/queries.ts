@@ -1,6 +1,6 @@
 /** GraphQL documents used against Beacon's CMS. */
 
-export const PLAYABLE = ['video', 'videoPodcast']
+export const PLAYABLE = ['video', 'videoPodcast', 'podcast']
 
 /** Shared shape for anything that renders as a tile. */
 const CARD = `
@@ -8,12 +8,16 @@ const CARD = `
     id title ottTitle duration slug contentType episodeNumber releaseDate
     contentTier { name planLevel }
     primaryCollection { id name slug isSeries }
-    thumbnail { sizes { landscape { url } landscape2x { url } } }
+    thumbnail { sizes { landscape { url } landscape2x { url } square { url } } }
   }
 `
 
 const VIDEO = `
   contentVideo { video { video videoData closedCaptions } }
+`
+
+const PODCAST = `
+  contentPodcast { podcast { source audio player audioData } }
 `
 
 export const ME = `
@@ -30,6 +34,7 @@ export const CONTENT = `
         collections { id name slug isSeries }
         content { ... on SuggestedContent { carouselContent: content { ...Card } } }
         ${VIDEO}
+        ${PODCAST}
       }
     }
     currentProgress(slug: $slug) { videoProgress videoProgressSeconds }
@@ -43,7 +48,9 @@ export const MEDIA = `
       docs {
         id title duration episodeNumber
         primaryCollection { id isSeries }
+        thumbnail { sizes { square { url } } }
         ${VIDEO}
+        ${PODCAST}
       }
     }
     currentProgress(slug: $slug) { videoProgress videoProgressSeconds }
@@ -144,6 +151,12 @@ export const HOME_BLOCKS = `
           excludedPlatforms { ios android web }
         }
         ... on LatestCarousel {
+          id
+          title
+          content { ...BlockCard }
+          excludedPlatforms { ios android web }
+        }
+        ... on ListenCarousel {
           id
           title
           content { ...BlockCard }

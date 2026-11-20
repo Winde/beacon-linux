@@ -94,6 +94,33 @@ describe('buildHome', () => {
     expect(home.rows).toEqual([])
   })
 
+  it('renders the Listen carousel with podcast cards', async () => {
+    const home = await buildHome(
+      depsFor(
+        [
+          {
+            __typename: 'ListenCarousel',
+            id: 'listen-block',
+            title: 'Listen up',
+            content: [
+              cmsCard({
+                id: 'p1',
+                slug: 'a-podcast',
+                title: 'A Podcast',
+                contentType: 'podcast'
+              })
+            ]
+          }
+        ],
+        []
+      )
+    )
+
+    expect(home.rows).toHaveLength(1)
+    expect(home.rows[0]).toMatchObject({ id: 'listen-block', kind: 'listen', title: 'Listen up' })
+    expect(home.rows[0].items[0]).toMatchObject({ id: 'p1', title: 'A Podcast' })
+  })
+
   it('leaves the row out when a local mark hides the only entry', async () => {
     const docs = [doc('marked', 40)]
     const watchState: HomeDependencies['watchState'] = () => ({ progress: 1, watched: true })

@@ -241,6 +241,7 @@ describe('registerIpc', () => {
 
   it('adds the reordered playlist to a play response', async () => {
     glue.client.play.mockResolvedValue({
+      kind: 'video',
       url: 'https://cdn.jwplayer.com/v2/media/abc/master.m3u8',
       playlist: null
     })
@@ -255,6 +256,19 @@ describe('registerIpc', () => {
     expect(data.playlist).toBe('rewritten')
   })
 
+  it('does not reorder an audio-only playlist', async () => {
+    glue.client.play.mockResolvedValue({
+      kind: 'audio',
+      url: 'https://cdn.example/audio.m3u8',
+      playlist: null
+    })
+
+    const data = await handler('playback:open')({}, 'podcast')
+
+    expect(fetchMasterPlaylist).not.toHaveBeenCalled()
+    expect(data.playlist).toBeNull()
+  })
+
   it('returns null when there is nothing to play', async () => {
     glue.client.play.mockResolvedValue(null)
 
@@ -264,6 +278,7 @@ describe('registerIpc', () => {
 
   it('serves the original playlist when reordering fails', async () => {
     glue.client.play.mockResolvedValue({
+      kind: 'video',
       url: 'https://cdn.jwplayer.com/x.m3u8',
       playlist: 'original'
     })

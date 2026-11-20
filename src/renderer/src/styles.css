@@ -1497,6 +1497,72 @@ kbd {
   background: #000;
 }
 
+/* An audio-only stream still uses the video element, but has no picture. */
+.player__video--audio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.player__audio {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 0 8vw;
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(240, 184, 102, 0.14), transparent 55%), #09080d;
+}
+
+.player__audio-art {
+  width: min(42vh, 460px);
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 18px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.player__audio-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.player__audio-art-empty {
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(circle at 30% 25%, rgba(240, 184, 102, 0.35), transparent 60%),
+    linear-gradient(145deg, #2b1c38, #120c19);
+}
+
+.player__audio-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 760px;
+}
+
+.player__audio-kicker {
+  color: var(--muted);
+  font-size: 0.8rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.player__audio-title {
+  margin: 0;
+  font-size: clamp(1.5rem, 3vw, 2.4rem);
+  line-height: 1.2;
+}
+
 .player__center {
   position: absolute;
   inset: 0;
@@ -1517,6 +1583,11 @@ kbd {
 
 .player__chrome.is-visible {
   opacity: 1;
+}
+
+/* Audio has no top title, so keep the controls on the bottom edge. */
+.player__chrome--audio {
+  justify-content: flex-end;
 }
 
 .player__top {
