@@ -144,10 +144,18 @@ export function useMediaSession({ slug, startAt }: MediaSessionOptions): MediaSe
         if (cancelled) return
 
         if (Hls?.isSupported()) {
-          const hls = new Hls({ enableWorker: true })
           // Beacon's captions are fetched as a separate VTT file and drawn by
-          // the renderer. Left on, hls.js also renders the stream's own
-          // subtitle track, which paints every cue twice.
+          // the renderer. hls.js must not create or draw its own text tracks:
+          // the stream can carry both an EXT-X-MEDIA subtitle track and in-band
+          // CEA captions, and either one paints every cue a second time.
+          // `subtitleDisplay = false` is not enough; hls.js can flip it back
+          // when it selects a default subtitle track. Turning off native text
+          // tracks is the only reliable way to keep our fetched track alone.
+          const hls = new Hls({
+            enableWorker: true,
+            renderTextTracksNatively: false,
+            enableCEA708Captions: false
+          })
           hls.subtitleDisplay = false
 
           const syncTracks = (): void => {
@@ -168,7 +176,11 @@ export function useMediaSession({ slug, startAt }: MediaSessionOptions): MediaSe
 
           hls.loadSource(source)
           hls.attachMedia(video)
-          hls.on(Hls.Events.MANIFEST_PARSED, syncTracks)
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            // We use JW's caption file; hls.js has nothing to select or load.
+            hls.subtitleTrack = -1
+            syncTracks()
+          })
           hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, syncTracks)
           hls.on(Hls.Events.LEVEL_SWITCHED, (_event, payload) => setActiveLevel(payload.level))
           hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_event, payload) => setAudioTrack(payload.id))
@@ -315,11 +327,26 @@ export function useMediaSession({ slug, startAt }: MediaSessionOptions): MediaSe
   useEffect(() => {
     const video = videoRef.current
     if (!video?.textTracks) return
-    // Show only the externally fetched track. hls.js may have added its own
-    // subtitle tracks for the same stream, and two visible tracks double-render.
-    const own = video.querySelector<HTMLTrackElement>('track[data-own="captions"]')?.track ?? null
-    for (const track of Array.from(video.textTracks)) {
-      track.mode = captionUrl && track === own ? 'showing' : 'disabled'
+
+    // Show only the externally fetched track. hls.js may add a native subtitle
+    // track after this effect first runs (or after the manifest is parsed), so
+    // re-apply the modes on every add/remove as well as on a caption change.
+    const sync = (): void => {
+      if (!video.textTracks) return
+      const own = video.querySelector<HTMLTrackElement>('track[data-own="captions"]')?.track ?? null
+      for (const track of Array.from(video.textTracks)) {
+        const mode = captionUrl && track === own ? 'showing' : 'disabled'
+        if (track.mode !== mode) track.mode = mode
+      }
+    }
+
+    sync()
+    const tracks = video.textTracks
+    tracks.addEventListener?.('addtrack', sync)
+    tracks.addEventListener?.('removetrack', sync)
+    return () => {
+      tracks.removeEventListener?.('addtrack', sync)
+      tracks.removeEventListener?.('removetrack', sync)
     }
   }, [captionUrl, caption])
 

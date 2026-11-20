@@ -579,7 +579,6 @@ export function Player({
             kind="subtitles"
             label={caption?.label}
             src={captionUrl}
-            default
           />
         ) : null}
       </video>

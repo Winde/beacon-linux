@@ -7,10 +7,13 @@ import { Player, type PlayerHandle } from './Player'
 
 const hlsMock = vi.hoisted(() => ({
   instances: [] as Array<{
+    config?: Record<string, unknown>
     levels: { height: number; bitrate: number }[]
     audioTracks: { name?: string; lang?: string }[]
     audioTrack: number
     currentLevel: number
+    subtitleDisplay: boolean
+    subtitleTrack: number
     destroy: ReturnType<typeof vi.fn>
     emit: (event: string, ...args: unknown[]) => void
   }>
@@ -19,6 +22,7 @@ const hlsMock = vi.hoisted(() => ({
 vi.mock('hls.js', () => {
   class FakeHls {
     static isSupported = (): boolean => true
+    config?: Record<string, unknown>
     static Events = {
       ERROR: 'hlsError',
       MANIFEST_PARSED: 'manifestParsed',
@@ -30,12 +34,15 @@ vi.mock('hls.js', () => {
     audioTracks: { name?: string; lang?: string }[] = []
     audioTrack = -1
     currentLevel = -1
+    subtitleDisplay = true
+    subtitleTrack = 0
     loadSource = vi.fn()
     attachMedia = vi.fn()
     destroy = vi.fn()
     private listeners = new Map<string, Array<(...args: any[]) => void>>()
 
-    constructor() {
+    constructor(config?: Record<string, unknown>) {
+      this.config = config
       hlsMock.instances.push(this)
     }
 
@@ -236,6 +243,23 @@ describe('Player', () => {
     unmount()
     expect(flush).toHaveBeenCalled()
     expect(progress).toHaveBeenLastCalledWith({ contentId: 'v1', position: 111, duration: 600 })
+  })
+
+  it('keeps hls.js from creating or drawing its own subtitle tracks', async () => {
+    stubBeacon()
+    render(<Player slug="v1" onClose={vi.fn()} onPlayNext={vi.fn()} />)
+
+    await screen.findByText('Test Episode')
+    await vi.waitFor(() => expect(hlsMock.instances).toHaveLength(1))
+
+    const hls = hlsMock.instances[0]!
+    expect(hls.config).toMatchObject({
+      renderTextTracksNatively: false,
+      enableCEA708Captions: false
+    })
+    expect(hls.subtitleDisplay).toBe(false)
+    act(() => hls.emit('manifestParsed'))
+    expect(hls.subtitleTrack).toBe(-1)
   })
 
   it('opens the subtitle menu from the control bar and turns captions on', async () => {
