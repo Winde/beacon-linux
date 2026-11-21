@@ -65,7 +65,9 @@ each layout maps to.
 Beacon updates itself from inside the app. **Check for updates** at the foot of
 the left menu compares this build with the latest GitHub release; if one is
 newer, `Update now` downloads it beside the running AppImage, verifies it against
-the release's `SHA256SUMS.txt` and restarts into it. Nothing installs on its own.
+the release's `SHA256SUMS.txt`, then closes. Open Beacon again from Steam to use
+the new version; Game Mode ends the app's session on quit, so the app does not
+come back by itself. Nothing installs on its own.
 Builds before 0.2.0 have no updater, so upgrade those once with the installer;
 after that the menu keeps the app current.
 

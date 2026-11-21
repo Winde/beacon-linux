@@ -425,7 +425,8 @@ describe('App updates', () => {
 
     await act(async () => finish())
 
-    expect(await screen.findByText(/is installed\. Restarting/)).toBeDefined()
+    expect(await screen.findByText(/is installed\. Closing Beacon/)).toBeDefined()
+    expect(await screen.findByText(/open it again from Steam/)).toBeDefined()
   })
 
   it('lists the notes of every release between the running one and the offered one', async () => {

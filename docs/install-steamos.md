@@ -70,7 +70,8 @@ password field.
 Beacon updates itself: **Check for updates** at the foot of the left menu
 compares this build with the latest stable release, downloads the new AppImage
 beside the running one, verifies it against the release's `SHA256SUMS.txt`,
-swaps it in and restarts. It is a manual check; nothing installs silently.
+swaps it in and closes. Open Beacon again from Steam to use the new version. It
+is a manual check; nothing installs silently.
 Builds before 0.2.0 have no updater, so they need the installer once.
 
 Re-running the installer also replaces `~/Applications/Beacon.AppImage` in

@@ -107,7 +107,7 @@ vi.mock('./updates', () => ({
 }))
 
 import '../preload/index'
-import { registerIpc } from './ipc'
+import { CLOSING_OVERLAY_MS, registerIpc } from './ipc'
 import { fetchCaptionFile, fetchMasterPlaylist } from './hls'
 
 function handler(channel: string): (...args: any[]) => any {
@@ -403,15 +403,24 @@ describe('registerIpc', () => {
     expect(handler('app:version')()).toBe('9.9.9')
   })
 
-  it('installs an update and relaunches the replaced AppImage', async () => {
-    await handler('updates:install')({})
+  it('installs an update, holds the closing overlay, then relaunches the replaced AppImage', async () => {
+    vi.useFakeTimers()
+    try {
+      await handler('updates:install')({})
 
-    expect(glue.updater.install).toHaveBeenCalledOnce()
-    expect(glue.app.relaunch).toHaveBeenCalledWith({
-      execPath: '/home/deck/Applications/Beacon.AppImage',
-      args: process.argv.slice(1).filter((arg) => !arg.startsWith('--open='))
-    })
-    expect(glue.app.quit).toHaveBeenCalledOnce()
+      expect(glue.updater.install).toHaveBeenCalledOnce()
+      expect(glue.app.relaunch).toHaveBeenCalledWith({
+        execPath: '/home/deck/Applications/Beacon.AppImage',
+        args: process.argv.slice(1).filter((arg) => !arg.startsWith('--open='))
+      })
+      // The window stays up for the renderer's closing state before it goes.
+      expect(glue.app.quit).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(CLOSING_OVERLAY_MS)
+      expect(glue.app.quit).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('stays up when the update cannot be installed', async () => {

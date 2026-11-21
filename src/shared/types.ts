@@ -325,8 +325,8 @@ export interface BeaconApi {
   }
   /**
    * GitHub Releases is the only update channel. `install` replaces this
-   * AppImage in place and restarts the app; the promise rejects when that is
-   * not possible.
+   * AppImage in place, then closes the app; on SteamOS it is opened again from
+   * Steam. The promise rejects when the install is not possible.
    */
   updates: {
     check(): Promise<UpdateInfo>

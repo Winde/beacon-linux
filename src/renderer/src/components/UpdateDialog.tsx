@@ -9,7 +9,7 @@ export type UpdatePrompt =
   | { name: 'current'; version: string }
   | { name: 'available'; current: string; latest: string; canInstall: boolean }
   | { name: 'installing'; latest: string }
-  | { name: 'restarting'; latest: string }
+  | { name: 'closing'; latest: string }
   | { name: 'failed'; stage: 'check' | 'install'; reason: string }
 
 interface UpdateDialogProps {
@@ -26,10 +26,12 @@ type NotesState =
   | { name: 'failed' }
 
 /**
- * The update flow's one decision per state: nothing to do, install (with the
- * restart it implies), or try again. Installing is deliberately uncancellable:
- * the file is already on its way over, and backing out of the dialog while it
- * finishes would restart the app under the viewer.
+ * The update flow's one decision per state: nothing to do, install (which ends
+ * with the app closing), or try again. Installing is deliberately
+ * uncancellable: the file is already on its way over, and backing out of the
+ * dialog while it finishes would close the app under the viewer. SteamOS Game
+ * Mode ends the session on quit, so the copy says to reopen the app from Steam
+ * rather than promising a restart.
  */
 export function UpdateDialog({
   prompt,
@@ -43,7 +45,7 @@ export function UpdateDialog({
 
   // A new prompt brings new actions; the first one takes focus, never a
   // heading in the changelog above it. The busy states have none, and the
-  // caller swallows input until the restart.
+  // caller swallows input until the app closes.
   useEffect(() => {
     if (ref.current) focusFirst('[data-focus="action"]', ref.current)
   }, [prompt.name])
@@ -71,7 +73,7 @@ export function UpdateDialog({
     }
   }, [latest])
 
-  const busy = prompt.name === 'installing' || prompt.name === 'restarting'
+  const busy = prompt.name === 'installing' || prompt.name === 'closing'
   let title: string
   let message: string
   const actions: DialogAction[] = []
@@ -90,7 +92,7 @@ export function UpdateDialog({
     case 'available':
       title = `Beacon v${prompt.latest} is available`
       message = prompt.canInstall
-        ? `You have v${prompt.current}. Beacon downloads the update, checks it against the release's SHA-256, then restarts.`
+        ? `You have v${prompt.current}. Beacon downloads the update, checks it against the release's SHA-256, then closes. Open it again from Steam to finish.`
         : `You have v${prompt.current}. This copy can't replace itself: download the new version from the Beacon releases page on GitHub.`
       actions.push({ label: 'Later', onSelect: onClose, variant: 'ghost', testId: 'update-later' })
       if (prompt.canInstall) {
@@ -111,11 +113,11 @@ export function UpdateDialog({
       break
     case 'installing':
       title = 'Updating Beacon'
-      message = `Downloading Beacon v${prompt.latest}…`
+      message = `Downloading Beacon v${prompt.latest}… Beacon will close when it's done.`
       break
-    case 'restarting':
-      title = 'Updating Beacon'
-      message = `Beacon v${prompt.latest} is installed. Restarting…`
+    case 'closing':
+      title = 'Update installed'
+      message = `Beacon v${prompt.latest} is installed. Closing Beacon — open it again from Steam.`
       break
     case 'failed':
       title = prompt.stage === 'check' ? "Couldn't check for updates" : "Couldn't update Beacon"

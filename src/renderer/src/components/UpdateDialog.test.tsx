@@ -49,6 +49,7 @@ describe('UpdateDialog', () => {
     })
 
     expect(screen.getByText(/checks it against the release's SHA-256/)).toBeDefined()
+    expect(screen.getByText(/Open it again from Steam to finish/)).toBeDefined()
     fireEvent.click(screen.getByTestId('update-install'))
 
     expect(onInstall).toHaveBeenCalledOnce()
@@ -74,10 +75,11 @@ describe('UpdateDialog', () => {
     expect(screen.queryAllByRole('button')).toHaveLength(0)
   })
 
-  it('says it is restarting once the file is in place', () => {
-    renderPrompt({ name: 'restarting', latest: '0.2.0' })
+  it('says the app is closing once the file is in place', () => {
+    renderPrompt({ name: 'closing', latest: '0.2.0' })
 
-    expect(screen.getByText(/is installed. Restarting/)).toBeDefined()
+    expect(screen.getByText(/Beacon v0\.2\.0 is installed\. Closing Beacon/)).toBeDefined()
+    expect(screen.getByText(/open it again from Steam/)).toBeDefined()
   })
 
   it('offers Try again after a failed install', () => {

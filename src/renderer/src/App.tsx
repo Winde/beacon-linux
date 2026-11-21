@@ -358,7 +358,7 @@ export default function App(): React.JSX.Element {
     if (
       update?.name === 'checking' ||
       update?.name === 'installing' ||
-      update?.name === 'restarting'
+      update?.name === 'closing'
     ) {
       return
     }
@@ -371,9 +371,10 @@ export default function App(): React.JSX.Element {
     setUpdate({ name: 'installing', latest: knownUpdate.latest })
     try {
       // The main process downloads, verifies and swaps the AppImage in, then
-      // schedules a relaunch. This window goes away on its own from here.
+      // schedules a relaunch. This window goes away on its own from here; the
+      // closing state tells the viewer to open the app again from Steam.
       await window.beacon.updates.install()
-      setUpdate({ name: 'restarting', latest: knownUpdate.latest })
+      setUpdate({ name: 'closing', latest: knownUpdate.latest })
     } catch (error) {
       setUpdate({ name: 'failed', stage: 'install', reason: cleanError(error) })
     }
@@ -519,11 +520,11 @@ export default function App(): React.JSX.Element {
       return
     }
 
-    // The update dialog is modal as well. Installing has no cancel: the file
-    // is on its way in and the app restarts, so a press must not land behind
-    // the backdrop while that happens.
+    // The update dialog is modal as well. Installing and closing have no
+    // cancel: the file is on its way in and the app is about to quit, so a
+    // press must not land behind the backdrop.
     if (update) {
-      if (update.name === 'installing' || update.name === 'restarting') return
+      if (update.name === 'installing' || update.name === 'closing') return
       if (action === 'up' || action === 'down' || action === 'left' || action === 'right') {
         move(action, document.querySelector<HTMLElement>('.dialog') ?? undefined)
         return

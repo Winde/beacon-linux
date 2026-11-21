@@ -157,7 +157,9 @@ menu keeps it current: it asks GitHub for the latest stable release
 (`releases/latest`, so pre-releases are never offered), downloads the
 `Beacon-<version>-x86_64.AppImage` asset beside the running file, verifies it
 against that release's `SHA256SUMS.txt`, atomically replaces the AppImage and
-relaunches. The confirmation dialog also lists the notes of every stable
+closes. The app asks Electron to relaunch, but SteamOS Game Mode ends the
+session on quit, so the offer and the closing overlay both tell the viewer to
+open Beacon again from Steam. The dialog also lists the notes of every stable
 release between the running version and the offered one, newest first. Those
 come from the releases list (`releases?per_page=100`), read when the dialog
 opens and cached in the app for as long as that release is pending; a body

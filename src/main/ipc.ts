@@ -18,6 +18,9 @@ import { PageStore } from './page-store'
 import { PreferencesStore, preferencesPath } from './preferences'
 import { currentAppImage, relaunchArgs, Updater } from './updates'
 
+/** How long the closing overlay stays up before the window goes. */
+export const CLOSING_OVERLAY_MS = 2000
+
 export const client = new BeaconClient()
 export const catalog = new Catalog(client)
 client.catalog = catalog
@@ -138,6 +141,8 @@ export function registerIpc(): void {
     // the file that was just replaced instead; Electron does that once this
     // instance has exited, which keeps the single-instance lock uncontended.
     app.relaunch({ execPath: appImage, args: relaunchArgs(process.argv.slice(1)) })
-    app.quit()
+    // The renderer switches to its closing state as soon as this call returns.
+    // Hold the window long enough to read it, then quit as before.
+    setTimeout(() => app.quit(), CLOSING_OVERLAY_MS)
   })
 }
