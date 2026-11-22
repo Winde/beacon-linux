@@ -26,6 +26,7 @@ afterEach(() => {
   cleanup()
   pageCache.clear()
   featureFlags.pageTransitions = true
+  featureFlags.focusDepth = true
   vi.unstubAllGlobals()
   Reflect.deleteProperty(document, 'startViewTransition')
 })
@@ -641,6 +642,16 @@ describe('App back', () => {
     await waitFor(() => expect(start).toHaveBeenCalledOnce())
     expect(sourceNames).toEqual(['tile__art'])
     await waitFor(() => expect(document.querySelector('[data-view-art]')).toBeNull())
+  })
+
+  it('leaves the extra focus depth off when its flag is off', async () => {
+    featureFlags.focusDepth = false
+    stubApp({ home: HOME_WITH_VIDEO })
+    render(<App />)
+
+    await screen.findByTestId('hero-browse')
+
+    expect(document.querySelector('.app')?.classList.contains('app--focus-depth')).toBe(false)
   })
 
   it('skips the page transition when the feature flag is off', async () => {

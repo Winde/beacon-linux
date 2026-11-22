@@ -12,12 +12,18 @@ export interface FeatureFlags {
    * header (and back). Off makes every navigation take effect instantly.
    */
   pageTransitions: boolean
+  /**
+   * The extra lift, glow and pressed state on the focused card, button or
+   * control. Off keeps the plain focus ring without the decorative depth.
+   */
+  focusDepth: boolean
 }
 
 export type FeatureFlag = keyof FeatureFlags
 
 export const featureFlags: FeatureFlags = {
-  pageTransitions: true
+  pageTransitions: true,
+  focusDepth: true
 }
 
 export function featureEnabled(flag: FeatureFlag): boolean {

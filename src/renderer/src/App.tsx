@@ -941,7 +941,11 @@ export default function App(): React.JSX.Element {
   }
 
   return (
-    <div className={`app${railOpen ? ' app--rail' : ''}`}>
+    <div
+      className={`app${railOpen ? ' app--rail' : ''}${
+        featureEnabled('focusDepth') ? ' app--focus-depth' : ''
+      }`}
+    >
       <NavRail
         open={railOpen}
         showHome={current.route.name !== 'home'}
