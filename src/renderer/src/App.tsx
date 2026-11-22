@@ -16,6 +16,7 @@ import { NavRail } from './components/NavRail'
 import { UpdateDialog, type UpdatePrompt } from './components/UpdateDialog'
 import { DelayedSpinner } from './components/ui'
 import { cleanError } from './lib/errors'
+import { featureEnabled } from './lib/featureFlags'
 import { pageCache } from './lib/pages'
 
 export type Route =
@@ -216,7 +217,9 @@ export default function App(): React.JSX.Element {
       source: HTMLElement | null,
       destination: () => HTMLElement | null
     ): void => {
-      const start = document.startViewTransition?.bind(document)
+      const start = featureEnabled('pageTransitions')
+        ? document.startViewTransition?.bind(document)
+        : undefined
       if (!start || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
         update()
         return

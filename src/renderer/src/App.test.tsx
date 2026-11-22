@@ -14,6 +14,7 @@ import type {
 } from '@shared/types'
 import App, { upToCollection, type Entry } from './App'
 import { setFocused } from './nav/focus'
+import { featureFlags } from './lib/featureFlags'
 import { pageCache } from './lib/pages'
 
 beforeEach(() => {
@@ -24,6 +25,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   pageCache.clear()
+  featureFlags.pageTransitions = true
   vi.unstubAllGlobals()
   Reflect.deleteProperty(document, 'startViewTransition')
 })
@@ -639,6 +641,26 @@ describe('App back', () => {
     await waitFor(() => expect(start).toHaveBeenCalledOnce())
     expect(sourceNames).toEqual(['tile__art'])
     await waitFor(() => expect(document.querySelector('[data-view-art]')).toBeNull())
+  })
+
+  it('skips the page transition when the feature flag is off', async () => {
+    featureFlags.pageTransitions = false
+    const start = vi.fn()
+    Object.defineProperty(document, 'startViewTransition', {
+      configurable: true,
+      value: start
+    })
+
+    stubApp({ home: HOME_WITH_VIDEO })
+    render(<App />)
+
+    await screen.findByTestId('hero-browse')
+    const tile = screen.getByRole('button', { name: /Episode 1/ })
+    setFocused(tile)
+    fireEvent.click(tile)
+
+    await screen.findByTestId('play')
+    expect(start).not.toHaveBeenCalled()
   })
 
   it('goes back a screen before it offers to exit', async () => {
