@@ -311,7 +311,8 @@ describe('App startup', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })).toBeDefined()
     expect(screen.queryByText('Loading Beacon')).toBeNull()
     // A cache hit is never treated as fresh: the feed is revalidated anyway.
-    expect(home).toHaveBeenCalledOnce()
+    // The revalidation starts in a passive effect, after the cached paint.
+    await waitFor(() => expect(home).toHaveBeenCalledOnce())
   })
 
   it('paints the cached Favourites row with the feed', async () => {
