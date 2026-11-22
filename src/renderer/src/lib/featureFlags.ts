@@ -17,13 +17,20 @@ export interface FeatureFlags {
    * control. Off keeps the plain focus ring without the decorative depth.
    */
   focusDepth: boolean
+  /**
+   * When a vertical move enters a new shelf or grid line, scroll that row to a
+   * fixed line near the top of the content area so the next row stays visible.
+   * Off keeps the minimal "just make it visible" scroll.
+   */
+  rowPivot: boolean
 }
 
 export type FeatureFlag = keyof FeatureFlags
 
 export const featureFlags: FeatureFlags = {
   pageTransitions: true,
-  focusDepth: true
+  focusDepth: true,
+  rowPivot: true
 }
 
 export function featureEnabled(flag: FeatureFlag): boolean {

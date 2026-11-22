@@ -6,6 +6,8 @@
  * instead of re-rendering every tile on screen.
  */
 
+import { featureEnabled } from '../lib/featureFlags'
+
 export type Direction = 'up' | 'down' | 'left' | 'right'
 
 type Listener = (element: HTMLElement | null) => void
@@ -14,6 +16,9 @@ const FOCUSABLE = '[data-focus]:not([data-focus="false"])'
 const FOCUS_CLASS = 'is-focused'
 /** A horizontal strip of items, e.g. a shelf, a grid line, or a button row. */
 const ROW = '[data-focus-row]'
+/** Where a newly focused row lands inside its scroller. */
+const ROW_PIVOT = 48
+const ROW_SCROLL_MS = 180
 
 let current: HTMLElement | null = null
 const listeners = new Set<Listener>()
@@ -85,7 +90,131 @@ function layoutBox(element: HTMLElement): Box {
   }
 }
 
-export function setFocused(element: HTMLElement | null, scroll = true): void {
+function prefersReducedMotion(): boolean {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+}
+
+function scrollInset(style: CSSStyleDeclaration, side: 'Left' | 'Right'): number {
+  const explicit = parseFloat(style.getPropertyValue(`scroll-padding-${side.toLowerCase()}`))
+  if (Number.isFinite(explicit)) return explicit
+  const padding = parseFloat(style.getPropertyValue(`padding-${side.toLowerCase()}`))
+  return Number.isFinite(padding) ? padding : 0
+}
+
+/** Make the target visible inside each horizontally scrolling shelf. */
+function revealHorizontally(element: HTMLElement): void {
+  const rect = element.getBoundingClientRect()
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    const style = getComputedStyle(parent)
+    if (!/(auto|scroll)/.test(style.overflowX)) continue
+    if (parent.scrollWidth <= parent.clientWidth + 1) continue
+    const box = parent.getBoundingClientRect()
+    const left = box.left + scrollInset(style, 'Left')
+    const right = box.right - scrollInset(style, 'Right')
+    if (rect.left < left) {
+      parent.scrollLeft = Math.max(0, parent.scrollLeft - (left - rect.left))
+    } else if (rect.right > right) {
+      parent.scrollLeft = Math.min(
+        parent.scrollWidth - parent.clientWidth,
+        parent.scrollLeft + (rect.right - right)
+      )
+    }
+  }
+}
+
+/** The nearest ancestor that actually scrolls vertically. */
+function verticalScroller(element: HTMLElement): HTMLElement | null {
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    const style = getComputedStyle(parent)
+    if (!/(auto|scroll)/.test(style.overflowY)) continue
+    if (parent.scrollHeight <= parent.clientHeight + 1) continue
+    return parent
+  }
+  return null
+}
+
+/** A shelf, or the visual line a grid tile belongs to. */
+function rowTarget(element: HTMLElement): HTMLElement | null {
+  const row = element.closest<HTMLElement>('.row')
+  if (row) return row
+  if (!element.closest('.grid')) return null
+  return element.closest<HTMLElement>('.tile') ?? element
+}
+
+let pivotFrame: number | null = null
+let pivotScroller: HTMLElement | null = null
+
+function cancelRowPivot(): void {
+  if (pivotFrame !== null) cancelAnimationFrame(pivotFrame)
+  pivotFrame = null
+  pivotScroller = null
+}
+
+function scrollToPivot(scroller: HTMLElement, top: number): void {
+  cancelRowPivot()
+  if (prefersReducedMotion() || Math.abs(top - scroller.scrollTop) < 1) {
+    scroller.scrollTop = top
+    return
+  }
+
+  const from = scroller.scrollTop
+  const distance = top - from
+  const start = performance.now()
+  pivotScroller = scroller
+
+  const step = (now: number): void => {
+    if (pivotScroller !== scroller) return
+    const progress = Math.min(1, (now - start) / ROW_SCROLL_MS)
+    const eased = 1 - (1 - progress) ** 3
+    scroller.scrollTop = from + distance * eased
+    if (progress < 1) {
+      pivotFrame = requestAnimationFrame(step)
+    } else {
+      cancelRowPivot()
+    }
+  }
+
+  pivotFrame = requestAnimationFrame(step)
+}
+
+/**
+ * Put the focused row at a stable line under the header, leaving the next row
+ * visible. Returns false when the element is not in a shelf or grid, so the
+ * caller can fall back to the old "nearest" scroll.
+ */
+function pivotRow(element: HTMLElement): boolean {
+  if (!featureEnabled('rowPivot')) return false
+  const target = rowTarget(element)
+  if (!target) return false
+  const scroller = verticalScroller(target)
+  if (!scroller) return false
+
+  revealHorizontally(element)
+  const scrollerRect = scroller.getBoundingClientRect()
+  const targetRect = target.getBoundingClientRect()
+  const rowTop = targetRect.top - scrollerRect.top + scroller.scrollTop
+  const max = scroller.scrollHeight - scroller.clientHeight
+  const top = Math.max(0, Math.min(max, rowTop - ROW_PIVOT))
+  scrollToPivot(scroller, top)
+  return true
+}
+
+/**
+ * Moving up into a pinned header or tab leaves the shelves where they were.
+ * Put them back at the top so the next Down starts at the first row.
+ */
+function resetContentScroll(element: HTMLElement): void {
+  if (!featureEnabled('rowPivot')) return
+  const route = element.closest<HTMLElement>('.route')
+  const scroller = route?.querySelector<HTMLElement>('.screen__scroll')
+  if (scroller && scroller.scrollTop > 0) scrollToPivot(scroller, 0)
+}
+
+export function setFocused(
+  element: HTMLElement | null,
+  scroll = true,
+  pivotVertical = false
+): void {
   if (element === current) return
   current?.classList.remove(FOCUS_CLASS)
   current?.removeAttribute('data-focused')
@@ -95,7 +224,13 @@ export function setFocused(element: HTMLElement | null, scroll = true): void {
     current.setAttribute('data-focused', 'true')
     // Real DOM focus keeps accessibility and lets components use onFocus.
     current.focus({ preventScroll: true })
-    if (scroll) current.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    if (scroll) {
+      const row = pivotVertical && pivotRow(current)
+      if (!row) {
+        if (pivotVertical) resetContentScroll(current)
+        current.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      }
+    }
   }
   for (const listener of listeners) listener(current)
 }
@@ -209,15 +344,17 @@ export function move(direction: Direction, scope?: ParentNode): boolean {
   }
   const pool = candidates(scope)
   const next = pick(current, pool, direction)
+  const vertical = direction === 'up' || direction === 'down'
   if (next) {
-    setFocused(next)
+    // A scoped move (rail, dialog) must not scroll the page behind it.
+    setFocused(next, true, vertical && !scope)
     return true
   }
   // Right at the end of a row carries on to the row below, from its start.
   // Left at the start is left alone: it is the gesture that opens the rail.
   const wrap = direction === 'right' ? firstOfNextRow(current, pool) : null
   if (!wrap) return false
-  setFocused(wrap)
+  setFocused(wrap, true, !scope)
   return true
 }
 

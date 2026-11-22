@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { featureFlags } from '../lib/featureFlags'
 import { focusFirst, focusWithin, getFocused, move, onFocusChange, setFocused } from './focus'
 
 interface TileOptions {
@@ -50,6 +51,11 @@ beforeEach(() => {
   document.body.innerHTML = ''
 })
 
+afterEach(() => {
+  featureFlags.rowPivot = true
+  Reflect.deleteProperty(window, 'matchMedia')
+})
+
 describe('setFocused', () => {
   it('marks the focused element and clears the previous one', () => {
     const [a, b] = grid()
@@ -84,6 +90,52 @@ describe('setFocused', () => {
 
     expect(getFocused()).toBeNull()
     expect(a.classList.contains('is-focused')).toBe(false)
+  })
+})
+
+describe('row pivot', () => {
+  function scrollerWithRow(): { scroller: HTMLElement; target: HTMLElement; row: HTMLElement } {
+    const scroller = document.createElement('div')
+    scroller.className = 'screen__scroll'
+    scroller.style.overflowY = 'auto'
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 500 })
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1200 })
+    scroller.getBoundingClientRect = () => new DOMRect(0, 100, 800, 500)
+
+    const row = document.createElement('section')
+    row.className = 'row'
+    row.getBoundingClientRect = () => new DOMRect(0, 400, 800, 250)
+
+    const target = tile(0, 0)
+    target.getBoundingClientRect = () => new DOMRect(0, 430, 280, 160)
+    row.append(target)
+    scroller.append(row)
+    document.body.append(scroller)
+
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn(() => ({ matches: true }))
+    })
+    return { scroller, target, row }
+  }
+
+  it('lands a newly focused row at the pivot line', () => {
+    const { scroller, target } = scrollerWithRow()
+
+    setFocused(target, true, true)
+
+    // Row content top = 400 - 100 = 300; pivot = 48px from the scroller top.
+    expect(scroller.scrollTop).toBe(252)
+  })
+
+  it('keeps the old nearest scroll when the flag is off', () => {
+    featureFlags.rowPivot = false
+    const { scroller, target } = scrollerWithRow()
+
+    setFocused(target, true, true)
+
+    expect(target.scrollIntoView).toHaveBeenCalled()
+    expect(scroller.scrollTop).toBe(0)
   })
 })
 

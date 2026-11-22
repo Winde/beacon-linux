@@ -27,6 +27,7 @@ afterEach(() => {
   pageCache.clear()
   featureFlags.pageTransitions = true
   featureFlags.focusDepth = true
+  featureFlags.rowPivot = true
   vi.unstubAllGlobals()
   Reflect.deleteProperty(document, 'startViewTransition')
 })
