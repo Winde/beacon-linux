@@ -5,6 +5,7 @@ import type {
   AuthStatus,
   CachedPages,
   Card,
+  CollectionData,
   ContentData,
   FavouriteItem,
   FavouritesData,
@@ -54,8 +55,6 @@ const SERIES: Card = {
   count: 12
 }
 
-const HOME_WITH_SERIES: HomeData = { hero: [SERIES], rows: [] }
-
 const VIDEO: Card = {
   kind: 'video',
   id: 'id-video-1',
@@ -66,8 +65,23 @@ const VIDEO: Card = {
   minutes: 30
 }
 
+const COLLECTION: CollectionData = {
+  id: 'id-campaign-1',
+  slug: 'campaign-1',
+  title: 'Campaign 1',
+  image: null,
+  image2x: null,
+  isSeries: true,
+  seasons: [{ title: 'Season 1', items: [VIDEO] }]
+}
+
+const HOME_WITH_SERIES: HomeData = {
+  hero: [],
+  rows: [{ id: 'featured', kind: 'featured', title: 'Featured', items: [SERIES] }]
+}
+
 const HOME_WITH_VIDEO: HomeData = {
-  hero: [SERIES],
+  hero: [],
   rows: [{ id: 'latest', kind: 'latest', title: 'Latest', items: [VIDEO] }]
 }
 
@@ -186,7 +200,7 @@ function stubApp({
       cachedHome: vi.fn(() => Promise.resolve(cachedHome)),
       cachedPages: vi.fn(() => Promise.resolve(cachedPages)),
       browse: vi.fn(),
-      collection: vi.fn(),
+      collection: vi.fn(() => Promise.resolve(COLLECTION)),
       content,
       search: vi.fn(),
       suggest: vi.fn()
@@ -309,7 +323,7 @@ describe('App startup', () => {
 
     // The local boot is long over before the delayed spinner would appear.
     expect(screen.queryByText('Loading Beacon')).toBeNull()
-    expect(await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })).toBeDefined()
+    expect(await screen.findByRole('button', { name: /Campaign 1/ })).toBeDefined()
     expect(screen.queryByText('Loading Beacon')).toBeNull()
     // A cache hit is never treated as fresh: the feed is revalidated anyway.
     // The revalidation starts in a passive effect, after the cached paint.
@@ -326,8 +340,9 @@ describe('App startup', () => {
     })
     render(<App />)
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })).toBeDefined()
-    expect(screen.getByRole('heading', { name: 'Favourites' })).toBeDefined()
+    expect(await screen.findByRole('heading', { name: 'Favourites' })).toBeDefined()
+    // One tile from the feed, one from the cached favourites row.
+    expect(screen.getAllByRole('button', { name: /Campaign 1/ })).toHaveLength(2)
   })
 
   it('replaces a cached Favourites row when the account has moved on', async () => {
@@ -363,7 +378,7 @@ describe('App startup', () => {
       listImpl: () => live
     })
     render(<App />)
-    await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })
+    await screen.findByRole('button', { name: /Campaign 1/ })
 
     act(() => {
       window.dispatchEvent(new Event('focus'))
@@ -571,7 +586,7 @@ describe('App back', () => {
     const { quit } = stubApp({ home: HOME_WITH_SERIES })
     render(<App />)
 
-    await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })
+    await screen.findByRole('button', { name: /Campaign 1/ })
     fireEvent.keyDown(window, { key: 'Escape' })
 
     expect(quit).toHaveBeenCalledOnce()
@@ -581,8 +596,7 @@ describe('App back', () => {
     stubApp({ home: HOME_WITH_VIDEO })
     render(<App />)
 
-    await screen.findByTestId('hero-browse')
-    const tile = screen.getByRole('button', { name: /Episode 1/ })
+    const tile = await screen.findByRole('button', { name: /Episode 1/ })
     setFocused(tile)
     fireEvent.click(tile)
 
@@ -599,7 +613,7 @@ describe('App back', () => {
 
   it('keeps the tile focus when the page behind it painted from cache', async () => {
     const home: HomeData = {
-      hero: [SERIES],
+      hero: [],
       rows: [
         { id: 'latest', kind: 'latest', title: 'Latest', items: [{ ...VIDEO, slug: EPISODE.slug }] }
       ]
@@ -607,8 +621,7 @@ describe('App back', () => {
     stubApp({ home, cachedPages: { collections: [], contents: [EPISODE] } })
     render(<App />)
 
-    await screen.findByTestId('hero-browse')
-    const tile = screen.getByRole('button', { name: /Episode 1/ })
+    const tile = await screen.findByRole('button', { name: /Episode 1/ })
     setFocused(tile)
     fireEvent.click(tile)
     await screen.findByTestId('play')
@@ -636,8 +649,7 @@ describe('App back', () => {
     stubApp({ home: HOME_WITH_VIDEO })
     render(<App />)
 
-    await screen.findByTestId('hero-browse')
-    const tile = screen.getByRole('button', { name: /Episode 1/ })
+    const tile = await screen.findByRole('button', { name: /Episode 1/ })
     setFocused(tile)
     fireEvent.click(tile)
 
@@ -651,7 +663,7 @@ describe('App back', () => {
     stubApp({ home: HOME_WITH_VIDEO })
     render(<App />)
 
-    await screen.findByTestId('hero-browse')
+    await screen.findByRole('button', { name: /Episode 1/ })
 
     expect(document.querySelector('.app')?.classList.contains('app--focus-depth')).toBe(false)
   })
@@ -667,8 +679,7 @@ describe('App back', () => {
     stubApp({ home: HOME_WITH_VIDEO })
     render(<App />)
 
-    await screen.findByTestId('hero-browse')
-    const tile = screen.getByRole('button', { name: /Episode 1/ })
+    const tile = await screen.findByRole('button', { name: /Episode 1/ })
     setFocused(tile)
     fireEvent.click(tile)
 
@@ -680,7 +691,7 @@ describe('App back', () => {
     const { quit } = stubApp({ home: HOME_WITH_SERIES })
     render(<App />)
 
-    await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })
+    await screen.findByRole('button', { name: /Campaign 1/ })
     fireEvent.keyDown(window, { key: '/' })
     await screen.findByRole('heading', { level: 1, name: 'Search' })
 
@@ -718,12 +729,18 @@ describe('App sign-in', () => {
 
     await act(async () => deliver(HOME_WITH_SERIES))
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Campaign 1' })).toBeDefined()
+    expect(await screen.findByRole('button', { name: /Campaign 1/ })).toBeDefined()
     expect(screen.queryByRole('heading', { name: 'Sign in' })).toBeNull()
   })
 })
 
 describe('App favourites', () => {
+  /** Open the series from Home; its favourite control lives on the page head. */
+  async function openCollection(): Promise<HTMLElement> {
+    fireEvent.click(await screen.findByRole('button', { name: /Campaign 1/ }))
+    return screen.findByTestId('favourite-toggle')
+  }
+
   it('flips the button at once and spins until the account answers', async () => {
     let settle!: (data: FavouritesData) => void
     const { add } = stubApp({
@@ -735,24 +752,26 @@ describe('App favourites', () => {
     })
     render(<App />)
 
-    const button = await screen.findByTestId('hero-favourite')
+    const button = await openCollection()
     expect(button.textContent).toBe('Add to favourites')
 
     fireEvent.click(button)
 
     // The label is the new state immediately, with a spinner in place of the icon.
-    expect(screen.getByTestId('hero-favourite').textContent).toBe('Remove from favourites')
-    expect(screen.getByTestId('hero-favourite').getAttribute('aria-busy')).toBe('true')
-    expect(screen.getByTestId('hero-favourite').querySelector('.button__spinner')).not.toBeNull()
-    expect(add).toHaveBeenCalledWith(SERIES)
+    expect(screen.getByTestId('favourite-toggle').textContent).toBe('Remove from favourites')
+    expect(screen.getByTestId('favourite-toggle').getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByTestId('favourite-toggle').querySelector('.button__spinner')).not.toBeNull()
+    expect(add).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'series', slug: 'campaign-1', title: 'Campaign 1' })
+    )
 
     settle({ items: [favourite('campaign-1', 'Campaign 1')], after: null })
 
     await waitFor(() =>
-      expect(screen.getByTestId('hero-favourite').getAttribute('aria-busy')).toBe('false')
+      expect(screen.getByTestId('favourite-toggle').getAttribute('aria-busy')).toBe('false')
     )
-    expect(screen.getByTestId('hero-favourite').querySelector('.button__spinner')).toBeNull()
-    expect(screen.getByTestId('hero-favourite').textContent).toBe('Remove from favourites')
+    expect(screen.getByTestId('favourite-toggle').querySelector('.button__spinner')).toBeNull()
+    expect(screen.getByTestId('favourite-toggle').textContent).toBe('Remove from favourites')
   })
 
   it('puts the button back when the account refuses the write', async () => {
@@ -762,22 +781,22 @@ describe('App favourites', () => {
     })
     render(<App />)
 
-    const button = await screen.findByTestId('hero-favourite')
+    const button = await openCollection()
     fireEvent.click(button)
-    expect(screen.getByTestId('hero-favourite').textContent).toBe('Remove from favourites')
+    expect(screen.getByTestId('favourite-toggle').textContent).toBe('Remove from favourites')
 
     await waitFor(() =>
-      expect(screen.getByTestId('hero-favourite').textContent).toBe('Add to favourites')
+      expect(screen.getByTestId('favourite-toggle').textContent).toBe('Add to favourites')
     )
     expect(add).toHaveBeenCalledOnce()
-    expect(screen.getByTestId('hero-favourite').getAttribute('aria-busy')).toBe('false')
+    expect(screen.getByTestId('favourite-toggle').getAttribute('aria-busy')).toBe('false')
   })
 
   it('removes a favourite at once and spins while storing that', async () => {
     let settle!: (data: FavouritesData) => void
     const { remove } = stubApp({
       home: HOME_WITH_SERIES,
-      items: [favourite('campaign-1', 'Campaign 1')],
+      items: [favourite('campaign-1', 'Saved Campaign')],
       remove: () =>
         new Promise<FavouritesData>((resolve) => {
           settle = resolve
@@ -785,18 +804,18 @@ describe('App favourites', () => {
     })
     render(<App />)
 
-    const button = await screen.findByTestId('hero-favourite')
+    const button = await openCollection()
     expect(button.textContent).toBe('Remove from favourites')
 
     fireEvent.click(button)
 
-    expect(screen.getByTestId('hero-favourite').textContent).toBe('Add to favourites')
-    expect(screen.getByTestId('hero-favourite').getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByTestId('favourite-toggle').textContent).toBe('Add to favourites')
+    expect(screen.getByTestId('favourite-toggle').getAttribute('aria-busy')).toBe('true')
     expect(remove).toHaveBeenCalledWith('campaign-1')
 
     settle({ items: [], after: null })
     await waitFor(() =>
-      expect(screen.getByTestId('hero-favourite').getAttribute('aria-busy')).toBe('false')
+      expect(screen.getByTestId('favourite-toggle').getAttribute('aria-busy')).toBe('false')
     )
   })
 })

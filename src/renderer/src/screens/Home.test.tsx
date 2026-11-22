@@ -3,15 +3,10 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Card, FavouriteItem, HomeData } from '@shared/types'
 import { SPINNER_DELAY } from '../components/ui'
-import { HERO_WIDTH, preloadAll } from '../lib/images'
 import { focusFirst } from '../nav/focus'
 import { Home } from './Home'
 
 vi.mock('../nav/focus', () => ({ focusFirst: vi.fn() }))
-vi.mock('../lib/images', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/images')>()
-  return { ...actual, preloadAll: vi.fn() }
-})
 
 afterEach(() => {
   cleanup()
@@ -20,7 +15,6 @@ afterEach(() => {
 })
 
 beforeEach(() => {
-  vi.mocked(preloadAll).mockClear()
   vi.mocked(focusFirst).mockClear()
 })
 
@@ -83,7 +77,7 @@ describe('Home', () => {
   it('holds the loader back while a slow feed is still worth waiting for', () => {
     vi.useFakeTimers()
     stubHome(new Promise<HomeData>(() => {}))
-    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} />)
+    render(<Home onOpen={vi.fn()} />)
 
     expect(screen.queryByText('Loading Beacon')).toBeNull()
     act(() => vi.advanceTimersByTime(SPINNER_DELAY - 1))
@@ -94,28 +88,25 @@ describe('Home', () => {
 
   it('never flashes the loader when the feed arrives quickly', async () => {
     stubHome(homeData())
-    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} />)
+    render(<Home onOpen={vi.fn()} />)
 
     expect(screen.queryByText('Loading Beacon')).toBeNull()
-    expect(await screen.findByRole('heading', { level: 1, name: 'Featured One' })).toBeDefined()
+    expect(await screen.findByRole('heading', { name: 'Recently added' })).toBeDefined()
     expect(screen.queryByText('Loading Beacon')).toBeNull()
   })
 
   it('shows a feed fetched during sign-in without a loader', async () => {
     stubHome(new Promise<HomeData>(() => {}))
-    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} initial={homeData()} />)
+    render(<Home onOpen={vi.fn()} initial={homeData()} />)
 
     expect(screen.queryByText('Loading Beacon')).toBeNull()
-    expect(screen.getByRole('heading', { level: 1, name: 'Featured One' })).toBeDefined()
     expect(screen.getByRole('heading', { name: 'Recently added' })).toBeDefined()
   })
 
   it('revalidates account data when the window regains focus', async () => {
     stubHome(new Promise<HomeData>(() => {}))
     const onRevalidate = vi.fn()
-    render(
-      <Home onOpen={vi.fn()} onPlay={vi.fn()} initial={homeData()} onRevalidate={onRevalidate} />
-    )
+    render(<Home onOpen={vi.fn()} initial={homeData()} onRevalidate={onRevalidate} />)
 
     act(() => {
       window.dispatchEvent(new Event('focus'))
@@ -128,63 +119,38 @@ describe('Home', () => {
     stubHome(
       Promise.reject(new Error("Error invoking remote method 'catalog:home': Error: Network down"))
     )
-    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} />)
+    render(<Home onOpen={vi.fn()} />)
 
     expect(await screen.findByText('Network down')).toBeDefined()
   })
 
   it('keeps the cached feed on screen when its refresh fails', async () => {
     stubHome(Promise.reject(new Error('Network down')))
-    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} initial={homeData()} />)
+    render(<Home onOpen={vi.fn()} initial={homeData()} />)
 
     expect(await screen.findByText("Couldn't refresh — saved copy")).toBeDefined()
-    expect(screen.getByRole('heading', { level: 1, name: 'Featured One' })).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'Recently added' })).toBeDefined()
     expect(screen.queryByText('Network down')).toBeNull()
   })
 
-  it('shows the first featured card and the rows', async () => {
+  it('shows only the shelves, and starts focus on the first tile', async () => {
     stubHome(homeData())
-    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} />)
+    const { container } = render(<Home onOpen={vi.fn()} />)
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Featured One' })).toBeDefined()
-    expect(screen.getByRole('heading', { name: 'Recently added' })).toBeDefined()
-    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('[data-focus]'))
-    expect(preloadAll).toHaveBeenCalledWith([
-      `https://images.example/feat-1x/format=auto,width=${HERO_WIDTH}`,
-      `https://images.example/feat-2x/format=auto,width=${HERO_WIDTH}`
-    ])
-  })
-
-  it('previews the tile that takes focus', async () => {
-    const data = homeData()
-    stubHome(data)
-    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} />)
-    await screen.findByRole('heading', { level: 1, name: 'Featured One' })
-
-    fireEvent.focusIn(screen.getByText('Episode a').closest('button')!)
-
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Episode a')
-  })
-
-  it('plays the focused preview from the hero', async () => {
-    const data = homeData()
-    const onPlay = vi.fn()
-    stubHome(data)
-    render(<Home onOpen={vi.fn()} onPlay={onPlay} />)
-    await screen.findByRole('heading', { level: 1, name: 'Featured One' })
-
-    fireEvent.focusIn(screen.getByText('Episode b').closest('button')!)
-    fireEvent.click(screen.getByTestId('hero-play'))
-
-    expect(onPlay).toHaveBeenCalledWith(data.rows[0].items[1])
+    expect(await screen.findByRole('heading', { name: 'Recently added' })).toBeDefined()
+    // The hero is no longer drawn: its featured cards do not appear at all.
+    expect(screen.queryByText('Featured One')).toBeNull()
+    expect(container.querySelector('.hero')).toBeNull()
+    expect(container.querySelector('.screen--split')).toBeNull()
+    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('.row__track [data-focus]'))
   })
 
   it('opens the card selected in a row', async () => {
     const data = homeData()
     const onOpen = vi.fn()
     stubHome(data)
-    render(<Home onOpen={onOpen} onPlay={vi.fn()} />)
-    await screen.findByRole('heading', { level: 1, name: 'Featured One' })
+    render(<Home onOpen={onOpen} />)
+    await screen.findByRole('heading', { name: 'Recently added' })
 
     fireEvent.click(screen.getByText('Episode b'))
 
@@ -205,7 +171,7 @@ describe('Home', () => {
         ]
       })
     )
-    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} favourites={[favourite('w1', 'Saved One')]} />)
+    render(<Home onOpen={vi.fn()} favourites={[favourite('w1', 'Saved One')]} />)
 
     expect(await screen.findByRole('heading', { name: 'Favourites' })).toBeDefined()
     expect(shelfTitles()).toEqual(['Continue watching', 'Favourites', 'Recently added'])
@@ -220,7 +186,7 @@ describe('Home', () => {
         ]
       })
     )
-    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} favourites={[favourite('w1', 'Saved One')]} />)
+    render(<Home onOpen={vi.fn()} favourites={[favourite('w1', 'Saved One')]} />)
 
     await screen.findByRole('heading', { name: 'Favourites' })
     expect(shelfTitles()).toEqual(['Favourites', 'Recently added'])
@@ -241,12 +207,7 @@ describe('Home', () => {
       })
     )
     render(
-      <Home
-        onOpen={vi.fn()}
-        onPlay={vi.fn()}
-        favourites={[favourite('w1', 'Saved One')]}
-        favouritesAfter="recent"
-      />
+      <Home onOpen={vi.fn()} favourites={[favourite('w1', 'Saved One')]} favouritesAfter="recent" />
     )
 
     await screen.findByRole('heading', { name: 'Favourites' })
@@ -255,7 +216,7 @@ describe('Home', () => {
 
   it('hides the row while there are no favourites', async () => {
     stubHome(homeData())
-    render(<Home onOpen={vi.fn()} onPlay={vi.fn()} favourites={[]} />)
+    render(<Home onOpen={vi.fn()} favourites={[]} />)
 
     await screen.findByRole('heading', { name: 'Recently added' })
     expect(screen.queryByRole('heading', { name: 'Favourites' })).toBeNull()
@@ -279,7 +240,6 @@ describe('Home', () => {
     render(
       <Home
         onOpen={vi.fn()}
-        onPlay={vi.fn()}
         favourites={[favourite('w1', 'Saved One')]}
         onMoveFavourites={onMoveFavourites}
       />
@@ -311,7 +271,6 @@ describe('Home', () => {
     const { rerender } = render(
       <Home
         onOpen={vi.fn()}
-        onPlay={vi.fn()}
         favourites={[favourite('w1', 'Saved One')]}
         favouritesAfter="top"
         onMoveFavourites={vi.fn()}
@@ -325,7 +284,6 @@ describe('Home', () => {
     rerender(
       <Home
         onOpen={vi.fn()}
-        onPlay={vi.fn()}
         favourites={[favourite('w1', 'Saved One')]}
         favouritesAfter="recent"
         onMoveFavourites={vi.fn()}
@@ -334,28 +292,6 @@ describe('Home', () => {
 
     expect(screen.getByTestId<HTMLButtonElement>('favourites-up').disabled).toBe(false)
     expect(screen.getByTestId<HTMLButtonElement>('favourites-down').disabled).toBe(true)
-  })
-
-  it('favourites the previewed series from the hero, saved or not', async () => {
-    const onToggleFavourite = vi.fn()
-    stubHome(homeData())
-    render(
-      <Home
-        onOpen={vi.fn()}
-        onPlay={vi.fn()}
-        favourites={[favourite('w1', 'Saved One')]}
-        onToggleFavourite={onToggleFavourite}
-      />
-    )
-    await screen.findByRole('heading', { level: 1, name: 'Featured One' })
-    // The featured card is an episode: there is nothing to favourite yet.
-    expect(screen.queryByTestId('hero-favourite')).toBeNull()
-
-    fireEvent.focusIn(screen.getByText('Saved One').closest('button')!)
-    expect(screen.getByTestId('hero-favourite').textContent).toBe('Remove from favourites')
-
-    fireEvent.click(screen.getByTestId('hero-favourite'))
-    expect(onToggleFavourite).toHaveBeenCalledWith(expect.objectContaining({ slug: 'w1' }))
   })
 
   it('refreshes the feed after playback without blanking it or moving focus', async () => {
@@ -374,10 +310,10 @@ describe('Home', () => {
     const home = vi.fn().mockResolvedValueOnce(before).mockResolvedValueOnce(after)
     vi.stubGlobal('beacon', { catalog: { home } })
 
-    const { rerender } = render(<Home onOpen={vi.fn()} onPlay={vi.fn()} />)
+    const { rerender } = render(<Home onOpen={vi.fn()} />)
     await screen.findByRole('heading', { name: 'Recently added' })
 
-    rerender(<Home onOpen={vi.fn()} onPlay={vi.fn()} refreshKey={1} />)
+    rerender(<Home onOpen={vi.fn()} refreshKey={1} />)
     // The feed the viewer is looking at stays up until the new one is ready.
     expect(screen.getByRole('heading', { name: 'Recently added' })).toBeDefined()
     expect(screen.queryByText('Loading Beacon')).toBeNull()

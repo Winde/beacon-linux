@@ -623,6 +623,11 @@ kbd {
 
 /* ---------- rows ---------- */
 
+/* Home has no header: the shelves start at the safe edge themselves. */
+.screen--home {
+  padding-top: 28px;
+}
+
 .rows {
   /* Clear of the pinned header: a shelf with no heading has no title margin to
    * hold its artwork away from the hero above it. */

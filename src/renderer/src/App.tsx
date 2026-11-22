@@ -330,8 +330,6 @@ export default function App(): React.JSX.Element {
     setPlayer({ slug, startAt })
   }, [])
 
-  const playCard = useCallback((card: Card) => play(card.slug), [play])
-
   const openLogin = useCallback(() => {
     push({ name: 'login' })
   }, [push])
@@ -895,14 +893,11 @@ export default function App(): React.JSX.Element {
         return (
           <Home
             onOpen={openCard}
-            onPlay={playCard}
             refreshKey={progressVersion}
             initial={route.feed}
             favourites={favourites.items}
             favouritesAfter={favourites.after}
-            onToggleFavourite={signedIn ? toggleFavourite : undefined}
             onMoveFavourites={moveFavourites}
-            pendingFavourites={pendingFavourites}
             onRevalidate={refreshFavourites}
           />
         )
