@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Card, SearchData } from '@shared/types'
 import { focusFirst, setFocused } from '../nav/focus'
 import { OnScreenKeyboard } from '../components/OnScreenKeyboard'
@@ -29,7 +29,7 @@ export function Search({ onOpen }: SearchProps): React.JSX.Element {
   const [busy, setBusy] = useState(false)
   const root = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     focusFirst('.keyboard .key')
   }, [])
 

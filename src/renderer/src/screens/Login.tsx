@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import type { CredentialStorage } from '@shared/types'
 import { focusFirst } from '../nav/focus'
 import { cleanError } from '../lib/errors'
@@ -16,8 +16,11 @@ export function Login({ onSignedIn, onSkip }: LoginProps): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [storage, setStorage] = useState<CredentialStorage | null>(null)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     focusFirst('[data-focus]')
+  }, [])
+
+  useEffect(() => {
     void window.beacon.auth
       .storage()
       .then(setStorage)

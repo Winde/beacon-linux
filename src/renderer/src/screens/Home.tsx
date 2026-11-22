@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { NavArrowDown, NavArrowUp } from 'iconoir-react'
 import type { Card, FavouriteItem, FavouritesAnchor, HomeData, HomeRow } from '@shared/types'
 import { isFavourite, toCard } from '@shared/favourites'
@@ -141,15 +141,20 @@ export function Home({
     onMoveFavourites?.(next[target - 1]?.id ?? 'top')
   }
 
+  // Focus is part of the page's first frame: a page transition snapshots the
+  // new screen after the commit, so a passive effect would capture it with no
+  // highlight. Layout effects run before that snapshot and before paint.
+  useLayoutEffect(() => {
+    if (!data || placed.current) return
+    // A refreshed feed must not yank focus back to the top of the page.
+    placed.current = true
+    focusFirst('[data-focus]')
+  }, [data])
+
   useEffect(() => {
     if (!data) return
     // Warm the featured backdrops so the first few focus moves have no wait.
     preloadAll(data.hero.map((card) => backdropUrl(card.image, card.image2x)))
-    // A refreshed feed must not yank focus back to the top of the page.
-    if (!placed.current) {
-      placed.current = true
-      focusFirst('[data-focus]')
-    }
     // Nor keep previewing a title that just left the feed or the favourites.
     setPreview((current) => {
       if (!current) return current

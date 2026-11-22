@@ -71,6 +71,78 @@ kbd {
   opacity: 0.55;
 }
 
+/* ---------- page transitions ---------- */
+
+/*
+ * A route change is a quick crossfade. The artwork is pulled out of both
+ * screenshots into one named group, so the focused tile becomes the page head
+ * (or the reverse on Back) while the surrounding chrome fades underneath.
+ * Fast enough for a remote: input has to stay ahead of the animation.
+ */
+::view-transition-group(root) {
+  animation-duration: 180ms;
+  animation-timing-function: ease;
+}
+
+::view-transition-old(root) {
+  animation: beacon-page-out 100ms ease-out both;
+}
+
+::view-transition-new(root) {
+  animation: beacon-page-in 180ms ease-out both;
+}
+
+::view-transition-group(beacon-art) {
+  z-index: 1;
+  animation-duration: 220ms;
+  animation-timing-function: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+::view-transition-old(beacon-art),
+::view-transition-new(beacon-art) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Header text stays on top of the artwork while it grows behind it. */
+::view-transition-group(beacon-head) {
+  z-index: 2;
+  animation-duration: 160ms;
+  animation-timing-function: ease-out;
+}
+
+::view-transition-new(beacon-head) {
+  animation: beacon-page-in 160ms ease-out both;
+}
+
+@keyframes beacon-page-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes beacon-page-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The JS already skips the transition API, but keep the pseudo-elements still
+   if a future caller runs one anyway. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(root),
+  ::view-transition-group(beacon-art),
+  ::view-transition-group(beacon-head),
+  ::view-transition-old(root),
+  ::view-transition-new(root),
+  ::view-transition-old(beacon-art),
+  ::view-transition-new(beacon-art),
+  ::view-transition-new(beacon-head) {
+    animation: none !important;
+  }
+}
+
 .rail {
   position: fixed;
   inset: 0 auto 0 0;
@@ -358,6 +430,12 @@ kbd {
   /* The blurred stand-in is scaled past the hero box; without clipping its
    * glow and blur spill over the first row of the shelf below. */
   overflow: hidden;
+}
+
+/* The art and its shade travel together in a page transition. */
+.hero__art {
+  position: absolute;
+  inset: 0;
 }
 
 .hero__bg {
@@ -759,6 +837,12 @@ kbd {
  * that content instead of reserving 420 and squeezing the shelves. */
 .page-head--tall {
   min-height: 320px;
+}
+
+/* The art and its shade travel together in a page transition. */
+.page-head__art {
+  position: absolute;
+  inset: 0;
 }
 
 .page-head__bg {

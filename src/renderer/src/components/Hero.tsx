@@ -41,27 +41,29 @@ export function Hero({
 
   return (
     <section className="hero">
-      {card.image ? (
-        <img
-          key={card.image}
-          className="hero__bg hero__bg--stand-in"
-          src={card.image}
-          alt=""
-          draggable={false}
-          aria-hidden
-        />
-      ) : null}
-      {shown ? (
-        <img
-          key={shown}
-          className="hero__bg hero__bg--fresh"
-          src={shown}
-          alt=""
-          draggable={false}
-          decoding="async"
-        />
-      ) : null}
-      <div className="hero__shade" />
+      <div className="hero__art">
+        {card.image ? (
+          <img
+            key={card.image}
+            className="hero__bg hero__bg--stand-in"
+            src={card.image}
+            alt=""
+            draggable={false}
+            aria-hidden
+          />
+        ) : null}
+        {shown ? (
+          <img
+            key={shown}
+            className="hero__bg hero__bg--fresh"
+            src={shown}
+            alt=""
+            draggable={false}
+            decoding="async"
+          />
+        ) : null}
+        <div className="hero__shade" />
+      </div>
       <div className="hero__body">
         <p className="hero__eyebrow">Featured</p>
         <h1 className="hero__title">{card.title}</h1>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import type { Card, FavouritesAnchor, FavouritesData, HomeData, UpdateInfo } from '@shared/types'
 import { isFavourite, optimisticItem } from '@shared/favourites'
 import { useInput } from './input/useInput'
@@ -76,6 +77,81 @@ function routeElement(id: number): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[data-route-id="${id}"]`)
 }
 
+/** Artwork and header text that can carry a page transition. */
+const ART_ATTR = 'data-view-art'
+const HEAD_ATTR = 'data-view-head'
+
+function pageArt(container: ParentNode | null): HTMLElement | null {
+  if (!container) return null
+  return (
+    container.querySelector<HTMLElement>('.page-head__art') ??
+    container.querySelector<HTMLElement>('.hero__art') ??
+    // Older or synthetic markup without the wrapper still gets a usable image.
+    container.querySelector<HTMLElement>('.page-head__bg') ??
+    container.querySelector<HTMLElement>('.hero__bg--fresh') ??
+    container.querySelector<HTMLElement>('.hero__bg--stand-in')
+  )
+}
+
+function tileArt(element: HTMLElement | null): HTMLElement | null {
+  return element?.querySelector<HTMLElement>('.tile__art') ?? null
+}
+
+function visibleRoute(): HTMLElement | null {
+  return (
+    Array.from(document.querySelectorAll<HTMLElement>('.route')).find(
+      (route) => route.style.display !== 'none'
+    ) ?? null
+  )
+}
+
+function activePageArt(): HTMLElement | null {
+  return pageArt(visibleRoute())
+}
+
+/** The art under the focused control, or its page's header art. */
+function focusedArt(): HTMLElement | null {
+  const focused = getFocused()
+  if (!focused) return null
+  return tileArt(focused) ?? pageArt(focused.closest<HTMLElement>('.route'))
+}
+
+function markArt(element: HTMLElement | null): void {
+  if (!element) return
+  element.dataset.viewArt = ''
+  element.style.viewTransitionName = 'beacon-art'
+}
+
+/**
+ * The title/actions that sit on top of the header art. Naming them separately
+ * keeps them above the expanding artwork; otherwise the art covers them until
+ * the transition ends.
+ */
+function pageHeadline(art: HTMLElement | null): HTMLElement | null {
+  if (!art) return null
+  if (art.classList.contains('hero__art')) {
+    return art.parentElement?.querySelector<HTMLElement>('.hero__body') ?? null
+  }
+  if (art.classList.contains('page-head__art')) {
+    return art.parentElement?.querySelector<HTMLElement>('.page-head__body') ?? null
+  }
+  return null
+}
+
+function markHeadline(element: HTMLElement | null): void {
+  if (!element) return
+  element.dataset.viewHead = ''
+  element.style.viewTransitionName = 'beacon-head'
+}
+
+function clearArt(): void {
+  for (const element of document.querySelectorAll<HTMLElement>(`[${ART_ATTR}], [${HEAD_ATTR}]`)) {
+    element.removeAttribute(ART_ATTR)
+    element.removeAttribute(HEAD_ATTR)
+    element.style.viewTransitionName = ''
+  }
+}
+
 const EMPTY_FAVOURITES: FavouritesData = { items: [], after: null }
 
 export default function App(): React.JSX.Element {
@@ -89,6 +165,11 @@ export default function App(): React.JSX.Element {
   /** Route ids the last render had, to tell a return from a new page. */
   const seenRoutes = useRef<number[]>([])
   const activeRouteId = useRef<number | null>(null)
+  /** The current stack, read by navigation without making callbacks depend on it. */
+  const stackRef = useRef<Entry[]>([])
+  stackRef.current = stack
+  /** Orders page transitions so a superseded one cannot clear the next. */
+  const transitionSeq = useRef(0)
   const [railOpen, setRailOpen] = useState(false)
   const railReturn = useRef<HTMLElement | null>(null)
   /** Whether the rail should offer Sign out; guests have no account to leave. */
@@ -120,17 +201,108 @@ export default function App(): React.JSX.Element {
   const [knownUpdate, setKnownUpdate] = useState<UpdateInfo | null>(null)
   const updateReturn = useRef<HTMLElement | null>(null)
 
-  const push = useCallback((route: Route) => {
-    setStack((current) => [...current, { id: nextId.current++, route }])
+  /**
+   * Navigate behind a fast crossfade, carrying the source and destination
+   * artwork through one named View Transition. The old and new screenshots
+   * crossfade; the art morphs from tile to header (or back) above them.
+   *
+   * Every navigation must still work when the API is unavailable (tests,
+   * reduced motion, or an engine without View Transitions): those fall back to
+   * the same state update with no animation.
+   */
+  const navigate = useCallback(
+    (
+      update: () => void,
+      source: HTMLElement | null,
+      destination: () => HTMLElement | null
+    ): void => {
+      const start = document.startViewTransition?.bind(document)
+      if (!start || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+        update()
+        return
+      }
+
+      const seq = ++transitionSeq.current
+      clearArt()
+      markArt(source)
+
+      let updated = false
+      const apply = (): void => {
+        if (updated) return
+        updated = true
+        try {
+          flushSync(update)
+          if (seq !== transitionSeq.current) return
+          // The old screenshot already holds the source; give the new snapshot
+          // the same name so the two pieces of artwork morph into each other.
+          clearArt()
+          const destinationArt = destination()
+          markArt(destinationArt)
+          markHeadline(pageHeadline(destinationArt))
+        } catch {
+          clearArt()
+        }
+      }
+
+      let transition: ViewTransition
+      try {
+        transition = start(apply)
+      } catch {
+        clearArt()
+        if (!updated) update()
+        return
+      }
+
+      void transition.finished.finally(() => {
+        if (seq === transitionSeq.current) clearArt()
+      })
+    },
+    []
+  )
+
+  /** Save what the page being left was focused on, before a child page can
+   * take focus in its own layout effect. */
+  const rememberFocus = useCallback(() => {
+    const active = stackRef.current[stackRef.current.length - 1]
+    const focused = getFocused()
+    if (!active || !focused?.isConnected) return
+    const route = routeElement(active.id)
+    if (route?.contains(focused)) focusByRoute.current.set(active.id, focused)
   }, [])
 
-  const reset = useCallback((route: Route) => {
-    setStack([{ id: nextId.current++, route }])
-  }, [])
+  const push = useCallback(
+    (route: Route) => {
+      rememberFocus()
+      const entry = { id: nextId.current++, route }
+      navigate(() => setStack((current) => [...current, entry]), focusedArt(), activePageArt)
+    },
+    [navigate, rememberFocus]
+  )
+
+  const reset = useCallback(
+    (route: Route) => {
+      // The first route of a launch is not a navigation: Home must be there
+      // when the window opens, not fade in from an empty document.
+      if (stackRef.current.length === 0) {
+        setStack([{ id: nextId.current++, route }])
+        return
+      }
+      rememberFocus()
+      const entry = { id: nextId.current++, route }
+      navigate(() => setStack([entry]), activePageArt(), activePageArt)
+    },
+    [navigate, rememberFocus]
+  )
 
   const back = useCallback(() => {
-    setStack((current) => (current.length > 1 ? current.slice(0, -1) : current))
-  }, [])
+    if (stackRef.current.length <= 1) return
+    rememberFocus()
+    navigate(
+      () => setStack((current) => (current.length > 1 ? current.slice(0, -1) : current)),
+      activePageArt(),
+      focusedArt
+    )
+  }, [navigate, rememberFocus])
 
   const openCard = useCallback(
     (card: Card) => {
@@ -141,9 +313,14 @@ export default function App(): React.JSX.Element {
   )
 
   /** The episode page's series link is an "up" move, not a new stack level. */
-  const openSeriesUp = useCallback((slug: string, card?: Card) => {
-    setStack((current) => upToCollection(current, slug, () => nextId.current++, card))
-  }, [])
+  const openSeriesUp = useCallback(
+    (slug: string, card?: Card) => {
+      rememberFocus()
+      const next = upToCollection(stackRef.current, slug, () => nextId.current++, card)
+      navigate(() => setStack(next), activePageArt(), activePageArt)
+    },
+    [navigate, rememberFocus]
+  )
 
   const play = useCallback((slug: string, startAt?: number) => {
     lastFocus.current = getFocused()
@@ -178,9 +355,12 @@ export default function App(): React.JSX.Element {
   }, [])
 
   const openRail = useCallback(() => {
+    // Before the rail takes focus, remember the page target it came from, so a
+    // rail destination that is later dismissed returns to the same content.
+    rememberFocus()
     railReturn.current = getFocused()
     setRailOpen(true)
-  }, [])
+  }, [rememberFocus])
 
   const closeRail = useCallback(() => {
     setRailOpen(false)

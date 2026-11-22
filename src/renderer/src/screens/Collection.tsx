@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Card, CollectionData } from '@shared/types'
 import { useAsync } from '../lib/useAsync'
 import { isPageMissing, PageMissingError } from '../lib/errors'
@@ -30,14 +30,16 @@ function CollectionSkeleton({ card }: { card?: Card }): React.JSX.Element {
   return (
     <div className="screen screen--split" aria-busy="true">
       <header className="page-head">
-        {card?.image ? (
-          <img
-            className="page-head__bg"
-            src={backdropUrl(card.image, card.image2x) ?? undefined}
-            alt=""
-          />
-        ) : null}
-        <div className="page-head__shade" />
+        <div className="page-head__art">
+          {card?.image ? (
+            <img
+              className="page-head__bg"
+              src={backdropUrl(card.image, card.image2x) ?? undefined}
+              alt=""
+            />
+          ) : null}
+          <div className="page-head__shade" />
+        </div>
         <div className="page-head__body">
           {card ? (
             <>
@@ -92,7 +94,7 @@ export function Collection({
   const [seasonIndex, setSeasonIndex] = useState(0)
   const placed = useRef(false)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!data || placed.current) return
     placed.current = true
     // Browsing is the point of this screen: put focus on the seasons or the
@@ -128,14 +130,16 @@ export function Collection({
     <div className="screen screen--split">
       <RefreshNote refreshing={refreshing} error={error} hasData />
       <header className="page-head">
-        {data.image ? (
-          <img
-            className="page-head__bg"
-            src={backdropUrl(data.image, data.image2x) ?? undefined}
-            alt=""
-          />
-        ) : null}
-        <div className="page-head__shade" />
+        <div className="page-head__art">
+          {data.image ? (
+            <img
+              className="page-head__bg"
+              src={backdropUrl(data.image, data.image2x) ?? undefined}
+              alt=""
+            />
+          ) : null}
+          <div className="page-head__shade" />
+        </div>
         <div className="page-head__body">
           <h1 className="page-head__title">{data.title}</h1>
           <p className="page-head__sub">

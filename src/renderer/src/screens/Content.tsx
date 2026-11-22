@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Card, ContentData } from '@shared/types'
 import { useAsync } from '../lib/useAsync'
 import { cleanError, isPageMissing, PageMissingError } from '../lib/errors'
@@ -43,14 +43,16 @@ function ContentSkeleton({ card }: { card?: Card }): React.JSX.Element {
   return (
     <div className="screen screen--split" aria-busy="true">
       <header className="page-head page-head--tall">
-        {card?.image ? (
-          <img
-            className="page-head__bg"
-            src={backdropUrl(card.image, card.image2x) ?? undefined}
-            alt=""
-          />
-        ) : null}
-        <div className="page-head__shade" />
+        <div className="page-head__art">
+          {card?.image ? (
+            <img
+              className="page-head__bg"
+              src={backdropUrl(card.image, card.image2x) ?? undefined}
+              alt=""
+            />
+          ) : null}
+          <div className="page-head__shade" />
+        </div>
         <div className="page-head__body">
           {card?.subtitle ? (
             <p className="page-head__eyebrow">{card.subtitle}</p>
@@ -132,7 +134,9 @@ export function Content({
     setExpanded(false)
   }, [slug])
 
-  useEffect(() => {
+  // Before the page's first paint, so the transition's new snapshot already
+  // shows Play focused.
+  useLayoutEffect(() => {
     if (!data) return
     if (!placed.current) {
       placed.current = true
@@ -228,14 +232,16 @@ export function Content({
     <div className="screen screen--split">
       <RefreshNote refreshing={refreshing} error={error} hasData />
       <header className="page-head page-head--tall">
-        {data.image ? (
-          <img
-            className="page-head__bg"
-            src={backdropUrl(data.image, data.image2x) ?? undefined}
-            alt=""
-          />
-        ) : null}
-        <div className="page-head__shade" />
+        <div className="page-head__art">
+          {data.image ? (
+            <img
+              className="page-head__bg"
+              src={backdropUrl(data.image, data.image2x) ?? undefined}
+              alt=""
+            />
+          ) : null}
+          <div className="page-head__shade" />
+        </div>
         <div className="page-head__body">
           {series ? (
             <button

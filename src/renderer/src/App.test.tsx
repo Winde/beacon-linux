@@ -25,6 +25,7 @@ afterEach(() => {
   cleanup()
   pageCache.clear()
   vi.unstubAllGlobals()
+  Reflect.deleteProperty(document, 'startViewTransition')
 })
 
 function favourite(slug: string, title: string): FavouriteItem {
@@ -589,6 +590,55 @@ describe('App back', () => {
 
     await waitFor(() => expect(document.activeElement).toBe(tile))
     expect(tile.classList.contains('is-focused')).toBe(true)
+  })
+
+  it('keeps the tile focus when the page behind it painted from cache', async () => {
+    const home: HomeData = {
+      hero: [SERIES],
+      rows: [
+        { id: 'latest', kind: 'latest', title: 'Latest', items: [{ ...VIDEO, slug: EPISODE.slug }] }
+      ]
+    }
+    stubApp({ home, cachedPages: { collections: [], contents: [EPISODE] } })
+    render(<App />)
+
+    await screen.findByTestId('hero-browse')
+    const tile = screen.getByRole('button', { name: /Episode 1/ })
+    setFocused(tile)
+    fireEvent.click(tile)
+    await screen.findByTestId('play')
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    await waitFor(() => expect(document.activeElement).toBe(tile))
+    expect(tile.classList.contains('is-focused')).toBe(true)
+  })
+
+  it('carries the focused tile through a page transition', async () => {
+    let sourceNames: string[] = []
+    const start = vi.fn((callback: () => void) => {
+      sourceNames = Array.from(document.querySelectorAll<HTMLElement>('[data-view-art]')).map(
+        (element) => element.className
+      )
+      callback()
+      return { finished: Promise.resolve() }
+    })
+    Object.defineProperty(document, 'startViewTransition', {
+      configurable: true,
+      value: start
+    })
+
+    stubApp({ home: HOME_WITH_VIDEO })
+    render(<App />)
+
+    await screen.findByTestId('hero-browse')
+    const tile = screen.getByRole('button', { name: /Episode 1/ })
+    setFocused(tile)
+    fireEvent.click(tile)
+
+    await waitFor(() => expect(start).toHaveBeenCalledOnce())
+    expect(sourceNames).toEqual(['tile__art'])
+    await waitFor(() => expect(document.querySelector('[data-view-art]')).toBeNull())
   })
 
   it('goes back a screen before it offers to exit', async () => {

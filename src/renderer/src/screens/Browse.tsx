@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Card } from '@shared/types'
 import { useAsync } from '../lib/useAsync'
 import { BROWSE_SORTS, sortBrowseCards, type BrowseSort } from '../lib/browse'
@@ -35,7 +35,7 @@ export function Browse({ onOpen }: BrowseProps): React.JSX.Element | null {
     return sortBrowseCards(source, sort)
   }, [active, data, sort])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!data || placed.current) return
     placed.current = true
     focusFirst(data.series.length && data.collections.length ? '.tab' : '.grid [data-focus]')
