@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Card, FavouritesAnchor, FavouritesData, HomeData, UpdateInfo } from '@shared/types'
 import { isFavourite, optimisticItem } from '@shared/favourites'
 import { useInput } from './input/useInput'
@@ -71,6 +71,11 @@ function openRailElement(): HTMLElement | null {
   return document.querySelector<HTMLElement>('.rail.is-open')
 }
 
+/** The mounted page for one stack entry. Hidden routes remain queryable. */
+function routeElement(id: number): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-route-id="${id}"]`)
+}
+
 const EMPTY_FAVOURITES: FavouritesData = { items: [], after: null }
 
 export default function App(): React.JSX.Element {
@@ -79,6 +84,11 @@ export default function App(): React.JSX.Element {
   const playerRef = useRef<PlayerHandle>(null)
   const lastFocus = useRef<HTMLElement | null>(null)
   const nextId = useRef(0)
+  /** What was focused on each page, so Back can put the highlight back. */
+  const focusByRoute = useRef(new Map<number, HTMLElement>())
+  /** Route ids the last render had, to tell a return from a new page. */
+  const seenRoutes = useRef<number[]>([])
+  const activeRouteId = useRef<number | null>(null)
   const [railOpen, setRailOpen] = useState(false)
   const railReturn = useRef<HTMLElement | null>(null)
   /** Whether the rail should offer Sign out; guests have no account to leave. */
@@ -499,6 +509,50 @@ export default function App(): React.JSX.Element {
     }
   }, [loadFavourites, refreshSession, reset])
 
+  /**
+   * Pages stay mounted, so their scroll position survives Back, but their DOM
+   * focus does not: hiding a route clears it. Remember the last focus on each
+   * page and put it back when that page returns, or Back leaves the viewer on a
+   * screen with no highlight and an A press that does nothing.
+   */
+  useLayoutEffect(() => {
+    const activeId = stack[stack.length - 1]?.id ?? null
+    const previousId = activeRouteId.current
+    const known = seenRoutes.current
+
+    if (activeId !== previousId) {
+      const focused = getFocused()
+      const previousRoute = previousId === null ? null : routeElement(previousId)
+      if (
+        previousId !== null &&
+        previousRoute &&
+        focused?.isConnected &&
+        previousRoute.contains(focused)
+      ) {
+        focusByRoute.current.set(previousId, focused)
+      }
+
+      if (activeId !== null) {
+        const activeRoute = routeElement(activeId)
+        const saved = focusByRoute.current.get(activeId)
+        if (activeRoute && saved?.isConnected && activeRoute.contains(saved)) {
+          setFocused(saved)
+        } else if (activeRoute && known.includes(activeId)) {
+          // The old target left the page while it was hidden. Give the
+          // returning screen a valid starting point instead of no focus at all.
+          focusFirst(undefined, activeRoute)
+        }
+      }
+      activeRouteId.current = activeId
+    }
+
+    seenRoutes.current = stack.map((entry) => entry.id)
+    const present = new Set(seenRoutes.current)
+    for (const id of focusByRoute.current.keys()) {
+      if (!present.has(id)) focusByRoute.current.delete(id)
+    }
+  }, [stack])
+
   useInput((action) => {
     if (player) {
       playerRef.current?.handle(action)
@@ -721,6 +775,7 @@ export default function App(): React.JSX.Element {
         <div
           key={entry.id}
           className="route"
+          data-route-id={entry.id}
           style={{ display: index === stack.length - 1 ? 'block' : 'none' }}
         >
           {renderRoute(entry.route)}

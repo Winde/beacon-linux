@@ -110,7 +110,7 @@ export function Browse({ onOpen }: BrowseProps): React.JSX.Element | null {
         </div>
       ) : null}
 
-      <ScreenScroll>
+      <ScreenScroll resetKey={`${active}:${sort}`}>
         {items.length ? (
           <div className="grid" data-focus-row>
             {items.map((card) => (

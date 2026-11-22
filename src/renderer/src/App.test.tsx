@@ -13,6 +13,7 @@ import type {
   UpdateInfo
 } from '@shared/types'
 import App, { upToCollection, type Entry } from './App'
+import { setFocused } from './nav/focus'
 import { pageCache } from './lib/pages'
 
 beforeEach(() => {
@@ -49,6 +50,21 @@ const SERIES: Card = {
 }
 
 const HOME_WITH_SERIES: HomeData = { hero: [SERIES], rows: [] }
+
+const VIDEO: Card = {
+  kind: 'video',
+  id: 'id-video-1',
+  slug: 'video-1',
+  title: 'Episode 1',
+  image: null,
+  image2x: null,
+  minutes: 30
+}
+
+const HOME_WITH_VIDEO: HomeData = {
+  hero: [SERIES],
+  rows: [{ id: 'latest', kind: 'latest', title: 'Latest', items: [VIDEO] }]
+}
 
 const EPISODE: ContentData = {
   id: 'e5',
@@ -553,6 +569,26 @@ describe('App back', () => {
     fireEvent.keyDown(window, { key: 'Escape' })
 
     expect(quit).toHaveBeenCalledOnce()
+  })
+
+  it('puts the highlight back on the tile that opened the page', async () => {
+    stubApp({ home: HOME_WITH_VIDEO })
+    render(<App />)
+
+    await screen.findByTestId('hero-browse')
+    const tile = screen.getByRole('button', { name: /Episode 1/ })
+    setFocused(tile)
+    fireEvent.click(tile)
+
+    // jsdom has no layout engine, so the page's own focusFirst() skips every
+    // candidate. Stand in for it: the real app focuses Play on arrival.
+    const play = await screen.findByTestId('play')
+    setFocused(play)
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    await waitFor(() => expect(document.activeElement).toBe(tile))
+    expect(tile.classList.contains('is-focused')).toBe(true)
   })
 
   it('goes back a screen before it offers to exit', async () => {

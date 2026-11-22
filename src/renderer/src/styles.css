@@ -188,6 +188,7 @@ kbd {
   overflow-y: auto;
   overflow-x: hidden;
   padding-bottom: 96px;
+  scroll-padding-bottom: 28px;
   scrollbar-width: none;
 }
 
@@ -222,6 +223,9 @@ kbd {
   overflow-y: auto;
   overflow-x: hidden;
   padding-bottom: 96px;
+  /* Room for the focus ring and swell below a tile at the bottom edge: without
+     it, scrollIntoView stops flush with the scroller and clips both. */
+  scroll-padding-bottom: 28px;
   scrollbar-width: none;
   /* Keep focus from parking a tile in the fade below the header. */
   scroll-padding-top: 80px;
@@ -232,10 +236,26 @@ kbd {
  * reads as the artwork being pasted over the list. Once the list moves, the
  * very top of the scroller fades out so rows dissolve into the header instead.
  * Kept short: a deeper fade eats the top of a focused tile.
+ *
+ * A sticky pseudo-element rather than a mask: a gradient layer can fade in and
+ * out, so the edge does not snap on the first pixel of scroll.
  */
-.screen__scroll.is-scrolled {
-  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 34px);
-  mask-image: linear-gradient(180deg, transparent 0, #000 34px);
+.screen__scroll::before {
+  content: '';
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: block;
+  height: 34px;
+  margin-bottom: -34px;
+  background: linear-gradient(180deg, var(--bg) 0, rgba(8, 9, 12, 0) 100%);
+  opacity: 0;
+  transition: opacity 160ms ease;
+  pointer-events: none;
+}
+
+.screen__scroll.is-scrolled::before {
+  opacity: 1;
 }
 
 .screen__scroll::-webkit-scrollbar {
@@ -1364,7 +1384,9 @@ kbd {
   max-height: calc(100vh - 172px);
   overflow-y: auto;
   padding-right: 6px;
+  scroll-padding-bottom: 24px;
   scrollbar-width: none;
+  transition: opacity 160ms ease;
 }
 
 .search__results::-webkit-scrollbar {
@@ -1375,7 +1397,6 @@ kbd {
    read as stale rather than as the answer to what is now in the field. */
 .search__results.is-stale {
   opacity: 0.55;
-  transition: opacity 160ms ease;
 }
 
 /* Tiles scale to 1.035 and draw a 3px ring when focused. The gap is too narrow
@@ -1407,6 +1428,7 @@ kbd {
   padding: 40px;
   background: rgba(4, 5, 8, 0.74);
   backdrop-filter: blur(4px);
+  animation: dialog-backdrop-in 140ms ease both;
 }
 
 .dialog {
@@ -1416,6 +1438,21 @@ kbd {
   border-radius: var(--radius);
   background: #12141b;
   box-shadow: 0 28px 70px rgba(0, 0, 0, 0.6);
+  animation: dialog-in 150ms ease both;
+}
+
+/* A modal arrives with its question rather than materialising already open. */
+@keyframes dialog-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
 }
 
 .dialog__title {
@@ -1813,7 +1850,16 @@ kbd {
   background: rgba(12, 13, 18, 0.97);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
   transform: translateX(-50%);
+  animation: player-panel-in 120ms ease both;
   pointer-events: none;
+}
+
+/* The menu belongs to the control that opened it: it lifts into place. */
+@keyframes player-panel-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px) scale(0.98);
+  }
 }
 
 .player__panel-title {
@@ -1887,6 +1933,15 @@ kbd {
   background: rgba(12, 14, 19, 0.92);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(10px);
+  animation: player-upnext-in 180ms ease both;
+}
+
+/* The ending card eases in from the edge instead of appearing mid-frame. */
+@keyframes player-upnext-in {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
 }
 
 .player__upnext-card {

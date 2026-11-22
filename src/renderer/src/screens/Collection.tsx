@@ -172,7 +172,7 @@ export function Collection({
         </div>
       ) : null}
 
-      <ScreenScroll>
+      <ScreenScroll resetKey={seasonIndex}>
         <div className="grid" data-focus-row>
           {season?.items.map((item) => (
             <Tile key={item.slug} card={item} onSelect={onOpen} />

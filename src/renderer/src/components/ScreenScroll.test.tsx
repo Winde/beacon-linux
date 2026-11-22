@@ -16,6 +16,27 @@ describe('ScreenScroll', () => {
     expect(container.querySelector('.screen__scroll')?.textContent).toBe('content')
   })
 
+  it('returns to the top when the list it holds changes', () => {
+    const { container, rerender } = render(
+      <ScreenScroll resetKey="newest">
+        <p>list</p>
+      </ScreenScroll>
+    )
+    const scroller = container.querySelector<HTMLElement>('.screen__scroll')!
+    scroller.scrollTop = 300
+    fireEvent.scroll(scroller)
+    expect(scroller.classList.contains('is-scrolled')).toBe(true)
+
+    rerender(
+      <ScreenScroll resetKey="oldest">
+        <p>other list</p>
+      </ScreenScroll>
+    )
+
+    expect(scroller.scrollTop).toBe(0)
+    expect(scroller.classList.contains('is-scrolled')).toBe(false)
+  })
+
   it('masks the top edge only while scrolled', () => {
     const { container } = render(<ScreenScroll>content</ScreenScroll>)
     const scroller = container.querySelector<HTMLElement>('.screen__scroll')!
