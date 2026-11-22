@@ -141,8 +141,18 @@ describe('Home', () => {
     // The hero is no longer drawn: its featured cards do not appear at all.
     expect(screen.queryByText('Featured One')).toBeNull()
     expect(container.querySelector('.hero')).toBeNull()
-    expect(container.querySelector('.screen--split')).toBeNull()
     await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('.row__track [data-focus]'))
+  })
+
+  it('opens Search from the small Home header', async () => {
+    const onSearch = vi.fn()
+    stubHome(homeData())
+    render(<Home onOpen={vi.fn()} onSearch={onSearch} />)
+    await screen.findByRole('heading', { name: 'Recently added' })
+
+    fireEvent.click(screen.getByTestId('home-search'))
+
+    expect(onSearch).toHaveBeenCalledOnce()
   })
 
   it('opens the card selected in a row', async () => {

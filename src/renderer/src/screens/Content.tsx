@@ -116,6 +116,8 @@ export function Content({
   const placed = useRef(false)
   const wasLocked = useRef(false)
   const wasSignIn = useRef(false)
+  /** Keeps page focus inside this route; the top bar is focusable too. */
+  const root = useRef<HTMLDivElement>(null)
   // The toggle shows its result before the CMS has answered. The next read
   // replaces it, so this is a head start, not a second source of truth.
   const [watchedNow, setWatchedNow] = useState<boolean | null>(null)
@@ -147,14 +149,15 @@ export function Content({
           ? '[data-testid="signin"]'
           : data.locked
             ? '[data-focus]'
-            : '[data-testid="play"]'
+            : '[data-testid="play"]',
+        root.current ?? undefined
       )
     } else if (wasLocked.current && !data.locked) {
       // The account just unlocked this page: put focus on the new Play button.
-      focusFirst('[data-testid="play"]')
+      focusFirst('[data-testid="play"]', root.current ?? undefined)
     } else if (wasSignIn.current && !data.signInNeeded) {
       // Signed in, but the tier still excludes it; the sign-in button is gone.
-      focusFirst('[data-focus]')
+      focusFirst('[data-focus]', root.current ?? undefined)
     }
     wasLocked.current = data.locked
     wasSignIn.current = data.signInNeeded
@@ -229,7 +232,7 @@ export function Content({
   }
 
   return (
-    <div className="screen screen--split">
+    <div className="screen screen--split" ref={root}>
       <RefreshNote refreshing={refreshing} error={error} hasData />
       <header className="page-head page-head--tall">
         <div className="page-head__art">

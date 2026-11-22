@@ -8,8 +8,7 @@ afterEach(cleanup)
 function rail(overrides: Partial<React.ComponentProps<typeof NavRail>> = {}): React.JSX.Element {
   return (
     <NavRail
-      open
-      showHome
+      active="home"
       onHome={vi.fn()}
       onBrowse={vi.fn()}
       onSearch={vi.fn()}
@@ -24,7 +23,7 @@ function rail(overrides: Partial<React.ComponentProps<typeof NavRail>> = {}): Re
 }
 
 describe('NavRail', () => {
-  it('offers Home when there is somewhere to go back to', () => {
+  it('offers Home even while already on it', () => {
     const onHome = vi.fn()
     render(rail({ onHome }))
 
@@ -33,16 +32,32 @@ describe('NavRail', () => {
     expect(onHome).toHaveBeenCalledOnce()
   })
 
-  it('hides Home while already on it', () => {
-    render(rail({ showHome: false }))
+  it('marks the current section, not the focused control', () => {
+    render(rail({ active: 'home' }))
 
-    expect(screen.queryByTestId('rail-home')).toBeNull()
-    expect(screen.getByTestId('rail-search')).toBeDefined()
+    expect(screen.getByTestId('rail-home').getAttribute('aria-current')).toBe('page')
+    expect(screen.getByTestId('rail-browse').getAttribute('aria-current')).toBeNull()
+    expect(screen.getByTestId('rail-search').getAttribute('aria-current')).toBeNull()
+  })
+
+  it('moves the active mark to Browse', () => {
+    render(rail({ active: 'browse' }))
+
+    expect(screen.getByTestId('rail-home').getAttribute('aria-current')).toBeNull()
+    expect(screen.getByTestId('rail-browse').getAttribute('aria-current')).toBe('page')
+    expect(screen.getByTestId('rail-browse').classList.contains('is-active')).toBe(true)
+  })
+
+  it('moves the active mark to Search', () => {
+    render(rail({ active: 'search' }))
+
+    expect(screen.getByTestId('rail-search').getAttribute('aria-current')).toBe('page')
+    expect(screen.getByTestId('rail-search').classList.contains('is-active')).toBe(true)
   })
 
   it('keeps Search available from Home', () => {
     const onSearch = vi.fn()
-    render(rail({ showHome: false, onSearch }))
+    render(rail({ onSearch }))
 
     fireEvent.click(screen.getByTestId('rail-search'))
 
@@ -73,13 +88,7 @@ describe('NavRail', () => {
     expect(screen.queryByTestId('rail-signout')).toBeNull()
   })
 
-  it('is out of the navigation order while closed', () => {
-    render(rail({ open: false }))
-
-    expect(screen.getByTestId('rail-search').closest('nav')?.hasAttribute('inert')).toBe(true)
-  })
-
-  it('is navigable while open', () => {
+  it('is always in the navigation order', () => {
     render(rail())
 
     expect(screen.getByTestId('rail-search').closest('nav')?.hasAttribute('inert')).toBe(false)

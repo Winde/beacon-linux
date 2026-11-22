@@ -9,6 +9,8 @@
   --radius: 14px;
   --tile-w: 280px;
   --gutter: 56px;
+  --rail-w: 64px;
+  --rail-w-expanded: 232px;
 }
 
 * {
@@ -59,16 +61,25 @@ kbd {
 .app {
   position: relative;
   height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app__body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The rail reserves its collapsed width; expanding it covers shelves instead
+ * of reflowing them, so a d-pad move never shifts the tile it is aiming at. */
+.app--rail .app__body {
+  padding-left: var(--rail-w);
 }
 
 .route {
   height: 100%;
   transition: opacity 160ms ease;
-}
-
-/* Content steps back while the rail is up, so the rail reads as a mode. */
-.app--rail .route {
-  opacity: 0.55;
 }
 
 /* ---------- page transitions ---------- */
@@ -143,57 +154,45 @@ kbd {
   }
 }
 
+/* A permanent icon rail. Its collapsed width is reserved by .app__body; while
+ * it holds focus it widens over the shelves and reveals the labels. */
 .rail {
-  position: fixed;
+  position: absolute;
   inset: 0 auto 0 0;
-  z-index: 40;
-  width: 232px;
-  padding: 26px 16px;
+  z-index: 30;
+  width: var(--rail-w);
+  padding: 12px 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  background: rgba(8, 9, 12, 0.94);
+  gap: 6px;
+  background: #0b0c10;
   border-right: 1px solid var(--line);
-  backdrop-filter: blur(8px);
-  transform: translateX(-100%);
-  visibility: hidden;
-  /* Hidden until it has focus. The delayed visibility keeps the slide-out
-     visible, while opening flips visibility immediately so the rail can take
-     focus on the same frame. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
   transition:
-    transform 180ms ease,
-    visibility 0s linear 180ms;
+    width 160ms ease,
+    padding 160ms ease,
+    box-shadow 160ms ease;
 }
 
-.rail.is-open {
-  transform: none;
-  visibility: visible;
-  transition:
-    transform 180ms ease,
-    visibility 0s linear 0s;
+.rail::-webkit-scrollbar {
+  display: none;
 }
 
-/* A quiet "there is more to the left": decorative, unfocusable, no width. */
-.rail-hint {
-  position: fixed;
-  left: 6px;
-  top: 50%;
-  z-index: 39;
-  transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--muted);
-  opacity: 0.5;
-  pointer-events: none;
-  user-select: none;
+.rail:focus-within {
+  width: var(--rail-w-expanded);
+  padding: 12px;
+  box-shadow: 16px 0 44px rgba(0, 0, 0, 0.38);
 }
 
 .rail__item {
+  width: 100%;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
+  justify-content: center;
+  gap: 0;
+  padding: 13px 0;
   border-radius: 12px;
   border: 1px solid transparent;
   background: transparent;
@@ -202,20 +201,61 @@ kbd {
   font-weight: 600;
   text-align: left;
   cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
-.rail__item.is-focused {
-  background: rgba(240, 184, 102, 0.14);
+.rail:focus-within .rail__item {
+  justify-content: flex-start;
+  gap: 14px;
+  padding: 13px 14px;
+}
+
+.rail__item:hover {
   color: var(--fg);
+}
+
+/* The section the viewer is in, not merely the control with focus. */
+.rail__item.is-active {
+  background: rgba(240, 184, 102, 0.12);
+  color: var(--fg);
+}
+
+.rail__item.is-active .rail__icon {
+  color: var(--accent);
+}
+
+.rail .rail__item.is-focused {
+  background: rgba(240, 184, 102, 0.18);
+  color: var(--fg);
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+}
+
+.rail__item.is-focused .rail__icon {
+  color: var(--accent);
 }
 
 .rail__icon {
   flex: 0 0 auto;
-  color: var(--accent);
+  color: inherit;
 }
 
+/* The label is only visually hidden when collapsed; it stays in the accessible
+ * name and appears as the rail expands. */
 .rail__label {
+  width: 0;
+  overflow: hidden;
+  opacity: 0;
   font-size: 1rem;
+  text-align: left;
+  transition: opacity 120ms ease;
+}
+
+.rail:focus-within .rail__label {
+  width: auto;
+  opacity: 1;
+  transition-delay: 50ms;
 }
 
 /* App and account actions sit apart from browsing, at the foot of the rail.
@@ -224,8 +264,8 @@ kbd {
   margin-top: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 10px;
+  gap: 6px;
+  padding-top: 8px;
   border-top: 1px solid var(--line);
 }
 
@@ -246,13 +286,24 @@ kbd {
 }
 
 .rail__version {
-  margin: 2px 0 0;
-  padding: 0 16px;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  opacity: 0;
   color: var(--muted);
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
+  white-space: nowrap;
   user-select: none;
+}
+
+.rail:focus-within .rail__version {
+  height: auto;
+  margin: 2px 0 0;
+  padding: 0 16px;
+  opacity: 1;
 }
 
 .screen {
@@ -284,6 +335,7 @@ kbd {
  * scroller whenever a screen has more rows. */
 .screen--split > .hero,
 .screen--split > .page-head,
+.screen--split > .home__head,
 .screen--split > .tabs,
 .screen--split > .hero-skeleton {
   flex: 0 0 auto;
@@ -390,11 +442,6 @@ kbd {
 /* A failed refresh is information, not an alarm: keep the dot muted. */
 .refresh-note.is-problem .refresh-note__dot {
   background: var(--muted);
-}
-
-/* The rail is a mode; the feed is not being read while it is up. */
-.app--rail .refresh-note {
-  opacity: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -621,12 +668,44 @@ kbd {
   font-size: 1.02rem;
 }
 
-/* ---------- rows ---------- */
+/* ---------- home header ---------- */
 
-/* Home has no header: the shelves start at the safe edge themselves. */
-.screen--home {
-  padding-top: 28px;
+/* Only Home has this strip, and it contains only the search affordance. The
+ * content screens keep their own page heads untouched. */
+.home__head {
+  display: flex;
+  align-items: center;
+  padding: 12px var(--gutter) 8px;
+  background: var(--bg);
 }
+
+.home__search {
+  width: min(360px, 100%);
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-raise);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+
+.home__search:hover {
+  color: var(--fg);
+}
+
+.home__search-skeleton {
+  width: min(360px, 100%);
+  height: 38px;
+  border-radius: 999px;
+}
+
+/* ---------- rows ---------- */
 
 .rows {
   /* Clear of the pinned header: a shelf with no heading has no title margin to

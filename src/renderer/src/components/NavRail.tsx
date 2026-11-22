@@ -1,8 +1,10 @@
-import { Home, LogOut, NavArrowLeft, RefreshDouble, Search, ViewGrid } from 'iconoir-react'
+import { Home, LogOut, RefreshDouble, Search, ViewGrid } from 'iconoir-react'
+
+export type RailSection = 'home' | 'browse' | 'search'
 
 interface NavRailProps {
-  open: boolean
-  showHome: boolean
+  /** The page family currently on screen, marked with the accent. */
+  active: RailSection
   onHome: () => void
   onBrowse: () => void
   onSearch: () => void
@@ -18,12 +20,12 @@ interface NavRailProps {
 }
 
 /**
- * Slides in from the left edge when focus reaches it: content keeps the full
- * width, and the rail only exists on screen while it has focus.
+ * A permanent icon rail, YouTube-style. At rest it is a narrow strip of icons;
+ * while it holds focus it expands to reveal the labels. It reserves its
+ * collapsed width, so the shelves never shift when the labels slide over them.
  */
 export function NavRail({
-  open,
-  showHome,
+  active,
   onHome,
   onBrowse,
   onSearch,
@@ -33,109 +35,102 @@ export function NavRail({
   checking,
   onCheckForUpdates
 }: NavRailProps): React.JSX.Element {
+  const itemClass = (section: RailSection): string =>
+    `rail__item${active === section ? ' is-active' : ''}`
+
   return (
-    <>
-      {/* Decor only: a quiet chevron in the gutter that says "there is more to
-          the left", without occupying a focusable slot or any layout width. */}
-      <span className="rail-hint" aria-hidden>
-        <NavArrowLeft width={20} height={20} strokeWidth={1.6} />
-      </span>
-      <nav
-        className={`rail${open ? ' is-open' : ''}`}
-        aria-hidden={!open}
-        // Closed means out of the navigation order, not merely off-screen: the
-        // slide-out keeps the buttons mounted (and momentarily visible) for
-        // 180ms, long enough to steal a "left" press.
-        inert={!open}
-        aria-label="Browse"
+    <nav className="rail" aria-label="Main">
+      <button
+        type="button"
+        className={itemClass('home')}
+        data-focus
+        data-testid="rail-home"
+        tabIndex={-1}
+        title="Home"
+        aria-current={active === 'home' ? 'page' : undefined}
+        onClick={onHome}
       >
-        {showHome ? (
+        <Home className="rail__icon" width={20} height={20} strokeWidth={1.7} aria-hidden />
+        <span className="rail__label">Home</span>
+      </button>
+      <button
+        type="button"
+        className={itemClass('browse')}
+        data-focus
+        data-testid="rail-browse"
+        tabIndex={-1}
+        title="Browse"
+        aria-current={active === 'browse' ? 'page' : undefined}
+        onClick={onBrowse}
+      >
+        <ViewGrid className="rail__icon" width={20} height={20} strokeWidth={1.7} aria-hidden />
+        <span className="rail__label">Browse</span>
+      </button>
+      <button
+        type="button"
+        className={itemClass('search')}
+        data-focus
+        data-testid="rail-search"
+        tabIndex={-1}
+        title="Search"
+        aria-current={active === 'search' ? 'page' : undefined}
+        onClick={onSearch}
+      >
+        <Search className="rail__icon" width={20} height={20} strokeWidth={1.7} aria-hidden />
+        <span className="rail__label">Search</span>
+      </button>
+
+      {/* App and account actions sit apart from browsing, at the foot of the
+          rail. The version line stays under them: it is read, never pressed. */}
+      <div className="rail__footer">
+        <button
+          type="button"
+          className="rail__item"
+          data-focus
+          data-testid="rail-update"
+          tabIndex={-1}
+          title="Check for updates"
+          disabled={checking}
+          aria-busy={checking}
+          onClick={onCheckForUpdates}
+        >
+          {checking ? (
+            <span className="rail__spinner" aria-hidden />
+          ) : (
+            <RefreshDouble
+              className="rail__icon"
+              width={20}
+              height={20}
+              strokeWidth={1.7}
+              aria-hidden
+            />
+          )}
+          <span className="rail__label">
+            {checking
+              ? 'Checking…'
+              : availableVersion
+                ? `Update to v${availableVersion}`
+                : 'Check for updates'}
+          </span>
+        </button>
+        {onSignOut ? (
           <button
             type="button"
             className="rail__item"
             data-focus
-            data-testid="rail-home"
+            data-testid="rail-signout"
             tabIndex={-1}
-            onClick={onHome}
+            title="Sign out"
+            onClick={onSignOut}
           >
-            <Home className="rail__icon" width={20} height={20} strokeWidth={1.7} aria-hidden />
-            <span className="rail__label">Home</span>
+            <LogOut className="rail__icon" width={20} height={20} strokeWidth={1.7} aria-hidden />
+            <span className="rail__label">Sign out</span>
           </button>
         ) : null}
-        <button
-          type="button"
-          className="rail__item"
-          data-focus
-          data-testid="rail-browse"
-          tabIndex={-1}
-          onClick={onBrowse}
-        >
-          <ViewGrid className="rail__icon" width={20} height={20} strokeWidth={1.7} aria-hidden />
-          <span className="rail__label">Browse</span>
-        </button>
-        <button
-          type="button"
-          className="rail__item"
-          data-focus
-          data-testid="rail-search"
-          tabIndex={-1}
-          onClick={onSearch}
-        >
-          <Search className="rail__icon" width={20} height={20} strokeWidth={1.7} aria-hidden />
-          <span className="rail__label">Search</span>
-        </button>
-
-        {/* App actions sit apart from browsing, at the foot of the rail. The
-            version line stays under them, always: it is the one thing here that
-            is read rather than pressed. */}
-        <div className="rail__footer">
-          <button
-            type="button"
-            className="rail__item"
-            data-focus
-            data-testid="rail-update"
-            tabIndex={-1}
-            disabled={checking}
-            aria-busy={checking}
-            onClick={onCheckForUpdates}
-          >
-            {checking ? (
-              <span className="rail__spinner" aria-hidden />
-            ) : (
-              <RefreshDouble
-                className="rail__icon"
-                width={20}
-                height={20}
-                strokeWidth={1.7}
-                aria-hidden
-              />
-            )}
-            <span className="rail__label">
-              {checking
-                ? 'Checking…'
-                : availableVersion
-                  ? `Update to v${availableVersion}`
-                  : 'Check for updates'}
-            </span>
-          </button>
-          {onSignOut ? (
-            <button
-              type="button"
-              className="rail__item"
-              data-focus
-              data-testid="rail-signout"
-              tabIndex={-1}
-              onClick={onSignOut}
-            >
-              <LogOut className="rail__icon" width={20} height={20} strokeWidth={1.7} aria-hidden />
-              <span className="rail__label">Sign out</span>
-            </button>
-          ) : null}
-          <p className="rail__version" data-testid="rail-version">
-            {version ? `v${version}` : ''}
-          </p>
-        </div>
-      </nav>
-    </>
+        <p className="rail__version" data-testid="rail-version">
+          {version ? `v${version}` : ''}
+        </p>
+      </div>
+    </nav>
   )
 }

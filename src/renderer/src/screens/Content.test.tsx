@@ -112,7 +112,9 @@ describe('Content', () => {
     expect(screen.getByText('55 min · Apprentice')).toBeDefined()
     expect(screen.getByText('An episode.')).toBeDefined()
     expect(content).toHaveBeenCalledWith('c1e5')
-    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('[data-testid="play"]'))
+    await vi.waitFor(() =>
+      expect(focusFirst).toHaveBeenCalledWith('[data-testid="play"]', expect.any(HTMLElement))
+    )
   })
 
   it('opens the series from the episode header', async () => {
@@ -330,7 +332,9 @@ describe('Content', () => {
 
     expect(await screen.findByText('Sign in with a Beacon account to watch this.')).toBeDefined()
     expect(screen.queryByTestId('play')).toBeNull()
-    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('[data-testid="signin"]'))
+    await vi.waitFor(() =>
+      expect(focusFirst).toHaveBeenCalledWith('[data-testid="signin"]', expect.any(HTMLElement))
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
     expect(onSignIn).toHaveBeenCalled()
@@ -348,13 +352,17 @@ describe('Content', () => {
     expect(
       await screen.findByText('Your membership level does not include this video.')
     ).toBeDefined()
-    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('[data-focus]'))
+    await vi.waitFor(() =>
+      expect(focusFirst).toHaveBeenCalledWith('[data-focus]', expect.any(HTMLElement))
+    )
 
     vi.mocked(focusFirst).mockClear()
     rerender(<Content slug="c1e5" onOpen={vi.fn()} onPlay={vi.fn()} refreshKey={1} />)
 
     expect(await screen.findByTestId('play')).toBeDefined()
-    await vi.waitFor(() => expect(focusFirst).toHaveBeenCalledWith('[data-testid="play"]'))
+    await vi.waitFor(() =>
+      expect(focusFirst).toHaveBeenCalledWith('[data-testid="play"]', expect.any(HTMLElement))
+    )
   })
 
   it('explains that a locked video needs a higher tier', async () => {

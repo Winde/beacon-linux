@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { NavArrowDown, NavArrowUp } from 'iconoir-react'
+import { NavArrowDown, NavArrowUp, Search } from 'iconoir-react'
 import type { Card, FavouriteItem, FavouritesAnchor, HomeData, HomeRow } from '@shared/types'
 import { toCard } from '@shared/favourites'
 import { useAsync } from '../lib/useAsync'
 import { focusFirst } from '../nav/focus'
 import { RefreshNote } from '../components/RefreshNote'
 import { Row } from '../components/Row'
-import { DelayedSkeleton, SkeletonRows } from '../components/Skeleton'
+import { ScreenScroll } from '../components/ScreenScroll'
+import { DelayedSkeleton, SkeletonBlock, SkeletonRows } from '../components/Skeleton'
 import { ErrorNote } from '../components/ui'
 
 const FAVOURITES_ROW = 'Favourites'
@@ -14,14 +15,21 @@ const NO_FAVOURITES: FavouriteItem[] = []
 
 function HomeSkeleton(): React.JSX.Element {
   return (
-    <div className="screen screen--home" aria-busy="true">
-      <SkeletonRows rows={3} tiles={6} />
+    <div className="screen screen--split screen--home" aria-busy="true">
+      <header className="home__head">
+        <SkeletonBlock className="home__search-skeleton" />
+      </header>
+      <ScreenScroll>
+        <SkeletonRows rows={3} tiles={6} />
+      </ScreenScroll>
     </div>
   )
 }
 
 interface HomeProps {
   onOpen: (card: Card) => void
+  /** Open the search screen from the bar above the shelves. */
+  onSearch?: () => void
   /** Bumped when playback ends; the feed is stale from then on. */
   refreshKey?: number
   /** A feed the app fetched while the sign-in panel was still up. */
@@ -38,6 +46,7 @@ interface HomeProps {
 
 export function Home({
   onOpen,
+  onSearch,
   refreshKey = 0,
   initial,
   favourites = NO_FAVOURITES,
@@ -143,54 +152,71 @@ export function Home({
   if (!data) return null
 
   return (
-    <div className="screen screen--home">
+    <div className="screen screen--split screen--home">
       <RefreshNote refreshing={refreshing} error={error} hasData />
-      <div className="rows">
-        {rows.map((row) =>
-          row.kind === 'favourites' ? (
-            <Row
-              key={row.id}
-              title={row.title}
-              items={row.items}
-              onSelect={onOpen}
-              actions={
-                onMoveFavourites ? (
-                  <div className="row__actions">
-                    <button
-                      type="button"
-                      className="row__move"
-                      data-focus
-                      data-testid="favourites-up"
-                      tabIndex={-1}
-                      title="Move up"
-                      aria-label="Move Favourites up"
-                      disabled={favouritesAt <= 0}
-                      onClick={() => move('up')}
-                    >
-                      <NavArrowUp width={18} height={18} strokeWidth={1.8} aria-hidden />
-                    </button>
-                    <button
-                      type="button"
-                      className="row__move"
-                      data-focus
-                      data-testid="favourites-down"
-                      tabIndex={-1}
-                      title="Move down"
-                      aria-label="Move Favourites down"
-                      disabled={favouritesAt < 0 || favouritesAt >= rows.length - 1}
-                      onClick={() => move('down')}
-                    >
-                      <NavArrowDown width={18} height={18} strokeWidth={1.8} aria-hidden />
-                    </button>
-                  </div>
-                ) : undefined
-              }
-            />
-          ) : (
-            <Row key={row.id} title={row.title} items={row.items} onSelect={onOpen} />
-          )
-        )}
-      </div>
+      <header className="home__head">
+        <button
+          type="button"
+          className="home__search"
+          data-focus
+          data-testid="home-search"
+          tabIndex={-1}
+          title="Search"
+          aria-label="Search"
+          onClick={() => onSearch?.()}
+        >
+          <Search width={18} height={18} strokeWidth={1.8} aria-hidden />
+          <span>Search</span>
+        </button>
+      </header>
+      <ScreenScroll>
+        <div className="rows">
+          {rows.map((row) =>
+            row.kind === 'favourites' ? (
+              <Row
+                key={row.id}
+                title={row.title}
+                items={row.items}
+                onSelect={onOpen}
+                actions={
+                  onMoveFavourites ? (
+                    <div className="row__actions">
+                      <button
+                        type="button"
+                        className="row__move"
+                        data-focus
+                        data-testid="favourites-up"
+                        tabIndex={-1}
+                        title="Move up"
+                        aria-label="Move Favourites up"
+                        disabled={favouritesAt <= 0}
+                        onClick={() => move('up')}
+                      >
+                        <NavArrowUp width={18} height={18} strokeWidth={1.8} aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        className="row__move"
+                        data-focus
+                        data-testid="favourites-down"
+                        tabIndex={-1}
+                        title="Move down"
+                        aria-label="Move Favourites down"
+                        disabled={favouritesAt < 0 || favouritesAt >= rows.length - 1}
+                        onClick={() => move('down')}
+                      >
+                        <NavArrowDown width={18} height={18} strokeWidth={1.8} aria-hidden />
+                      </button>
+                    </div>
+                  ) : undefined
+                }
+              />
+            ) : (
+              <Row key={row.id} title={row.title} items={row.items} onSelect={onOpen} />
+            )
+          )}
+        </div>
+      </ScreenScroll>
     </div>
   )
 }

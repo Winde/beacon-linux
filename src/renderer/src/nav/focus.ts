@@ -247,12 +247,16 @@ function pick(from: HTMLElement, pool: HTMLElement[], direction: Direction): HTM
   const ax = a.left + a.width / 2
   const ay = a.top + a.height / 2
   const horizontal = direction === 'left' || direction === 'right'
+  // The rail is a horizontal destination: it is entered from the left, never
+  // because an ordinary up/down press happened to be nearer an icon.
+  const inRail = Boolean(from.closest('.rail'))
 
   let best: HTMLElement | null = null
   let bestScore = Infinity
 
   for (const element of pool) {
     if (element === from) continue
+    if (!horizontal && inRail !== Boolean(element.closest('.rail'))) continue
     const b = layoutBox(element)
     const dx = b.left + b.width / 2 - ax
     const dy = b.top + b.height / 2 - ay

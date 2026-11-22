@@ -408,6 +408,35 @@ describe('App startup', () => {
   })
 })
 
+describe('App chrome', () => {
+  it('shows the rail and the Home search bar once a main screen is up', async () => {
+    stubApp({ home: HOME_WITH_SERIES })
+    render(<App />)
+
+    await screen.findByRole('button', { name: /Campaign 1/ })
+    expect(screen.getByTestId('rail-home').getAttribute('aria-current')).toBe('page')
+    expect(screen.getByTestId('home-search')).toBeDefined()
+  })
+
+  it('opens Search from the Home header', async () => {
+    stubApp({ home: HOME_WITH_SERIES })
+    render(<App />)
+
+    fireEvent.click(await screen.findByTestId('home-search'))
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Search' })).toBeDefined()
+  })
+
+  it('keeps the chrome off the sign-in screen', async () => {
+    stubApp({ signedIn: false })
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Sign in' })
+    expect(screen.queryByTestId('rail-home')).toBeNull()
+    expect(screen.queryByTestId('home-search')).toBeNull()
+  })
+})
+
 describe('App updates', () => {
   const UP_TO_DATE: UpdateInfo = {
     current: '0.1.4',

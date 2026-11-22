@@ -38,6 +38,15 @@ function strip(...tiles: HTMLElement[]): HTMLElement {
   return element
 }
 
+/** The app's permanent side rail, a vertical destination entered from the left. */
+function rail(...items: HTMLElement[]): HTMLElement {
+  const element = document.createElement('nav')
+  element.className = 'rail'
+  element.append(...items)
+  document.body.append(element)
+  return element
+}
+
 /** One shelf of `count` tiles, 220 apart, starting at `left`. */
 function shelf(top: number, count = 3, left = 0): HTMLElement[] {
   const tiles: HTMLElement[] = []
@@ -386,6 +395,42 @@ describe('move', () => {
     expect(move('up')).toBe(true)
     expect(getFocused()).toBe(shelf)
     expect(getFocused()).not.toBe(header)
+  })
+
+  it('enters the rail from the left, not with a vertical press', () => {
+    const home = tile(0, 0)
+    const browse = tile(0, 80)
+    rail(home, browse)
+    const content = tile(120, 0)
+    setFocused(content)
+
+    expect(move('up')).toBe(false)
+    expect(getFocused()).toBe(content)
+
+    expect(move('left')).toBe(true)
+    expect(getFocused()).toBe(home)
+  })
+
+  it('keeps vertical moves inside the rail', () => {
+    const home = tile(0, 0)
+    const browse = tile(0, 80)
+    rail(home, browse)
+    const content = tile(120, 80)
+    setFocused(home)
+
+    expect(move('down')).toBe(true)
+    expect(getFocused()).toBe(browse)
+    expect(getFocused()).not.toBe(content)
+  })
+
+  it('leaves the rail to the right', () => {
+    const home = tile(0, 0)
+    rail(home)
+    const content = tile(120, 0)
+    setFocused(home)
+
+    expect(move('right')).toBe(true)
+    expect(getFocused()).toBe(content)
   })
 })
 

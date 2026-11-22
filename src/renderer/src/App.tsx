@@ -12,7 +12,7 @@ import { Content } from './screens/Content'
 import { Search } from './screens/Search'
 import { Player, type PlayerHandle } from './screens/Player'
 import { ConfirmDialog } from './components/ConfirmDialog'
-import { NavRail } from './components/NavRail'
+import { NavRail, type RailSection } from './components/NavRail'
 import { UpdateDialog, type UpdatePrompt } from './components/UpdateDialog'
 import { DelayedSpinner } from './components/ui'
 import { cleanError } from './lib/errors'
@@ -63,14 +63,6 @@ export function upToCollection(
     (entry) => !(entry.route.name === 'collection' && entry.route.slug === slug)
   )
   return [...withoutExisting, { id: nextId(), route: { name: 'collection', slug, card } }]
-}
-
-/**
- * The rail while it is open. Navigation is confined to it: the rail covers the
- * screen, so the rows behind it must not win a d-pad move.
- */
-function openRailElement(): HTMLElement | null {
-  return document.querySelector<HTMLElement>('.rail.is-open')
 }
 
 /** The mounted page for one stack entry. Hidden routes remain queryable. */
@@ -171,8 +163,6 @@ export default function App(): React.JSX.Element {
   stackRef.current = stack
   /** Orders page transitions so a superseded one cannot clear the next. */
   const transitionSeq = useRef(0)
-  const [railOpen, setRailOpen] = useState(false)
-  const railReturn = useRef<HTMLElement | null>(null)
   /** Whether the rail should offer Sign out; guests have no account to leave. */
   const [signedIn, setSignedIn] = useState(false)
   /** Signing out drops the stored session, so the rail asks before doing it. */
@@ -355,28 +345,12 @@ export default function App(): React.JSX.Element {
     setPlayer({ slug })
   }, [])
 
-  const openRail = useCallback(() => {
-    // Before the rail takes focus, remember the page target it came from, so a
-    // rail destination that is later dismissed returns to the same content.
-    rememberFocus()
-    railReturn.current = getFocused()
-    setRailOpen(true)
-  }, [rememberFocus])
-
-  const closeRail = useCallback(() => {
-    setRailOpen(false)
-    const previous = railReturn.current
-    if (previous?.isConnected) setFocused(previous)
-    else focusFirst()
-  }, [])
-
   const openSearch = useCallback(() => {
-    setRailOpen(false)
-    push({ name: 'search' })
-  }, [push])
+    const top = stack[stack.length - 1]
+    if (top?.route.name !== 'search') push({ name: 'search' })
+  }, [push, stack])
 
   const openBrowse = useCallback(() => {
-    setRailOpen(false)
     const top = stack[stack.length - 1]
     if (top?.route.name !== 'browse') push({ name: 'browse' })
   }, [push, stack])
@@ -385,9 +359,9 @@ export default function App(): React.JSX.Element {
   // drop the whole stack so Back from Home exits instead of retracing a trail
   // the player has already chosen to abandon.
   const goHome = useCallback(() => {
-    setRailOpen(false)
+    if (stack[stack.length - 1]?.route.name === 'home') return
     reset({ name: 'home' })
-  }, [reset])
+  }, [reset, stack])
 
   /**
    * Read the account's favourites. Signed out, there is nothing to read: the
@@ -472,7 +446,6 @@ export default function App(): React.JSX.Element {
   // address, so a shared Deck does not hand the next person the last account.
   // Favourites belong to the account and are left alone.
   const signOut = useCallback(async () => {
-    setRailOpen(false)
     setConfirmSignOut(false)
     await window.beacon.auth.signOut().catch(() => {})
     try {
@@ -627,15 +600,6 @@ export default function App(): React.JSX.Element {
       })
       .catch(() => {})
   }, [])
-  // The rail is only focusable while open, so focus it once it is on screen.
-  // Queried directly rather than through focusFirst(): that helper skips
-  // elements whose computed visibility is hidden, which is exactly what the
-  // rail is mid-transition.
-  useEffect(() => {
-    if (!railOpen) return
-    const item = openRailElement()?.querySelector<HTMLElement>('[data-focus]')
-    if (item) setFocused(item)
-  }, [railOpen])
 
   useEffect(() => {
     let cancelled = false
@@ -778,23 +742,7 @@ export default function App(): React.JSX.Element {
       case 'down':
       case 'left':
       case 'right': {
-        if (railOpen) {
-          // The rail is the leftmost thing on screen; right hands the player
-          // back to whatever they were on.
-          if (action === 'right') {
-            closeRail()
-            return
-          }
-          if (action === 'left') return
-          // Up and down stay inside the rail. Sign out sits at the foot of the
-          // screen, so without a scope the nearer rows behind the rail would
-          // take the press and the account action would be unreachable.
-          move(action, openRailElement() ?? undefined)
-          return
-        }
-        if (move(action)) return
-        // Ran out of room to the left: that edge reveals the rail.
-        if (action === 'left') openRail()
+        move(action)
         return
       }
       case 'accept': {
@@ -807,10 +755,6 @@ export default function App(): React.JSX.Element {
         return
       }
       case 'back': {
-        if (railOpen) {
-          closeRail()
-          return
-        }
         const active = document.activeElement as HTMLElement | null
         if (active instanceof HTMLInputElement) {
           active.blur()
@@ -827,9 +771,7 @@ export default function App(): React.JSX.Element {
         return
       }
       case 'search': {
-        // Reopening from inside search would stack duplicate screens.
-        const top = stack[stack.length - 1]
-        if (top?.route.name !== 'search') push({ name: 'search' })
+        openSearch()
         return
       }
       default:
@@ -854,6 +796,11 @@ export default function App(): React.JSX.Element {
       </div>
     )
   }
+
+  // The sign-in screen is a single purpose screen and owns the whole window.
+  const showRail = current.route.name !== 'login'
+  const activeSection: RailSection =
+    current.route.name === 'browse' ? 'browse' : current.route.name === 'search' ? 'search' : 'home'
 
   const renderRoute = (route: Route): React.JSX.Element | null => {
     switch (route.name) {
@@ -893,6 +840,7 @@ export default function App(): React.JSX.Element {
         return (
           <Home
             onOpen={openCard}
+            onSearch={openSearch}
             refreshKey={progressVersion}
             initial={route.feed}
             favourites={favourites.items}
@@ -937,32 +885,35 @@ export default function App(): React.JSX.Element {
 
   return (
     <div
-      className={`app${railOpen ? ' app--rail' : ''}${
+      className={`app${showRail ? ' app--rail' : ''}${
         featureEnabled('focusDepth') ? ' app--focus-depth' : ''
       }`}
     >
-      <NavRail
-        open={railOpen}
-        showHome={current.route.name !== 'home'}
-        onHome={goHome}
-        onBrowse={openBrowse}
-        onSearch={openSearch}
-        onSignOut={signedIn ? requestSignOut : undefined}
-        version={version}
-        availableVersion={knownUpdate?.latest ?? null}
-        checking={update?.name === 'checking'}
-        onCheckForUpdates={requestUpdateCheck}
-      />
-      {stack.map((entry, index) => (
-        <div
-          key={entry.id}
-          className="route"
-          data-route-id={entry.id}
-          style={{ display: index === stack.length - 1 ? 'block' : 'none' }}
-        >
-          {renderRoute(entry.route)}
-        </div>
-      ))}
+      <div className="app__body">
+        {showRail ? (
+          <NavRail
+            active={activeSection}
+            onHome={goHome}
+            onBrowse={openBrowse}
+            onSearch={openSearch}
+            onSignOut={signedIn ? requestSignOut : undefined}
+            version={version}
+            availableVersion={knownUpdate?.latest ?? null}
+            checking={update?.name === 'checking'}
+            onCheckForUpdates={requestUpdateCheck}
+          />
+        ) : null}
+        {stack.map((entry, index) => (
+          <div
+            key={entry.id}
+            className="route"
+            data-route-id={entry.id}
+            style={{ display: index === stack.length - 1 ? 'block' : 'none' }}
+          >
+            {renderRoute(entry.route)}
+          </div>
+        ))}
+      </div>
 
       {confirmSignOut ? (
         <ConfirmDialog
